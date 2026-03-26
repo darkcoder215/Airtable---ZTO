@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAppStore } from "@/store/app-store";
-import { LogIn, Eye, EyeOff, Loader2 } from "lucide-react";
+import { LogIn, Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -14,7 +14,6 @@ export default function LoginPage() {
   const { setUser } = useAppStore();
 
   useEffect(() => {
-    // Check if already logged in
     fetch("/api/auth")
       .then((r) => r.json())
       .then((data) => {
@@ -57,26 +56,67 @@ export default function LoginPage() {
 
   if (checkingSession) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-primary-50 via-surface to-accent-50">
-        <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+      <div className="min-h-screen flex items-center justify-center bg-[var(--color-zto-black)]">
+        <Loader2 className="w-6 h-6 animate-spin text-[var(--color-zto-gray-500)]" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-primary-50 via-surface to-accent-50 p-4">
-      <div className="w-full max-w-md">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-600 to-primary-800 text-white text-3xl font-bold mb-4 shadow-lg">
-            ZTO
+    <div className="min-h-screen flex bg-[var(--color-zto-black)] relative grain overflow-hidden">
+      {/* Left side — Brand panel */}
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center relative">
+        <div className="absolute inset-0 bg-[var(--color-zto-charcoal)]" />
+        {/* Decorative grain/pattern */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`
+        }} />
+
+        <div className="relative z-10 text-center px-12 max-w-md">
+          {/* Logo */}
+          <div className="mb-12">
+            <h1 className="text-6xl font-black text-[var(--color-zto-white)] leading-tight tracking-tight">
+              صفر
+            </h1>
+            <div className="flex items-center justify-center gap-1 -mt-2">
+              <h1 className="text-6xl font-black text-[var(--color-zto-white)] leading-tight tracking-tight">
+                لـواحد
+              </h1>
+              <span className="text-lg font-black text-[var(--color-accent)] mt-[-1.5rem]">١٠</span>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-text-primary">نظام إدارة المحتوى</h1>
-          <p className="text-text-secondary mt-2">Zero to One - مرحباً بك في منصة الكتابة</p>
+
+          <div className="divider mb-8" />
+
+          <p className="text-[var(--color-zto-gray-400)] text-sm leading-relaxed font-medium">
+            منصة إدارة المحتوى الداخلية لفريق الكتابة والتحرير.
+            <br />
+            تحكّم في البيانات، أدِر الصلاحيات، واستخدم الذكاء الاصطناعي.
+          </p>
         </div>
 
-        {/* Login Card */}
-        <div className="card p-8">
+        {/* Corner decoration */}
+        <div className="absolute bottom-8 left-8 text-[var(--color-zto-gray-700)] text-[0.65rem] font-bold tracking-widest uppercase">
+          Zero to One &copy; {new Date().getFullYear()}
+        </div>
+      </div>
+
+      {/* Right side — Login form */}
+      <div className="flex-1 flex items-center justify-center p-6 relative z-10">
+        <div className="w-full max-w-sm">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center mb-10">
+            <h1 className="text-4xl font-black text-[var(--color-zto-white)] leading-tight">
+              صفر لـواحد
+            </h1>
+            <p className="text-[var(--color-zto-gray-500)] text-xs mt-2 font-medium">منصة إدارة المحتوى</p>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-xl font-black text-[var(--color-zto-white)] mb-1">تسجيل الدخول</h2>
+            <p className="text-[var(--color-zto-gray-500)] text-sm font-medium">أدخل بياناتك للوصول إلى المنصة</p>
+          </div>
+
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label className="label">اسم المستخدم</label>
@@ -105,7 +145,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-zto-gray-600)] hover:text-[var(--color-zto-gray-300)] transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -113,7 +153,7 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
+              <div className="bg-[var(--color-danger-muted)] border border-[color-mix(in_srgb,var(--color-danger)_30%,transparent)] text-[var(--color-danger)] rounded-lg px-4 py-3 text-sm font-medium">
                 {error}
               </div>
             )}
@@ -121,51 +161,41 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="btn-primary w-full py-3"
+              className="btn-primary w-full py-3 text-sm"
             >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <LogIn className="w-4 h-4" />
+                <>
+                  تسجيل الدخول
+                  <ArrowLeft className="w-4 h-4" />
+                </>
               )}
-              {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
             </button>
           </form>
 
           {/* Demo credentials */}
-          <div className="mt-6 pt-6 border-t border-border">
-            <p className="text-xs text-text-tertiary text-center mb-3">حسابات تجريبية</p>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between items-center bg-surface-tertiary rounded-lg px-3 py-2">
-                <span className="text-text-secondary">مدير: admin / admin123</span>
+          <div className="mt-8 pt-6 border-t border-[var(--color-zto-gray-800)]">
+            <p className="text-[0.6875rem] text-[var(--color-zto-gray-600)] mb-3 font-bold uppercase tracking-wider">حسابات تجريبية</p>
+            <div className="space-y-2">
+              {[
+                { label: "مدير النظام", user: "admin", pass: "admin123", badge: "مدير" },
+                { label: "أحمد الكاتب", user: "writer1", pass: "writer123", badge: "محرر" },
+                { label: "خالد المراجع", user: "viewer1", pass: "viewer123", badge: "مراجع" },
+              ].map((cred) => (
                 <button
+                  key={cred.user}
                   type="button"
-                  onClick={() => { setUsername("admin"); setPassword("admin123"); }}
-                  className="text-primary-600 hover:text-primary-700 font-medium"
+                  onClick={() => { setUsername(cred.user); setPassword(cred.pass); }}
+                  className="w-full flex items-center justify-between bg-[var(--color-zto-dark)] hover:bg-[var(--color-zto-gray-800)] border border-[var(--color-zto-gray-800)] hover:border-[var(--color-zto-gray-700)] rounded-lg px-4 py-2.5 transition-all group cursor-pointer"
                 >
-                  استخدام
+                  <div className="flex items-center gap-3">
+                    <span className="badge-primary">{cred.badge}</span>
+                    <span className="text-[var(--color-zto-gray-300)] text-sm font-medium">{cred.label}</span>
+                  </div>
+                  <ArrowLeft className="w-3.5 h-3.5 text-[var(--color-zto-gray-600)] group-hover:text-[var(--color-accent)] transition-colors" />
                 </button>
-              </div>
-              <div className="flex justify-between items-center bg-surface-tertiary rounded-lg px-3 py-2">
-                <span className="text-text-secondary">كاتب: writer1 / writer123</span>
-                <button
-                  type="button"
-                  onClick={() => { setUsername("writer1"); setPassword("writer123"); }}
-                  className="text-primary-600 hover:text-primary-700 font-medium"
-                >
-                  استخدام
-                </button>
-              </div>
-              <div className="flex justify-between items-center bg-surface-tertiary rounded-lg px-3 py-2">
-                <span className="text-text-secondary">مراجع: viewer1 / viewer123</span>
-                <button
-                  type="button"
-                  onClick={() => { setUsername("viewer1"); setPassword("viewer123"); }}
-                  className="text-primary-600 hover:text-primary-700 font-medium"
-                >
-                  استخدام
-                </button>
-              </div>
+              ))}
             </div>
           </div>
         </div>
