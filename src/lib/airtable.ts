@@ -276,7 +276,7 @@ export async function updateRecord(
           Authorization: `Bearer ${PAT}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ fields }),
+        body: JSON.stringify({ fields, typecast: true }),
       }
     );
     if (!response.ok) {
@@ -317,7 +317,7 @@ export async function createRecord(
           Authorization: `Bearer ${PAT}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ records: [{ fields }] }),
+        body: JSON.stringify({ records: [{ fields }], typecast: true }),
       }
     );
     if (!response.ok) {
