@@ -14,6 +14,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Filter,
   ArrowUpDown,
   CheckSquare,
@@ -31,6 +32,7 @@ import {
   List,
   Paperclip,
   ExternalLink,
+  Maximize2,
 } from "lucide-react";
 
 /* ────────── Types ────────── */
@@ -210,6 +212,17 @@ export default function DashboardPage() {
   /* linked record names */
   const [linkedNames, setLinkedNames] = useState<Record<string, string>>({});
 
+  /* expanded rows */
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleRowExpand = (id: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   /* ──── Fetch bases ──── */
   useEffect(() => {
     setLoading(true);
@@ -229,6 +242,9 @@ export default function DashboardPage() {
             setBasesError(
               "لا توجد قواعد بيانات متاحة. تأكد من صلاحيات رمز الوصول."
             );
+          } else {
+            // Auto-select the first base
+            setSelectedBase(data.bases[0]);
           }
         }
       })
@@ -730,29 +746,22 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-0 max-w-full">
-      {/* ── Base selector row ── */}
-      <div className="flex items-center gap-3 mb-4">
-        <Database className="w-5 h-5 text-amber-400 shrink-0" />
-        <div className="zto-select-wrap w-64">
-          <select
-            className="zto-input"
-            value={selectedBase?.id || ""}
-            onChange={(e) => {
-              const base = bases.find((b) => b.id === e.target.value);
-              setSelectedBase(base || null);
-            }}
-            disabled={loading}
-          >
-            <option value="">— اختر قاعدة —</option>
-            {bases.map((base) => (
-              <option key={base.id} value={base.id}>
-                {base.name}
-              </option>
-            ))}
-          </select>
+      {/* ── Header ── */}
+      {selectedBase && (
+        <div className="flex items-center gap-3 mb-1">
+          <Database className="w-5 h-5 text-amber-400 shrink-0" />
+          <h2 className="text-[15px] font-black text-white">{selectedBase.name}</h2>
+          {loading && <Loader2 className="w-4 h-4 animate-spin text-amber-400" />}
         </div>
-        {loading && <Loader2 className="w-4 h-4 animate-spin text-amber-400" />}
-      </div>
+      )}
+
+      {/* Loading bases */}
+      {!selectedBase && loading && (
+        <div className="flex items-center gap-3 mb-4">
+          <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+          <span className="text-neutral-500 text-[13px]">جاري تحميل القاعدة...</span>
+        </div>
+      )}
 
       {/* Bases error */}
       {basesError && (
@@ -933,7 +942,7 @@ export default function DashboardPage() {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-[#161616]">
-                  <th className="px-3 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 w-12">
+                  <th className="px-2 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r-2 border-r-neutral-700 w-14">
                     #
                   </th>
                   {selectedTable.fields.map((field) => {
@@ -959,91 +968,120 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((record, idx) => (
-                  <tr
-                    key={record.id}
-                    className="border-b border-neutral-700/80 hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="px-3 py-3 text-neutral-600 text-[11px] font-mono border-r border-neutral-800">
-                      {idx + 1}
-                    </td>
-                    {selectedTable.fields.map((field) => (
-                      <td
-                        key={field.id}
-                        className="px-4 py-3 text-[13px] max-w-xs border-r border-neutral-800/60"
-                      >
-                        {editingRecord === record.id
-                          ? renderFieldInput(field, editFields[field.name], (val) =>
-                              setEditFields((prev) => ({ ...prev, [field.name]: val }))
-                            )
-                          : renderFieldValue(record.fields[field.name], field)}
-                      </td>
-                    ))}
-                    {(canEdit || canDelete) && (
-                      <td className="px-3 py-3">
+                {filteredRecords.map((record, idx) => {
+                  const isExpanded = expandedRows.has(record.id);
+                  return (
+                    <tr
+                      key={record.id}
+                      className="border-b-2 border-neutral-700 hover:bg-white/[0.02] transition-colors group"
+                    >
+                      {/* Row number + expand */}
+                      <td className="px-2 py-3 border-r-2 border-neutral-700 align-top">
                         <div className="flex items-center gap-1">
-                          {editingRecord === record.id ? (
-                            <>
-                              <button
-                                onClick={saveEdit}
-                                disabled={savingRecord}
-                                className="zto-btn zto-btn-ok zto-btn-sm"
-                                style={{ padding: "4px 8px" }}
-                              >
-                                {savingRecord ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Save className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => setEditingRecord(null)}
-                                className="zto-btn zto-btn-ghost zto-btn-sm"
-                                style={{ padding: "4px 8px" }}
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              {canEdit && (
-                                <button
-                                  onClick={() => startEditing(record)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
-                                  style={{ padding: "4px 8px" }}
-                                  title="تعديل"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              {canDelete && (
-                                <button
-                                  onClick={() => handleDelete(record.id)}
-                                  disabled={deletingRecord === record.id}
-                                  className={`zto-btn zto-btn-ghost zto-btn-sm ${
-                                    confirmDelete === record.id
-                                      ? "text-red-400 bg-red-400/10"
-                                      : "text-neutral-500"
-                                  }`}
-                                  style={{ padding: "4px 8px" }}
-                                  title={
-                                    confirmDelete === record.id ? "اضغط مرة أخرى للتأكيد" : "حذف"
-                                  }
-                                >
-                                  {deletingRecord === record.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-                              )}
-                            </>
-                          )}
+                          <button
+                            onClick={() => toggleRowExpand(record.id)}
+                            className="text-neutral-600 hover:text-amber-400 transition-colors"
+                            title={isExpanded ? "طي" : "توسيع"}
+                          >
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                            />
+                          </button>
+                          <span className="text-neutral-600 text-[11px] font-mono">{idx + 1}</span>
                         </div>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      {/* Data cells */}
+                      {selectedTable.fields.map((field) => (
+                        <td
+                          key={field.id}
+                          className={`px-4 py-3 text-[13px] border-r border-neutral-700/50 align-top ${
+                            isExpanded ? "" : "max-w-[200px]"
+                          }`}
+                        >
+                          <div className={isExpanded ? "" : "line-clamp-2 overflow-hidden"}>
+                            {editingRecord === record.id
+                              ? renderFieldInput(field, editFields[field.name], (val) =>
+                                  setEditFields((prev) => ({ ...prev, [field.name]: val }))
+                                )
+                              : renderFieldValue(record.fields[field.name], field)}
+                          </div>
+                        </td>
+                      ))}
+                      {/* Actions */}
+                      {(canEdit || canDelete) && (
+                        <td className="px-3 py-3 align-top">
+                          <div className="flex items-center gap-1">
+                            {editingRecord === record.id ? (
+                              <>
+                                <button
+                                  onClick={saveEdit}
+                                  disabled={savingRecord}
+                                  className="zto-btn zto-btn-ok zto-btn-sm"
+                                  style={{ padding: "4px 8px" }}
+                                >
+                                  {savingRecord ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Save className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => setEditingRecord(null)}
+                                  className="zto-btn zto-btn-ghost zto-btn-sm"
+                                  style={{ padding: "4px 8px" }}
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => toggleRowExpand(record.id)}
+                                  className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  style={{ padding: "4px 8px" }}
+                                  title={isExpanded ? "طي" : "توسيع"}
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                </button>
+                                {canEdit && (
+                                  <button
+                                    onClick={() => startEditing(record)}
+                                    className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
+                                    style={{ padding: "4px 8px" }}
+                                    title="تعديل"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {canDelete && (
+                                  <button
+                                    onClick={() => handleDelete(record.id)}
+                                    disabled={deletingRecord === record.id}
+                                    className={`zto-btn zto-btn-ghost zto-btn-sm ${
+                                      confirmDelete === record.id
+                                        ? "text-red-400 bg-red-400/10"
+                                        : "text-neutral-500"
+                                    }`}
+                                    style={{ padding: "4px 8px" }}
+                                    title={
+                                      confirmDelete === record.id ? "اضغط مرة أخرى للتأكيد" : "حذف"
+                                    }
+                                  >
+                                    {deletingRecord === record.id ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1111,13 +1149,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!selectedBase && !loading && (
-        <div className="zto-card p-16 flex flex-col items-center justify-center text-center">
-          <Layers className="w-10 h-10 text-neutral-700 mb-3" />
-          <p className="text-neutral-400 text-[14px] font-bold">اختر قاعدة بيانات</p>
-          <p className="text-neutral-600 text-[13px] mt-1">حدد القاعدة من القائمة أعلاه للبدء</p>
-        </div>
-      )}
+      {!selectedBase && !loading && basesError && null}
 
       {/* ── Create modal ── */}
       {showCreateModal && selectedTable && (
