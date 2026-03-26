@@ -162,6 +162,9 @@ export default function DashboardPage() {
   const [deletingRecord, setDeletingRecord] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  /* linked record names */
+  const [linkedNames, setLinkedNames] = useState<Record<string, string>>({});
+
   /* ──── Fetch bases ──── */
   useEffect(() => {
     setLoading(true);
@@ -245,6 +248,9 @@ export default function DashboardPage() {
           } else if (data.records) {
             setRecords(data.records);
             setOffset(data.offset);
+            if (data.linkedRecordNames) {
+              setLinkedNames((prev) => ({ ...prev, ...data.linkedRecordNames }));
+            }
           }
         })
         .catch(() => {
@@ -477,7 +483,7 @@ export default function DashboardPage() {
         <div className="flex gap-1 flex-wrap">
           {(value as string[]).map((v, i) => (
             <span key={i} className="zto-badge zto-badge-info">
-              {v}
+              {linkedNames[v] || v}
             </span>
           ))}
         </div>

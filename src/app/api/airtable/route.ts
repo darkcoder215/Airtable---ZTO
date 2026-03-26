@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listBases, listTables, listRecords, createRecord, updateRecord, deleteRecord } from "@/lib/airtable";
+import { listBases, listTables, listRecords, createRecord, updateRecord, deleteRecord, getRecord, resolveLinkedRecordNames } from "@/lib/airtable";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { checkPermission, getFieldRestrictions } from "@/lib/access-control";
 import { logger } from "@/lib/logger";
@@ -76,7 +76,38 @@ export async function GET(request: NextRequest) {
           });
         }
 
-        return NextResponse.json(result);
+        // Resolve linked record names
+        let linkedRecordNames: Record<string, string> = {};
+        try {
+          const allTables = await listTables(baseId);
+          const currentTable = allTables.find((t) => t.id === tableId);
+          if (currentTable) {
+            linkedRecordNames = await resolveLinkedRecordNames(
+              baseId,
+              result.records,
+              currentTable.fields,
+              allTables
+            );
+          }
+        } catch (err) {
+          logger.warn("Failed to resolve linked record names", "API", err);
+        }
+
+        return NextResponse.json({ ...result, linkedRecordNames });
+      }
+
+      case "record": {
+        const baseId = searchParams.get("baseId");
+        const tableId = searchParams.get("tableId");
+        const recordId = searchParams.get("recordId");
+        if (!baseId || !tableId || !recordId) {
+          return NextResponse.json({ error: "معرف القاعدة والجدول والسجل مطلوبان" }, { status: 400 });
+        }
+        if (!checkPermission(user.id, user.role, baseId, tableId, "canView")) {
+          return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
+        }
+        const record = await getRecord(baseId, tableId, recordId);
+        return NextResponse.json({ record });
       }
 
       default:

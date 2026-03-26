@@ -376,3 +376,119 @@ export async function deleteRecord(
     throw error;
   }
 }
+
+// Get a single record
+export async function getRecord(
+  baseId: string,
+  tableId: string,
+  recordId: string
+): Promise<AirtableRecord> {
+  ensurePAT();
+  validateId(baseId, "base");
+  validateId(recordId, "record");
+
+  logger.info(`Fetching record ${recordId}`, "Airtable");
+  const startTime = Date.now();
+
+  try {
+    const response = await fetchWithRetry(
+      `https://api.airtable.com/v0/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}/${encodeURIComponent(recordId)}`,
+      { headers: { Authorization: `Bearer ${PAT}` } }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(getArabicError(response.status, errorBody));
+    }
+
+    const data = await response.json();
+    const duration = Date.now() - startTime;
+    logger.info(`Fetched record ${recordId} in ${duration}ms`, "Airtable");
+    return data;
+  } catch (error) {
+    if (error instanceof TypeError && (error as TypeError).message.includes("fetch")) {
+      throw new Error("فشل الاتصال بـ Airtable. تحقق من اتصال الإنترنت.");
+    }
+    throw error;
+  }
+}
+
+// Resolve linked record IDs to display names
+export async function resolveLinkedRecordNames(
+  baseId: string,
+  records: AirtableRecord[],
+  fields: AirtableField[],
+  allTables: AirtableTable[]
+): Promise<Record<string, string>> {
+  const linkFields = fields.filter((f) => f.type === "multipleRecordLinks");
+  if (linkFields.length === 0) return {};
+
+  // Group record IDs by their target linked table
+  const idsByTable: Record<string, Set<string>> = {};
+  for (const field of linkFields) {
+    const opts = field.options as Record<string, unknown> | undefined;
+    const linkedTableId = opts?.linkedTableId as string | undefined;
+    if (!linkedTableId) continue;
+
+    for (const record of records) {
+      const value = record.fields[field.name];
+      if (Array.isArray(value)) {
+        if (!idsByTable[linkedTableId]) idsByTable[linkedTableId] = new Set();
+        for (const id of value) {
+          if (typeof id === "string" && id.startsWith("rec")) {
+            idsByTable[linkedTableId].add(id);
+          }
+        }
+      }
+    }
+  }
+
+  if (Object.keys(idsByTable).length === 0) return {};
+
+  const nameMap: Record<string, string> = {};
+
+  // Resolve each linked table in parallel
+  const promises = Object.entries(idsByTable).map(async ([tableId, ids]) => {
+    // Find the primary field name for this linked table
+    const linkedTable = allTables.find((t) => t.id === tableId);
+    let primaryFieldName: string | undefined;
+    if (linkedTable) {
+      const primaryField = linkedTable.fields.find(
+        (f) => f.id === linkedTable.primaryFieldId
+      );
+      primaryFieldName = primaryField?.name;
+    }
+
+    const idArray = Array.from(ids);
+
+    // Batch fetch in groups of 40 to stay under URL limits
+    for (let i = 0; i < idArray.length; i += 40) {
+      const batch = idArray.slice(i, i + 40);
+      const formula = `OR(${batch.map((id) => `RECORD_ID()='${id}'`).join(",")})`;
+
+      try {
+        const result = await listRecords(baseId, tableId, {
+          pageSize: 100,
+          filterByFormula: formula,
+          fields: primaryFieldName ? [primaryFieldName] : undefined,
+        });
+
+        for (const rec of result.records) {
+          if (primaryFieldName && rec.fields[primaryFieldName] !== undefined) {
+            nameMap[rec.id] = String(rec.fields[primaryFieldName]);
+          } else {
+            const firstValue = Object.values(rec.fields)[0];
+            nameMap[rec.id] = firstValue ? String(firstValue) : rec.id;
+          }
+        }
+      } catch {
+        for (const id of batch) {
+          nameMap[id] = id;
+        }
+      }
+    }
+  });
+
+  await Promise.all(promises);
+  return nameMap;
+}
