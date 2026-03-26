@@ -145,6 +145,7 @@ export default function DashboardPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [sortField, setSortField] = useState("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [quickSearch, setQuickSearch] = useState("");
 
   /* edit */
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
@@ -665,213 +666,58 @@ export default function DashboardPage() {
   const canEdit = user?.role === "admin" || user?.role === "editor";
   const canDelete = user?.role === "admin";
 
+  /* ──── Quick search filter (client-side) ──── */
+  const filteredRecords = quickSearch.trim()
+    ? records.filter((r) =>
+        Object.values(r.fields).some((v) => {
+          if (v === null || v === undefined) return false;
+          if (Array.isArray(v))
+            return v.some((item) =>
+              String(linkedNames[item] || item)
+                .toLowerCase()
+                .includes(quickSearch.toLowerCase())
+            );
+          return String(v).toLowerCase().includes(quickSearch.toLowerCase());
+        })
+      )
+    : records;
+
   /* ──────────────────── JSX ──────────────────── */
 
   return (
-    <div className="space-y-5 max-w-full">
-      {/* ── Selection bar ── */}
-      <div className="zto-card p-5">
-        <h2 className="text-right text-[14px] font-bold text-white mb-4 flex items-center gap-2">
-          <Database className="w-4 h-4 text-amber-400" />
-          اختيار البيانات
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Base selector */}
-          <div>
-            <label className="zto-label flex items-center gap-2">
-              <Layers className="w-3.5 h-3.5 text-amber-400" />
-              القاعدة
-            </label>
-            <div className="zto-select-wrap">
-              <select
-                className="zto-input"
-                value={selectedBase?.id || ""}
-                onChange={(e) => {
-                  const base = bases.find((b) => b.id === e.target.value);
-                  setSelectedBase(base || null);
-                }}
-                disabled={loading}
-              >
-                <option value="">— اختر قاعدة —</option>
-                {bases.map((base) => (
-                  <option key={base.id} value={base.id}>
-                    {base.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Table selector */}
-          <div>
-            <label className="zto-label flex items-center gap-2">
-              <Table2 className="w-3.5 h-3.5 text-amber-400" />
-              الجدول
-            </label>
-            <div className="zto-select-wrap">
-              <select
-                className="zto-input"
-                value={selectedTable?.id || ""}
-                onChange={(e) => {
-                  const table = tables.find((t) => t.id === e.target.value);
-                  setSelectedTable(table || null);
-                }}
-                disabled={!selectedBase || loading}
-              >
-                <option value="">— اختر جدول —</option>
-                {tables.map((table) => (
-                  <option key={table.id} value={table.id}>
-                    {table.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+    <div className="space-y-0 max-w-full">
+      {/* ── Base selector row ── */}
+      <div className="flex items-center gap-3 mb-4">
+        <Database className="w-5 h-5 text-amber-400 shrink-0" />
+        <div className="zto-select-wrap w-64">
+          <select
+            className="zto-input"
+            value={selectedBase?.id || ""}
+            onChange={(e) => {
+              const base = bases.find((b) => b.id === e.target.value);
+              setSelectedBase(base || null);
+            }}
+            disabled={loading}
+          >
+            <option value="">— اختر قاعدة —</option>
+            {bases.map((base) => (
+              <option key={base.id} value={base.id}>
+                {base.name}
+              </option>
+            ))}
+          </select>
         </div>
-
-        {/* Bases error */}
-        {basesError && (
-          <div className="zto-alert zto-alert-err mt-4">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{basesError}</span>
-            <button
-              onClick={() => window.location.reload()}
-              className="zto-btn zto-btn-ghost zto-btn-sm mr-auto"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              إعادة المحاولة
-            </button>
-          </div>
-        )}
-
-        {/* Toolbar when table is selected */}
-        {selectedTable && (
-          <div className="mt-4 pt-4 border-t border-[#3a3a3a]">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-[14px] font-bold text-white">
-                  {selectedTable.name}
-                </span>
-                {selectedTable.description && (
-                  <span className="text-[13px] text-neutral-500">
-                    {selectedTable.description}
-                  </span>
-                )}
-                <span className="zto-badge zto-badge-default">
-                  {selectedTable.fields.length} حقل
-                </span>
-                <span className="zto-badge zto-badge-ok">
-                  {records.length} سجل
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowFilter(!showFilter)}
-                  className={`zto-btn zto-btn-ghost zto-btn-sm ${
-                    showFilter ? "text-amber-400" : ""
-                  }`}
-                >
-                  <Filter className="w-3.5 h-3.5" />
-                  فلترة
-                </button>
-                <button
-                  onClick={() => loadRecords()}
-                  disabled={loadingRecords}
-                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${
-                      loadingRecords ? "animate-spin" : ""
-                    }`}
-                  />
-                  تحديث
-                </button>
-                {canEdit && (
-                  <button
-                    onClick={() => {
-                      setCreateFields({});
-                      setShowCreateModal(true);
-                    }}
-                    className="zto-btn zto-btn-gold zto-btn-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    سجل جديد
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Filter row */}
-            {showFilter && (
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                  <Search className="w-4 h-4 text-neutral-500 shrink-0" />
-                  <input
-                    type="text"
-                    className="zto-input"
-                    placeholder='مثال: {الاسم} = "أحمد"'
-                    value={filterFormula}
-                    onChange={(e) => setFilterFormula(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") loadRecords();
-                    }}
-                  />
-                </div>
-                <div className="zto-select-wrap w-44">
-                  <select
-                    className="zto-input"
-                    value={sortField}
-                    onChange={(e) => setSortField(e.target.value)}
-                  >
-                    <option value="">ترتيب حسب...</option>
-                    {selectedTable.fields.map((f) => (
-                      <option key={f.id} value={f.name}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={() =>
-                    setSortDir(sortDir === "asc" ? "desc" : "asc")
-                  }
-                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                >
-                  <ArrowUpDown className="w-3.5 h-3.5" />
-                  {sortDir === "asc" ? "تصاعدي" : "تنازلي"}
-                </button>
-                <button
-                  onClick={() => loadRecords()}
-                  className="zto-btn zto-btn-gold zto-btn-sm"
-                >
-                  تطبيق
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {loading && <Loader2 className="w-4 h-4 animate-spin text-amber-400" />}
       </div>
 
-      {/* ── Loading ── */}
-      {(loading || loadingRecords) && (
-        <div className="zto-card p-16 flex flex-col items-center justify-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
-          <p className="text-neutral-500 text-[13px] font-bold">
-            جاري تحميل البيانات...
-          </p>
-        </div>
-      )}
-
-      {/* ── Records error ── */}
-      {recordsError && !loadingRecords && (
-        <div className="zto-card p-10 flex flex-col items-center justify-center gap-3 text-center">
-          <AlertCircle className="w-8 h-8 text-red-400" />
-          <p className="text-red-400 text-[14px] font-bold">{recordsError}</p>
+      {/* Bases error */}
+      {basesError && (
+        <div className="zto-alert zto-alert-err mb-4">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{basesError}</span>
           <button
-            onClick={() => loadRecords()}
-            className="zto-btn zto-btn-outline zto-btn-sm"
+            onClick={() => window.location.reload()}
+            className="zto-btn zto-btn-ghost zto-btn-sm mr-auto"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             إعادة المحاولة
@@ -879,223 +725,371 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Table Tabs ── */}
+      {selectedBase && tables.length > 0 && (
+        <div className="flex items-center gap-0 border-b-2 border-neutral-800 mb-0 overflow-x-auto">
+          {tables.map((table) => (
+            <button
+              key={table.id}
+              onClick={() => setSelectedTable(table)}
+              className={`px-5 py-2.5 text-[13px] font-bold whitespace-nowrap border-b-2 -mb-[2px] transition-colors ${
+                selectedTable?.id === table.id
+                  ? "border-amber-400 text-amber-400 bg-amber-400/5"
+                  : "border-transparent text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.02]"
+              }`}
+            >
+              {table.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Toolbar ── */}
+      {selectedTable && (
+        <div className="bg-[#141414] border border-neutral-800 border-t-0 rounded-b-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {/* Quick search */}
+            <div className="relative flex-1 max-w-xs">
+              <Search className="w-3.5 h-3.5 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                className="zto-input pr-9 text-[13px]"
+                placeholder="بحث سريع..."
+                value={quickSearch}
+                onChange={(e) => setQuickSearch(e.target.value)}
+              />
+            </div>
+
+            {/* Filter toggle */}
+            <button
+              onClick={() => setShowFilter(!showFilter)}
+              className={`zto-btn zto-btn-ghost zto-btn-sm ${
+                showFilter || filterFormula ? "text-amber-400" : ""
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              فلتر
+            </button>
+
+            {/* Sort */}
+            <div className="zto-select-wrap w-36">
+              <select
+                className="zto-input text-[12px]"
+                value={sortField}
+                onChange={(e) => {
+                  setSortField(e.target.value);
+                  loadRecords();
+                }}
+              >
+                <option value="">ترتيب حسب...</option>
+                {selectedTable.fields.map((f) => (
+                  <option key={f.id} value={f.name}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {sortField && (
+              <button
+                onClick={() => {
+                  setSortDir(sortDir === "asc" ? "desc" : "asc");
+                  loadRecords();
+                }}
+                className="zto-btn zto-btn-ghost zto-btn-sm"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                {sortDir === "asc" ? "↑" : "↓"}
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-neutral-500 font-bold">
+              {filteredRecords.length} سجل
+            </span>
+            <button
+              onClick={() => loadRecords()}
+              disabled={loadingRecords}
+              className="zto-btn zto-btn-ghost zto-btn-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingRecords ? "animate-spin" : ""}`} />
+            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setCreateFields({});
+                  setShowCreateModal(true);
+                }}
+                className="zto-btn zto-btn-gold zto-btn-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                سجل جديد
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Advanced filter row ── */}
+      {showFilter && selectedTable && (
+        <div className="bg-[#111] border border-neutral-800 border-t-0 px-4 py-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] text-neutral-500 font-bold shrink-0">Airtable Formula:</span>
+          <input
+            type="text"
+            className="zto-input flex-1 text-[13px] font-mono"
+            placeholder='مثال: {Status} = "Published"'
+            value={filterFormula}
+            onChange={(e) => setFilterFormula(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") loadRecords();
+            }}
+          />
+          <button onClick={() => loadRecords()} className="zto-btn zto-btn-gold zto-btn-sm">
+            تطبيق
+          </button>
+          {filterFormula && (
+            <button
+              onClick={() => {
+                setFilterFormula("");
+                loadRecords();
+              }}
+              className="zto-btn zto-btn-ghost zto-btn-sm text-red-400"
+            >
+              <X className="w-3 h-3" />
+              مسح
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Loading ── */}
+      {(loading || loadingRecords) && (
+        <div className="bg-[#111] border border-neutral-800 rounded-b-xl p-16 flex flex-col items-center justify-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+          <p className="text-neutral-500 text-[13px] font-bold">جاري تحميل البيانات...</p>
+        </div>
+      )}
+
+      {/* ── Records error ── */}
+      {recordsError && !loadingRecords && (
+        <div className="zto-card p-10 flex flex-col items-center justify-center gap-3 text-center mt-4">
+          <AlertCircle className="w-8 h-8 text-red-400" />
+          <p className="text-red-400 text-[14px] font-bold">{recordsError}</p>
+          <button onClick={() => loadRecords()} className="zto-btn zto-btn-outline zto-btn-sm">
+            <RefreshCw className="w-3.5 h-3.5" />
+            إعادة المحاولة
+          </button>
+        </div>
+      )}
+
       {/* ── Records table ── */}
-      {selectedTable &&
-        !loadingRecords &&
-        !recordsError &&
-        records.length > 0 && (
-          <div className="zto-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="zto-th w-12">#</th>
-                    {selectedTable.fields.map((field) => {
-                      const Icon = getFieldIcon(field.type);
-                      return (
-                        <th key={field.id} className="zto-th">
-                          <div className="flex items-center gap-1.5">
-                            <Icon className="w-3 h-3 text-neutral-500" />
-                            <span>{field.name}</span>
-                          </div>
-                        </th>
-                      );
-                    })}
-                    {(canEdit || canDelete) && (
-                      <th className="zto-th w-28">إجراءات</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.map((record, idx) => (
-                    <tr key={record.id} className="zto-tr">
-                      <td className="zto-td text-neutral-600 text-[11px] font-mono">
-                        {idx + 1}
+      {selectedTable && !loadingRecords && !recordsError && filteredRecords.length > 0 && (
+        <div className="border border-neutral-800 border-t-0 rounded-b-xl overflow-hidden bg-[#0d0d0d]">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-[#161616]">
+                  <th className="px-3 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 w-12">
+                    #
+                  </th>
+                  {selectedTable.fields.map((field) => {
+                    const Icon = getFieldIcon(field.type);
+                    return (
+                      <th
+                        key={field.id}
+                        className="px-4 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r border-neutral-800 whitespace-nowrap"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Icon className="w-3 h-3 text-neutral-500" />
+                          <span>{field.name}</span>
+                        </div>
+                      </th>
+                    );
+                  })}
+                  {(canEdit || canDelete) && (
+                    <th className="px-3 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 w-24">
+                      إجراءات
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecords.map((record, idx) => (
+                  <tr
+                    key={record.id}
+                    className="border-b border-neutral-700/80 hover:bg-white/[0.02] transition-colors"
+                  >
+                    <td className="px-3 py-3 text-neutral-600 text-[11px] font-mono border-r border-neutral-800">
+                      {idx + 1}
+                    </td>
+                    {selectedTable.fields.map((field) => (
+                      <td
+                        key={field.id}
+                        className="px-4 py-3 text-[13px] max-w-xs border-r border-neutral-800/60"
+                      >
+                        {editingRecord === record.id
+                          ? renderFieldInput(field, editFields[field.name], (val) =>
+                              setEditFields((prev) => ({ ...prev, [field.name]: val }))
+                            )
+                          : renderFieldValue(record.fields[field.name], field)}
                       </td>
-                      {selectedTable.fields.map((field) => (
-                        <td
-                          key={field.id}
-                          className="zto-td max-w-xs"
-                        >
-                          {editingRecord === record.id
-                            ? renderFieldInput(
-                                field,
-                                editFields[field.name],
-                                (val) =>
-                                  setEditFields((prev) => ({
-                                    ...prev,
-                                    [field.name]: val,
-                                  }))
-                              )
-                            : renderFieldValue(
-                                record.fields[field.name],
-                                field
-                              )}
-                        </td>
-                      ))}
-                      {(canEdit || canDelete) && (
-                        <td className="zto-td">
-                          <div className="flex items-center gap-1">
-                            {editingRecord === record.id ? (
-                              <>
+                    ))}
+                    {(canEdit || canDelete) && (
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1">
+                          {editingRecord === record.id ? (
+                            <>
+                              <button
+                                onClick={saveEdit}
+                                disabled={savingRecord}
+                                className="zto-btn zto-btn-ok zto-btn-sm"
+                                style={{ padding: "4px 8px" }}
+                              >
+                                {savingRecord ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Save className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              <button
+                                onClick={() => setEditingRecord(null)}
+                                className="zto-btn zto-btn-ghost zto-btn-sm"
+                                style={{ padding: "4px 8px" }}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {canEdit && (
                                 <button
-                                  onClick={saveEdit}
-                                  disabled={savingRecord}
-                                  className="zto-btn zto-btn-ok zto-btn-sm"
+                                  onClick={() => startEditing(record)}
+                                  className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
                                   style={{ padding: "4px 8px" }}
+                                  title="تعديل"
                                 >
-                                  {savingRecord ? (
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  onClick={() => handleDelete(record.id)}
+                                  disabled={deletingRecord === record.id}
+                                  className={`zto-btn zto-btn-ghost zto-btn-sm ${
+                                    confirmDelete === record.id
+                                      ? "text-red-400 bg-red-400/10"
+                                      : "text-neutral-500"
+                                  }`}
+                                  style={{ padding: "4px 8px" }}
+                                  title={
+                                    confirmDelete === record.id ? "اضغط مرة أخرى للتأكيد" : "حذف"
+                                  }
+                                >
+                                  {deletingRecord === record.id ? (
                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                   ) : (
-                                    <Save className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   )}
                                 </button>
-                                <button
-                                  onClick={() => setEditingRecord(null)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                                  style={{ padding: "4px 8px" }}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                {canEdit && (
-                                  <button
-                                    onClick={() => startEditing(record)}
-                                    className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
-                                    style={{ padding: "4px 8px" }}
-                                    title="تعديل"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                {canDelete && (
-                                  <button
-                                    onClick={() => handleDelete(record.id)}
-                                    disabled={deletingRecord === record.id}
-                                    className={`zto-btn zto-btn-ghost zto-btn-sm ${
-                                      confirmDelete === record.id
-                                        ? "text-red-400 bg-red-400/10"
-                                        : "text-neutral-500"
-                                    }`}
-                                    style={{ padding: "4px 8px" }}
-                                    title={
-                                      confirmDelete === record.id
-                                        ? "اضغط مرة أخرى للتأكيد"
-                                        : "حذف"
-                                    }
-                                  >
-                                    {deletingRecord === record.id ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    )}
-                                  </button>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-[#3a3a3a]">
-              <span className="text-[11px] text-neutral-500 font-bold">
-                عرض {records.length} سجل
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  disabled={prevOffsets.length === 0}
-                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                  onClick={() => {
-                    const prev = [...prevOffsets];
-                    const lastOffset = prev.pop();
-                    setPrevOffsets(prev);
-                    loadRecords(lastOffset);
-                  }}
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                  السابق
-                </button>
-                <button
-                  disabled={!offset}
-                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                  onClick={() => {
-                    if (offset) {
-                      setPrevOffsets((prev) => [...prev, offset]);
-                      loadRecords(offset);
-                    }
-                  }}
-                >
-                  التالي
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          {/* Pagination */}
+          <div className="flex items-center justify-between px-4 py-3 border-t-2 border-neutral-700 bg-[#141414]">
+            <span className="text-[11px] text-neutral-500 font-bold">
+              عرض {filteredRecords.length} سجل
+              {quickSearch && filteredRecords.length !== records.length && (
+                <span className="text-neutral-600"> (من {records.length})</span>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={prevOffsets.length === 0}
+                className="zto-btn zto-btn-ghost zto-btn-sm"
+                onClick={() => {
+                  const prev = [...prevOffsets];
+                  const lastOffset = prev.pop();
+                  setPrevOffsets(prev);
+                  loadRecords(lastOffset);
+                }}
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+                السابق
+              </button>
+              <button
+                disabled={!offset}
+                className="zto-btn zto-btn-ghost zto-btn-sm"
+                onClick={() => {
+                  if (offset) {
+                    setPrevOffsets((prev) => [...prev, offset]);
+                    loadRecords(offset);
+                  }
+                }}
+              >
+                التالي
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
       {/* ── Empty state ── */}
-      {selectedTable &&
-        !loadingRecords &&
-        !recordsError &&
-        records.length === 0 && (
-          <div className="zto-card p-16 flex flex-col items-center justify-center text-center">
-            <Database className="w-10 h-10 text-neutral-700 mb-3" />
-            <p className="text-neutral-400 text-[14px] font-bold">
-              لا توجد سجلات
-            </p>
-            <p className="text-neutral-600 text-[13px] mt-1">
-              هذا الجدول فارغ أو لا توجد نتائج تطابق الفلتر
-            </p>
-          </div>
-        )}
-
-      {/* ── No table selected ── */}
-      {!selectedTable && !loading && (
-        <div className="zto-card p-16 flex flex-col items-center justify-center text-center">
-          <Table2 className="w-10 h-10 text-neutral-700 mb-3" />
+      {selectedTable && !loadingRecords && !recordsError && filteredRecords.length === 0 && (
+        <div className="border border-neutral-800 border-t-0 rounded-b-xl p-16 flex flex-col items-center justify-center text-center bg-[#0d0d0d]">
+          <Database className="w-10 h-10 text-neutral-700 mb-3" />
           <p className="text-neutral-400 text-[14px] font-bold">
-            اختر قاعدة وجدول
+            {quickSearch ? "لا توجد نتائج للبحث" : "لا توجد سجلات"}
           </p>
           <p className="text-neutral-600 text-[13px] mt-1">
-            حدد القاعدة والجدول من الأعلى لعرض البيانات
+            {quickSearch
+              ? "جرّب كلمة بحث مختلفة"
+              : "هذا الجدول فارغ أو لا توجد نتائج تطابق الفلتر"}
           </p>
+        </div>
+      )}
+
+      {/* ── No table selected ── */}
+      {!selectedTable && !loading && selectedBase && tables.length > 0 && (
+        <div className="zto-card p-16 flex flex-col items-center justify-center text-center mt-4">
+          <Table2 className="w-10 h-10 text-neutral-700 mb-3" />
+          <p className="text-neutral-400 text-[14px] font-bold">اختر جدول من الأعلى</p>
+        </div>
+      )}
+
+      {!selectedBase && !loading && (
+        <div className="zto-card p-16 flex flex-col items-center justify-center text-center">
+          <Layers className="w-10 h-10 text-neutral-700 mb-3" />
+          <p className="text-neutral-400 text-[14px] font-bold">اختر قاعدة بيانات</p>
+          <p className="text-neutral-600 text-[13px] mt-1">حدد القاعدة من القائمة أعلاه للبدء</p>
         </div>
       )}
 
       {/* ── Create modal ── */}
       {showCreateModal && selectedTable && (
-        <div
-          className="zto-overlay"
-          onClick={() => setShowCreateModal(false)}
-        >
-          <div
-            className="zto-modal max-w-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
+        <div className="zto-overlay" onClick={() => setShowCreateModal(false)}>
+          <div className="zto-modal max-w-xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b border-[#3a3a3a] flex items-center justify-between">
               <h3 className="text-[14px] font-bold text-white flex items-center gap-2">
                 <Plus className="w-4 h-4 text-amber-400" />
-                سجل جديد
+                سجل جديد في {selectedTable.name}
               </h3>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="zto-btn zto-btn-ghost zto-btn-sm"
-                style={{ padding: "4px" }}
+                className="text-neutral-500 hover:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            {/* Fields */}
             <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedTable.fields.map((field) => {
                 const Icon = getFieldIcon(field.type);
@@ -1104,42 +1098,21 @@ export default function DashboardPage() {
                     <label className="zto-label flex items-center gap-1.5">
                       <Icon className="w-3 h-3 text-amber-400" />
                       {field.name}
-                      <span className="text-neutral-600 font-normal text-[11px]">
-                        ({field.type})
-                      </span>
+                      <span className="text-neutral-600 font-normal text-[11px]">({field.type})</span>
                     </label>
-                    {renderFieldInput(
-                      field,
-                      createFields[field.name],
-                      (val) =>
-                        setCreateFields((prev) => ({
-                          ...prev,
-                          [field.name]: val,
-                        }))
+                    {renderFieldInput(field, createFields[field.name], (val) =>
+                      setCreateFields((prev) => ({ ...prev, [field.name]: val }))
                     )}
                   </div>
                 );
               })}
             </div>
-
-            {/* Footer */}
             <div className="p-5 border-t border-[#3a3a3a] flex items-center gap-3 justify-start">
-              <button
-                onClick={handleCreate}
-                disabled={creatingRecord}
-                className="zto-btn zto-btn-gold"
-              >
-                {creatingRecord ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4" />
-                )}
+              <button onClick={handleCreate} disabled={creatingRecord} className="zto-btn zto-btn-gold">
+                {creatingRecord ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 إنشاء
               </button>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="zto-btn zto-btn-outline"
-              >
+              <button onClick={() => setShowCreateModal(false)} className="zto-btn zto-btn-outline">
                 إلغاء
               </button>
             </div>
