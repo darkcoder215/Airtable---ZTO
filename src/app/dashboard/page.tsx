@@ -103,6 +103,50 @@ function getFieldIcon(type: string) {
   }
 }
 
+function getFieldTypeColor(type: string): string {
+  switch (type) {
+    case "singleLineText":
+    case "multilineText":
+    case "richText":
+      return "text-blue-400";
+    case "number":
+    case "currency":
+    case "percent":
+    case "count":
+    case "autoNumber":
+      return "text-orange-400";
+    case "date":
+    case "dateTime":
+    case "createdTime":
+    case "lastModifiedTime":
+      return "text-cyan-400";
+    case "email":
+      return "text-pink-400";
+    case "phoneNumber":
+      return "text-green-400";
+    case "url":
+      return "text-violet-400";
+    case "checkbox":
+      return "text-emerald-400";
+    case "rating":
+      return "text-amber-400";
+    case "singleSelect":
+    case "multipleSelects":
+      return "text-purple-400";
+    case "multipleAttachments":
+      return "text-rose-400";
+    case "multipleRecordLinks":
+    case "multipleLookupValues":
+      return "text-teal-400";
+    case "formula":
+    case "rollup":
+    case "lookup":
+      return "text-neutral-400";
+    default:
+      return "text-neutral-500";
+  }
+}
+
 const READ_ONLY_TYPES = [
   "autoNumber",
   "createdTime",
@@ -894,13 +938,14 @@ export default function DashboardPage() {
                   </th>
                   {selectedTable.fields.map((field) => {
                     const Icon = getFieldIcon(field.type);
+                    const typeColor = getFieldTypeColor(field.type);
                     return (
                       <th
                         key={field.id}
                         className="px-4 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r border-neutral-800 whitespace-nowrap"
                       >
                         <div className="flex items-center gap-1.5">
-                          <Icon className="w-3 h-3 text-neutral-500" />
+                          <Icon className={`w-3.5 h-3.5 ${typeColor} shrink-0`} />
                           <span>{field.name}</span>
                         </div>
                       </th>
@@ -1093,10 +1138,11 @@ export default function DashboardPage() {
             <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedTable.fields.map((field) => {
                 const Icon = getFieldIcon(field.type);
+                const typeColor = getFieldTypeColor(field.type);
                 return (
                   <div key={field.id}>
                     <label className="zto-label flex items-center gap-1.5">
-                      <Icon className="w-3 h-3 text-amber-400" />
+                      <Icon className={`w-3 h-3 ${typeColor}`} />
                       {field.name}
                       <span className="text-neutral-600 font-normal text-[11px]">({field.type})</span>
                     </label>
