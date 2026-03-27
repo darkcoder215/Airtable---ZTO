@@ -196,10 +196,10 @@ export default function DashboardPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [quickSearch, setQuickSearch] = useState("");
 
-  /* edit */
-  const [editingRecord, setEditingRecord] = useState<string | null>(null);
-  const [editFields, setEditFields] = useState<{ [key: string]: unknown }>({});
-  const [savingRecord, setSavingRecord] = useState(false);
+  /* per-cell edit: tracks which cell is being edited */
+  const [editingCell, setEditingCell] = useState<{ recordId: string; fieldName: string } | null>(null);
+  const [editCellValue, setEditCellValue] = useState<unknown>(null);
+  const [savingCell, setSavingCell] = useState(false);
 
   /* create */
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -355,35 +355,27 @@ export default function DashboardPage() {
     }
   }, [selectedTable, loadRecords]);
 
-  /* ──── Edit ──── */
-  const startEditing = (record: AirtableRecord) => {
-    setEditingRecord(record.id);
-    setEditFields({ ...record.fields });
+  /* ──── Per-cell Edit ──── */
+  const startCellEdit = (recordId: string, fieldName: string, currentValue: unknown) => {
+    setEditingCell({ recordId, fieldName });
+    setEditCellValue(currentValue);
   };
 
-  const saveEdit = async () => {
-    if (!selectedBase || !selectedTable || !editingRecord) return;
-    setSavingRecord(true);
+  const cancelCellEdit = () => {
+    setEditingCell(null);
+    setEditCellValue(null);
+  };
+
+  const saveCellEdit = async () => {
+    if (!selectedBase || !selectedTable || !editingCell) return;
+    const { recordId, fieldName } = editingCell;
+    const originalRecord = records.find((r) => r.id === recordId);
+    if (originalRecord && JSON.stringify(editCellValue) === JSON.stringify(originalRecord.fields[fieldName])) {
+      cancelCellEdit();
+      return;
+    }
+    setSavingCell(true);
     try {
-      const originalRecord = records.find((r) => r.id === editingRecord);
-      const changedFields: Record<string, unknown> = {};
-      if (originalRecord) {
-        for (const [key, value] of Object.entries(editFields)) {
-          if (
-            JSON.stringify(value) !==
-            JSON.stringify(originalRecord.fields[key])
-          ) {
-            changedFields[key] = value;
-          }
-        }
-      }
-
-      if (Object.keys(changedFields).length === 0) {
-        setEditingRecord(null);
-        addToast("لم يتم تغيير أي حقل", "info");
-        return;
-      }
-
       const res = await fetch("/api/airtable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -391,24 +383,22 @@ export default function DashboardPage() {
           action: "update",
           baseId: selectedBase.id,
           tableId: selectedTable.id,
-          recordId: editingRecord,
-          fields: changedFields,
+          recordId,
+          fields: { [fieldName]: editCellValue },
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        setRecords((prev) =>
-          prev.map((r) => (r.id === editingRecord ? data.record : r))
-        );
-        setEditingRecord(null);
-        addToast("تم حفظ التغييرات بنجاح", "success");
+        setRecords((prev) => prev.map((r) => (r.id === recordId ? data.record : r)));
+        cancelCellEdit();
+        addToast("تم الحفظ", "success");
       } else {
-        addToast(data.error || "فشل حفظ التغييرات", "error");
+        addToast(data.error || "فشل الحفظ", "error");
       }
     } catch {
-      addToast("حدث خطأ أثناء الحفظ. حاول مرة أخرى.", "error");
+      addToast("حدث خطأ أثناء الحفظ", "error");
     } finally {
-      setSavingRecord(false);
+      setSavingCell(false);
     }
   };
 
@@ -1082,91 +1072,103 @@ export default function DashboardPage() {
                           <span className="text-neutral-600 text-[11px] font-mono">{idx + 1}</span>
                         </div>
                       </td>
-                      {/* Data cells */}
-                      {visibleFields.map((field) => (
-                        <td
-                          key={field.id}
-                          className={`px-4 ${rowPadding} text-[13px] border-r border-neutral-700/50 align-top ${
-                            isExpanded ? "" : "max-w-[200px]"
-                          }`}
-                        >
-                          <div className={isExpanded ? "" : "line-clamp-2 overflow-hidden"}>
-                            {editingRecord === record.id
-                              ? renderFieldInput(field, editFields[field.name], (val) =>
-                                  setEditFields((prev) => ({ ...prev, [field.name]: val }))
-                                )
-                              : renderFieldValue(record.fields[field.name], field)}
-                          </div>
-                        </td>
-                      ))}
+                      {/* Data cells — per-cell editing */}
+                      {visibleFields.map((field) => {
+                        const isCellEditing =
+                          editingCell?.recordId === record.id &&
+                          editingCell?.fieldName === field.name;
+                        const isReadOnly = READ_ONLY_TYPES.includes(field.type);
+                        const cellEditable = canEdit && !isReadOnly;
+                        return (
+                          <td
+                            key={field.id}
+                            className={`px-4 ${rowPadding} text-[13px] border-r border-neutral-700/50 align-top ${
+                              isExpanded ? "" : "max-w-[200px]"
+                            } ${cellEditable && !isCellEditing ? "cursor-pointer hover:bg-amber-400/5" : ""}`}
+                            onDoubleClick={() => {
+                              if (cellEditable && !isCellEditing) {
+                                startCellEdit(record.id, field.name, record.fields[field.name]);
+                              }
+                            }}
+                          >
+                            {isCellEditing ? (
+                              <div className="space-y-1.5">
+                                {renderFieldInput(field, editCellValue, (val) =>
+                                  setEditCellValue(val)
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={saveCellEdit}
+                                    disabled={savingCell}
+                                    className="zto-btn zto-btn-ok zto-btn-sm"
+                                    style={{ padding: "3px 6px" }}
+                                  >
+                                    {savingCell ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Save className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={cancelCellEdit}
+                                    className="zto-btn zto-btn-ghost zto-btn-sm"
+                                    style={{ padding: "3px 6px" }}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`${isExpanded ? "" : "line-clamp-2 overflow-hidden"} relative group/cell`}>
+                                {renderFieldValue(record.fields[field.name], field)}
+                                {cellEditable && (
+                                  <button
+                                    onClick={() =>
+                                      startCellEdit(record.id, field.name, record.fields[field.name])
+                                    }
+                                    className="absolute top-0 left-0 p-0.5 rounded bg-[#1a1a1a] border border-neutral-700 text-amber-400 opacity-0 group-hover/cell:opacity-100 transition-opacity"
+                                    title="تعديل"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
                       {/* Actions */}
                       {(canEdit || canDelete) && (
                         <td className={`px-3 ${rowPadding} align-top`}>
                           <div className="flex items-center gap-1">
-                            {editingRecord === record.id ? (
-                              <>
-                                <button
-                                  onClick={saveEdit}
-                                  disabled={savingRecord}
-                                  className="zto-btn zto-btn-ok zto-btn-sm"
-                                  style={{ padding: "4px 8px" }}
-                                >
-                                  {savingRecord ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Save className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-                                <button
-                                  onClick={() => setEditingRecord(null)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                                  style={{ padding: "4px 8px" }}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                {canEdit && (
-                                  <button
-                                    onClick={() => startEditing(record)}
-                                    className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
-                                    style={{ padding: "4px 8px" }}
-                                    title="تعديل"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
+                            <button
+                              onClick={() => toggleRowExpand(record.id)}
+                              className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ padding: "4px 8px" }}
+                              title={isExpanded ? "طي" : "توسيع"}
+                            >
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            </button>
+                            {canDelete && (
+                              <button
+                                onClick={() => handleDelete(record.id)}
+                                disabled={deletingRecord === record.id}
+                                className={`zto-btn zto-btn-ghost zto-btn-sm ${
+                                  confirmDelete === record.id
+                                    ? "text-red-400 bg-red-400/10"
+                                    : "text-neutral-500"
+                                }`}
+                                style={{ padding: "4px 8px" }}
+                                title={
+                                  confirmDelete === record.id ? "اضغط مرة أخرى للتأكيد" : "حذف"
+                                }
+                              >
+                                {deletingRecord === record.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 )}
-                                <button
-                                  onClick={() => toggleRowExpand(record.id)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  style={{ padding: "4px 8px" }}
-                                  title={isExpanded ? "طي" : "توسيع"}
-                                >
-                                  <Maximize2 className="w-3.5 h-3.5" />
-                                </button>
-                                {canDelete && (
-                                  <button
-                                    onClick={() => handleDelete(record.id)}
-                                    disabled={deletingRecord === record.id}
-                                    className={`zto-btn zto-btn-ghost zto-btn-sm ${
-                                      confirmDelete === record.id
-                                        ? "text-red-400 bg-red-400/10"
-                                        : "text-neutral-500"
-                                    }`}
-                                    style={{ padding: "4px 8px" }}
-                                    title={
-                                      confirmDelete === record.id ? "اضغط مرة أخرى للتأكيد" : "حذف"
-                                    }
-                                  >
-                                    {deletingRecord === record.id ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    )}
-                                  </button>
-                                )}
-                              </>
+                              </button>
                             )}
                           </div>
                         </td>
