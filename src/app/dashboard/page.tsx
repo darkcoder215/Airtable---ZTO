@@ -33,6 +33,9 @@ import {
   Paperclip,
   ExternalLink,
   Maximize2,
+  Eye,
+  EyeOff,
+  Rows3,
 } from "lucide-react";
 
 /* ────────── Types ────────── */
@@ -222,6 +225,23 @@ export default function DashboardPage() {
       return next;
     });
   };
+
+  /* column visibility */
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const toggleColumn = (fieldId: string) => {
+    setHiddenColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(fieldId)) next.delete(fieldId);
+      else next.add(fieldId);
+      return next;
+    });
+  };
+  const visibleFields = selectedTable?.fields.filter((f) => !hiddenColumns.has(f.id)) || [];
+
+  /* row height */
+  const [rowSize, setRowSize] = useState<"compact" | "normal" | "tall">("normal");
+  const rowPadding = rowSize === "compact" ? "py-1.5" : rowSize === "tall" ? "py-5" : "py-3";
 
   /* ──── Fetch bases ──── */
   useEffect(() => {
@@ -860,6 +880,75 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Column visibility toggle */}
+            <div className="relative">
+              <button
+                onClick={() => setShowColumnPicker(!showColumnPicker)}
+                className={`zto-btn zto-btn-ghost zto-btn-sm ${
+                  hiddenColumns.size > 0 ? "text-amber-400" : ""
+                }`}
+              >
+                {hiddenColumns.size > 0 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                أعمدة
+                {hiddenColumns.size > 0 && (
+                  <span className="text-[10px] bg-amber-400/20 text-amber-400 rounded px-1">
+                    {hiddenColumns.size} مخفي
+                  </span>
+                )}
+              </button>
+              {showColumnPicker && selectedTable && (
+                <div className="absolute left-0 top-full mt-1 z-50 bg-[#1a1a1a] border border-neutral-700 rounded-xl p-3 w-64 max-h-72 overflow-y-auto shadow-2xl">
+                  <p className="text-[11px] text-neutral-500 font-bold mb-2">إظهار / إخفاء الأعمدة</p>
+                  {selectedTable.fields.map((field) => {
+                    const Icon = getFieldIcon(field.type);
+                    const typeColor = getFieldTypeColor(field.type);
+                    const isHidden = hiddenColumns.has(field.id);
+                    return (
+                      <label
+                        key={field.id}
+                        className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer text-[12px] transition-colors ${
+                          isHidden ? "text-neutral-600" : "text-neutral-300"
+                        } hover:bg-white/[0.03]`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!isHidden}
+                          onChange={() => toggleColumn(field.id)}
+                          className="w-3.5 h-3.5 rounded accent-amber-400"
+                        />
+                        <Icon className={`w-3 h-3 ${isHidden ? "text-neutral-700" : typeColor} shrink-0`} />
+                        <span className={isHidden ? "line-through" : ""}>{field.name}</span>
+                      </label>
+                    );
+                  })}
+                  {hiddenColumns.size > 0 && (
+                    <button
+                      onClick={() => setHiddenColumns(new Set())}
+                      className="text-[11px] text-amber-400 mt-2 hover:underline"
+                    >
+                      إظهار الكل
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Row height */}
+            <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
+              {(["compact", "normal", "tall"] as const).map((size) => (
+                <button
+                  key={size}
+                  onClick={() => setRowSize(size)}
+                  className={`px-2 py-1 text-[10px] font-bold transition-colors ${
+                    rowSize === size ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                  title={size === "compact" ? "مضغوط" : size === "normal" ? "عادي" : "واسع"}
+                >
+                  <Rows3 className={`w-3 h-3 ${size === "compact" ? "scale-75" : size === "tall" ? "scale-125" : ""}`} />
+                </button>
+              ))}
+            </div>
+
             <span className="text-[11px] text-neutral-500 font-bold">
               {filteredRecords.length} سجل
             </span>
@@ -948,7 +1037,7 @@ export default function DashboardPage() {
                   <th className="px-2 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r-2 border-r-neutral-700 w-14">
                     #
                   </th>
-                  {selectedTable.fields.map((field) => {
+                  {visibleFields.map((field) => {
                     const Icon = getFieldIcon(field.type);
                     const typeColor = getFieldTypeColor(field.type);
                     return (
@@ -979,7 +1068,7 @@ export default function DashboardPage() {
                       className="border-b-2 border-neutral-700 hover:bg-white/[0.02] transition-colors group"
                     >
                       {/* Row number + expand */}
-                      <td className="px-2 py-3 border-r-2 border-neutral-700 align-top">
+                      <td className={`px-2 ${rowPadding} border-r-2 border-neutral-700 align-top`}>
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => toggleRowExpand(record.id)}
@@ -994,10 +1083,10 @@ export default function DashboardPage() {
                         </div>
                       </td>
                       {/* Data cells */}
-                      {selectedTable.fields.map((field) => (
+                      {visibleFields.map((field) => (
                         <td
                           key={field.id}
-                          className={`px-4 py-3 text-[13px] border-r border-neutral-700/50 align-top ${
+                          className={`px-4 ${rowPadding} text-[13px] border-r border-neutral-700/50 align-top ${
                             isExpanded ? "" : "max-w-[200px]"
                           }`}
                         >
@@ -1012,7 +1101,7 @@ export default function DashboardPage() {
                       ))}
                       {/* Actions */}
                       {(canEdit || canDelete) && (
-                        <td className="px-3 py-3 align-top">
+                        <td className={`px-3 ${rowPadding} align-top`}>
                           <div className="flex items-center gap-1">
                             {editingRecord === record.id ? (
                               <>
@@ -1038,14 +1127,6 @@ export default function DashboardPage() {
                               </>
                             ) : (
                               <>
-                                <button
-                                  onClick={() => toggleRowExpand(record.id)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  style={{ padding: "4px 8px" }}
-                                  title={isExpanded ? "طي" : "توسيع"}
-                                >
-                                  <Maximize2 className="w-3.5 h-3.5" />
-                                </button>
                                 {canEdit && (
                                   <button
                                     onClick={() => startEditing(record)}
@@ -1056,6 +1137,14 @@ export default function DashboardPage() {
                                     <Edit3 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
+                                <button
+                                  onClick={() => toggleRowExpand(record.id)}
+                                  className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  style={{ padding: "4px 8px" }}
+                                  title={isExpanded ? "طي" : "توسيع"}
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                </button>
                                 {canDelete && (
                                   <button
                                     onClick={() => handleDelete(record.id)}
