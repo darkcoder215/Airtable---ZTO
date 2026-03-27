@@ -243,8 +243,11 @@ export default function DashboardPage() {
               "لا توجد قواعد بيانات متاحة. تأكد من صلاحيات رمز الوصول."
             );
           } else {
-            // Auto-select the first base
-            setSelectedBase(data.bases[0]);
+            // Auto-select Zero to One OS base
+            const ztoBase = data.bases.find(
+              (b: Base) => b.id === "appIpXIFs2yxyxaUm" || b.name === "Zero to One OS"
+            );
+            setSelectedBase(ztoBase || data.bases[0]);
           }
         }
       })
