@@ -17,7 +17,12 @@ import {
   FileX2,
   Lock,
   Filter,
+  EyeOff,
 } from "lucide-react";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
 interface AccessRule {
   id: string;
@@ -39,6 +44,19 @@ interface AccessRule {
   updatedAt: string;
 }
 
+interface TableMeta {
+  id: string;
+  name: string;
+  fields: { id: string; name: string; type: string }[];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+const BASE_ID = "appIpXIFs2yxyxaUm";
+const BASE_NAME = "Zero to One OS";
+
 const AVAILABLE_USERS = [
   { id: "2", name: "أحمد الكاتب" },
   { id: "3", name: "سارة المحررة" },
@@ -55,14 +73,18 @@ const PERM_CONFIG = [
 const defaultFormData = {
   userId: "",
   userName: "",
-  baseId: "*",
-  baseName: "جميع القواعد",
+  baseId: BASE_ID,
+  baseName: BASE_NAME,
   tableId: "*",
   tableName: "جميع الجداول",
   permissions: { canView: true, canEdit: false, canCreate: false, canDelete: false },
   fieldRestrictions: [] as string[],
   filterFormula: "",
 };
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
 
 export default function AccessControlPage() {
   const { user, addToast } = useAppStore();
@@ -72,31 +94,26 @@ export default function AccessControlPage() {
   const [editingRule, setEditingRule] = useState<AccessRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({ ...defaultFormData });
-  const [bases, setBases] = useState<{ id: string; name: string }[]>([]);
-  const [tables, setTables] = useState<{ id: string; name: string }[]>([]);
+  const [tables, setTables] = useState<TableMeta[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
 
+  /* ---------- Load tables from the hardcoded base on mount ---------- */
   useEffect(() => {
     loadRules();
-    fetch("/api/airtable?action=bases")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.bases) setBases(data.bases);
-      })
-      .catch(() => {});
+    loadTables();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (formData.baseId && formData.baseId !== "*") {
-      fetch(`/api/airtable?action=tables&baseId=${formData.baseId}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.tables) setTables(data.tables);
-        })
-        .catch(() => {});
-    } else {
-      setTables([]);
-    }
-  }, [formData.baseId]);
+  const loadTables = () => {
+    setTablesLoading(true);
+    fetch(`/api/airtable?action=tables&baseId=${BASE_ID}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.tables) setTables(data.tables);
+      })
+      .catch(() => {})
+      .finally(() => setTablesLoading(false));
+  };
 
   const loadRules = () => {
     setLoading(true);
@@ -109,6 +126,8 @@ export default function AccessControlPage() {
       .catch(() => addToast("فشل تحميل قواعد الصلاحيات", "error"))
       .finally(() => setLoading(false));
   };
+
+  /* ---------- CRUD helpers ---------- */
 
   const handleSave = async () => {
     if (!formData.userId) {
@@ -161,6 +180,8 @@ export default function AccessControlPage() {
     }
   };
 
+  /* ---------- Modal helpers ---------- */
+
   const openCreate = () => {
     setEditingRule(null);
     setFormData({ ...defaultFormData });
@@ -172,8 +193,8 @@ export default function AccessControlPage() {
     setFormData({
       userId: rule.userId,
       userName: rule.userName,
-      baseId: rule.baseId,
-      baseName: rule.baseName,
+      baseId: BASE_ID,
+      baseName: BASE_NAME,
       tableId: rule.tableId,
       tableName: rule.tableName,
       permissions: { ...rule.permissions },
@@ -189,7 +210,34 @@ export default function AccessControlPage() {
     setFormData({ ...defaultFormData });
   };
 
-  /* ---------- Admin guard ---------- */
+  /* ---------- Derived: fields for the selected table ---------- */
+  const selectedTableMeta =
+    formData.tableId !== "*"
+      ? tables.find((t) => t.id === formData.tableId)
+      : null;
+
+  const toggleHiddenField = (fieldName: string) => {
+    setFormData((prev) => {
+      const exists = prev.fieldRestrictions.includes(fieldName);
+      return {
+        ...prev,
+        fieldRestrictions: exists
+          ? prev.fieldRestrictions.filter((f) => f !== fieldName)
+          : [...prev.fieldRestrictions, fieldName],
+      };
+    });
+  };
+
+  /* ---------- Resolve table name from id for cards ---------- */
+  const resolveTableName = (tableId: string) => {
+    if (tableId === "*") return "جميع الجداول";
+    const t = tables.find((t) => t.id === tableId);
+    return t?.name || tableId;
+  };
+
+  /* ================================================================ */
+  /*  Admin guard                                                      */
+  /* ================================================================ */
   if (user?.role !== "admin") {
     return (
       <div className="zto-card p-16 text-center">
@@ -201,7 +249,9 @@ export default function AccessControlPage() {
     );
   }
 
-  /* ---------- Main render ---------- */
+  /* ================================================================ */
+  /*  Main render                                                      */
+  /* ================================================================ */
   return (
     <div className="space-y-6" dir="rtl">
       {/* Header */}
@@ -212,7 +262,8 @@ export default function AccessControlPage() {
             التحكم بالصلاحيات
           </h2>
           <p className="text-neutral-500 text-sm mt-1">
-            تحكم في صلاحيات كل مستخدم على القواعد والجداول
+            تحكم في صلاحيات المستخدمين على قاعدة{" "}
+            <span className="text-[#c9a84c] font-bold">{BASE_NAME}</span>
           </p>
         </div>
         <button onClick={openCreate} className="zto-btn zto-btn-gold">
@@ -248,7 +299,11 @@ export default function AccessControlPage() {
                   <div>
                     <h3 className="font-bold text-sm text-white">{rule.userName}</h3>
                     <p className="text-[11px] text-neutral-500 mt-0.5">
-                      {rule.baseName} / {rule.tableName}
+                      <span className="text-[#c9a84c]">{BASE_NAME}</span>
+                      {" / "}
+                      <span className="text-neutral-400 font-bold">
+                        {resolveTableName(rule.tableId)}
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -292,14 +347,29 @@ export default function AccessControlPage() {
                 )}
               </div>
 
-              {/* Extra info */}
+              {/* Hidden fields + filter info */}
               {(rule.fieldRestrictions.length > 0 || rule.filterFormula) && (
-                <div className="mt-3 pt-3 border-t border-neutral-800 text-[11px] text-neutral-500">
+                <div className="mt-3 pt-3 border-t border-neutral-800 space-y-1.5">
                   {rule.fieldRestrictions.length > 0 && (
-                    <p>{rule.fieldRestrictions.length} حقول مقيدة</p>
+                    <div>
+                      <p className="text-[11px] text-neutral-500 flex items-center gap-1 mb-1">
+                        <EyeOff className="w-3 h-3" />
+                        حقول مخفية ({rule.fieldRestrictions.length})
+                      </p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {rule.fieldRestrictions.map((f) => (
+                          <span
+                            key={f}
+                            className="zto-badge zto-badge-default text-[10px]"
+                          >
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   )}
                   {rule.filterFormula && (
-                    <p className="font-mono mt-0.5 flex items-center gap-1">
+                    <p className="text-[11px] text-neutral-500 font-mono flex items-center gap-1">
                       <Filter className="w-3 h-3" />
                       {rule.filterFormula}
                     </p>
@@ -311,7 +381,9 @@ export default function AccessControlPage() {
         </div>
       )}
 
-      {/* Create / Edit Modal */}
+      {/* ============================================================ */}
+      {/*  Create / Edit Modal                                          */}
+      {/* ============================================================ */}
       {showModal && (
         <div className="zto-overlay" onClick={closeModal}>
           <div
@@ -334,6 +406,15 @@ export default function AccessControlPage() {
 
             {/* Modal body */}
             <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
+              {/* Base info (read-only) */}
+              <div>
+                <label className="zto-label">القاعدة</label>
+                <div className="zto-input flex items-center gap-2 opacity-70 cursor-default">
+                  <Shield className="w-3.5 h-3.5 text-[#c9a84c]" />
+                  <span>{BASE_NAME}</span>
+                </div>
+              </div>
+
               {/* User selector */}
               <div>
                 <label className="zto-label">المستخدم</label>
@@ -360,61 +441,39 @@ export default function AccessControlPage() {
                 </div>
               </div>
 
-              {/* Base selector */}
+              {/* Table selector */}
               <div>
-                <label className="zto-label">القاعدة</label>
+                <label className="zto-label">الجدول</label>
                 <div className="zto-select-wrap">
                   <select
                     className="zto-input"
-                    value={formData.baseId}
+                    value={formData.tableId}
+                    disabled={tablesLoading}
                     onChange={(e) => {
-                      const base = bases.find((b) => b.id === e.target.value);
+                      const table = tables.find((t) => t.id === e.target.value);
                       setFormData((prev) => ({
                         ...prev,
-                        baseId: e.target.value,
-                        baseName: base?.name || "جميع القواعد",
-                        tableId: "*",
-                        tableName: "جميع الجداول",
+                        tableId: e.target.value,
+                        tableName: table?.name || "جميع الجداول",
+                        fieldRestrictions: [],
                       }));
                     }}
                   >
-                    <option value="*">جميع القواعد</option>
-                    {bases.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
+                    <option value="*">جميع الجداول</option>
+                    {tables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
                       </option>
                     ))}
                   </select>
                 </div>
+                {tablesLoading && (
+                  <p className="text-[11px] text-neutral-600 mt-1 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    جاري تحميل الجداول...
+                  </p>
+                )}
               </div>
-
-              {/* Table selector (only when a specific base is selected) */}
-              {formData.baseId !== "*" && (
-                <div>
-                  <label className="zto-label">الجدول</label>
-                  <div className="zto-select-wrap">
-                    <select
-                      className="zto-input"
-                      value={formData.tableId}
-                      onChange={(e) => {
-                        const table = tables.find((t) => t.id === e.target.value);
-                        setFormData((prev) => ({
-                          ...prev,
-                          tableId: e.target.value,
-                          tableName: table?.name || "جميع الجداول",
-                        }));
-                      }}
-                    >
-                      <option value="*">جميع الجداول</option>
-                      {tables.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
 
               {/* Permission checkboxes */}
               <div>
@@ -474,6 +533,53 @@ export default function AccessControlPage() {
                   تقييد السجلات التي يراها المستخدم
                 </p>
               </div>
+
+              {/* Hidden fields section */}
+              {selectedTableMeta && selectedTableMeta.fields.length > 0 && (
+                <div>
+                  <label className="zto-label flex items-center gap-1.5">
+                    <EyeOff className="w-3.5 h-3.5" />
+                    الحقول المخفية
+                  </label>
+                  <p className="text-[11px] text-neutral-600 mb-2">
+                    حدد الحقول التي تريد إخفاءها عن المستخدم في جدول{" "}
+                    <span className="text-neutral-400 font-bold">
+                      {selectedTableMeta.name}
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto rounded-xl border border-neutral-800 p-3">
+                    {selectedTableMeta.fields.map((field) => {
+                      const isHidden = formData.fieldRestrictions.includes(field.name);
+                      return (
+                        <label
+                          key={field.id}
+                          className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all text-sm ${
+                            isHidden
+                              ? "border-red-500/30 bg-red-500/5 text-red-300"
+                              : "border-neutral-800 hover:border-neutral-700 text-neutral-400"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isHidden}
+                            onChange={() => toggleHiddenField(field.name)}
+                            className="w-3.5 h-3.5 rounded accent-red-500"
+                          />
+                          <span className="truncate text-[12px]">{field.name}</span>
+                          <span className="text-[10px] text-neutral-600 mr-auto">
+                            {field.type}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {formData.fieldRestrictions.length > 0 && (
+                    <p className="text-[11px] text-red-400/70 mt-1.5">
+                      {formData.fieldRestrictions.length} حقل سيتم إخفاؤه
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Modal footer */}
@@ -484,7 +590,7 @@ export default function AccessControlPage() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="zto-btn zto-btn-fill"
+                className="zto-btn zto-btn-gold"
               >
                 {saving ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
