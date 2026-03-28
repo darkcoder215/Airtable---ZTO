@@ -12,6 +12,7 @@ import {
   saveArticleToAirtable,
   saveArticlesToAirtable,
   getApifyToken,
+  getFilterHistory,
 } from "@/lib/data-sources";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
@@ -61,9 +62,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Status check for Apify
+  // Status check for Apify + OpenRouter
   if (action === "status") {
-    return NextResponse.json({ apifyConfigured: !!getApifyToken() });
+    return NextResponse.json({
+      apifyConfigured: !!getApifyToken(),
+      openrouterConfigured: !!process.env.OPENROUTER_API_KEY,
+    });
+  }
+
+  // Filter history
+  if (action === "filter-history") {
+    const history = getFilterHistory();
+    return NextResponse.json({ history });
   }
 
   // Default: return all sources

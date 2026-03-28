@@ -35,9 +35,27 @@ export interface FetchedArticle {
   savedToAirtable?: boolean;
 }
 
+export interface FilterResult {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  timestamp: string;
+  totalArticles: number;
+  passedArticles: number;
+  rejectedArticles: number;
+  model: string;
+  articles: {
+    title: string;
+    url: string;
+    passed: boolean;
+  }[];
+  rawResponse?: string;
+}
+
 // In-memory stores
 let dataSources: DataSource[] = [];
 let fetchedArticles: FetchedArticle[] = [];
+let filterHistory: FilterResult[] = [];
 
 // ---------------------------------------------------------------------------
 // Default sources
@@ -219,6 +237,212 @@ export function getArticles(sourceId?: string): FetchedArticle[] {
 
 export function getArticleById(id: string): FetchedArticle | null {
   return fetchedArticles.find((a) => a.id === id) || null;
+}
+
+export function getFilterHistory(): FilterResult[] {
+  return [...filterHistory].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ---------------------------------------------------------------------------
+// AI Filtering – uses OpenRouter GPT-4o-mini to classify articles
+// ---------------------------------------------------------------------------
+
+const AI_FILTER_MODEL = "openai/gpt-4o-mini";
+
+const AI_FILTER_SYSTEM_PROMPT = `You're an agent that analyzes the titles of some news and ONLY OUTPUTS JSON ONLY. Just analyze the title of the news and output whether it's related to startups & rounds of investments of startups or not. If you have multiple titles, extract the ones that have to do with startups & funding and remove the rest. Don't tweak anything in them, keep them as is with the headline & the link. Output them within the json as news with the value being the news and then the link leading to each. Stack all the news in the 2nd key as a paragraph where an empty row in between each news and its corresponding link. Don't create a collection.
+
+Your output is the following key with values either "yes" or "no".
+
+Investment_related:
+News:`;
+
+interface AIFilterArticle {
+  Investment_related: string;
+  News: string;
+  link?: string;
+}
+
+export async function filterArticlesWithAI(
+  articles: FetchedArticle[],
+  sourceId: string,
+  sourceName: string
+): Promise<{ passed: FetchedArticle[]; filterResult: FilterResult }> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    // No API key — pass all articles through unfiltered
+    const result: FilterResult = {
+      id: `filter-${Date.now()}`,
+      sourceId,
+      sourceName,
+      timestamp: new Date().toISOString(),
+      totalArticles: articles.length,
+      passedArticles: articles.length,
+      rejectedArticles: 0,
+      model: AI_FILTER_MODEL,
+      articles: articles.map((a) => ({ title: a.title, url: a.url, passed: true })),
+      rawResponse: "OpenRouter API key not configured — all articles passed through",
+    };
+    filterHistory.push(result);
+    return { passed: articles, filterResult: result };
+  }
+
+  // Build the user message with article titles and links
+  const userMessage = articles
+    .map((a, i) => `${i + 1}. ${a.title}\nLink: ${a.url}`)
+    .join("\n\n");
+
+  let rawResponse = "";
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "ZTO Data Sources Filter",
+      },
+      body: JSON.stringify({
+        model: AI_FILTER_MODEL,
+        messages: [
+          { role: "system", content: AI_FILTER_SYSTEM_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenRouter error (${response.status}): ${errText.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    rawResponse = data.choices?.[0]?.message?.content || "";
+  } catch (err) {
+    // On AI error, pass all articles through
+    const errorMsg = err instanceof Error ? err.message : "Unknown AI error";
+    const result: FilterResult = {
+      id: `filter-${Date.now()}`,
+      sourceId,
+      sourceName,
+      timestamp: new Date().toISOString(),
+      totalArticles: articles.length,
+      passedArticles: articles.length,
+      rejectedArticles: 0,
+      model: AI_FILTER_MODEL,
+      articles: articles.map((a) => ({ title: a.title, url: a.url, passed: true })),
+      rawResponse: `AI Error: ${errorMsg} — all articles passed through`,
+    };
+    filterHistory.push(result);
+    return { passed: articles, filterResult: result };
+  }
+
+  // Parse the AI response — try to extract JSON
+  const passedUrls = new Set<string>();
+  const passedTitles = new Set<string>();
+
+  try {
+    // Try to find JSON in the response
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Handle various response formats the AI might return
+      if (parsed.Investment_related === "yes" || parsed.investment_related === "yes") {
+        // Single article case — all passed
+        articles.forEach((a) => passedUrls.add(a.url));
+      } else if (parsed.Investment_related === "no" || parsed.investment_related === "no") {
+        // Single article — none passed (but check if there's a News field)
+        if (parsed.News) {
+          // Extract URLs from the News field
+          const urls = (parsed.News as string).match(/https?:\/\/[^\s"<>]+/g) || [];
+          urls.forEach((u: string) => passedUrls.add(u));
+        }
+      } else if (Array.isArray(parsed)) {
+        // Array of results
+        for (const item of parsed) {
+          if (
+            item.Investment_related === "yes" ||
+            item.investment_related === "yes"
+          ) {
+            if (item.link) passedUrls.add(item.link);
+            if (item.News || item.news || item.title) {
+              passedTitles.add(String(item.News || item.news || item.title).trim());
+            }
+          }
+        }
+      } else {
+        // Object with nested results — check for arrays or News field
+        for (const key of Object.keys(parsed)) {
+          const val = parsed[key];
+          if (Array.isArray(val)) {
+            for (const item of val) {
+              if (typeof item === "object" && item !== null) {
+                if (
+                  item.Investment_related === "yes" ||
+                  item.investment_related === "yes"
+                ) {
+                  if (item.link) passedUrls.add(item.link);
+                  if (item.News || item.news || item.title) {
+                    passedTitles.add(String(item.News || item.news || item.title).trim());
+                  }
+                }
+              }
+            }
+          } else if (typeof val === "string" && key.toLowerCase().includes("news")) {
+            // News field as a paragraph — extract URLs
+            const urls = val.match(/https?:\/\/[^\s"<>]+/g) || [];
+            urls.forEach((u: string) => passedUrls.add(u));
+          }
+        }
+      }
+    }
+  } catch {
+    // JSON parse failed — try to extract URLs from raw text
+    const urls = rawResponse.match(/https?:\/\/[^\s"<>]+/g) || [];
+    urls.forEach((u) => passedUrls.add(u));
+  }
+
+  // Match articles to the AI results
+  const passed: FetchedArticle[] = [];
+  const articleResults: FilterResult["articles"] = [];
+
+  for (const article of articles) {
+    const isRelevant =
+      passedUrls.has(article.url) ||
+      passedTitles.has(article.title.trim()) ||
+      // Fuzzy match: check if any passed title is contained in article title
+      Array.from(passedTitles).some(
+        (t) =>
+          t.length > 10 &&
+          (article.title.toLowerCase().includes(t.toLowerCase()) ||
+           t.toLowerCase().includes(article.title.toLowerCase()))
+      );
+
+    if (isRelevant) {
+      article.isInvestmentRelated = true;
+      passed.push(article);
+    }
+    articleResults.push({ title: article.title, url: article.url, passed: isRelevant });
+  }
+
+  const result: FilterResult = {
+    id: `filter-${Date.now()}`,
+    sourceId,
+    sourceName,
+    timestamp: new Date().toISOString(),
+    totalArticles: articles.length,
+    passedArticles: passed.length,
+    rejectedArticles: articles.length - passed.length,
+    model: AI_FILTER_MODEL,
+    articles: articleResults,
+    rawResponse,
+  };
+  filterHistory.push(result);
+
+  return { passed, filterResult: result };
 }
 
 // ---------------------------------------------------------------------------
@@ -565,11 +789,24 @@ export async function fetchSource(
       dataSources[idx].lastFetchedAt = new Date().toISOString();
     }
 
-    // Auto-save new articles to Airtable
-    try {
-      await saveArticlesToAirtable(newArticles, source.name);
-    } catch {
-      // Non-blocking — don't fail the fetch if Airtable save fails
+    // For RSS sources, filter through AI before saving to Airtable
+    // Only investment-related articles get saved
+    if (source.type === "rss" && newArticles.length > 0) {
+      try {
+        const { passed } = await filterArticlesWithAI(newArticles, sourceId, source.name);
+        if (passed.length > 0) {
+          await saveArticlesToAirtable(passed, source.name);
+        }
+      } catch {
+        // Non-blocking — don't fail the fetch if AI filter or Airtable save fails
+      }
+    } else {
+      // Non-RSS sources (Twitter, Apify) — save all directly
+      try {
+        await saveArticlesToAirtable(newArticles, source.name);
+      } catch {
+        // Non-blocking
+      }
     }
   }
 

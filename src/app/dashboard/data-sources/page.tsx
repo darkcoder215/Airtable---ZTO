@@ -23,6 +23,10 @@ import {
   BookOpen,
   Info,
   Database,
+  Filter,
+  CheckCircle2,
+  XCircle,
+  Brain,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -51,6 +55,19 @@ interface Article {
   category: string;
   publishedAt: string;
   savedToAirtable?: boolean;
+}
+
+interface FilterHistoryItem {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  timestamp: string;
+  totalArticles: number;
+  passedArticles: number;
+  rejectedArticles: number;
+  model: string;
+  articles: { title: string; url: string; passed: boolean }[];
+  rawResponse?: string;
 }
 
 /* ───────── Constants ───────── */
@@ -101,11 +118,17 @@ export default function DataSourcesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"sources" | "articles" | "guide">("sources");
+  const [activeTab, setActiveTab] = useState<"sources" | "articles" | "filters" | "guide">("sources");
 
-  // Apify status
+  // Apify + OpenRouter status
   const [apifyConfigured, setApifyConfigured] = useState(false);
+  const [openrouterConfigured, setOpenrouterConfigured] = useState(false);
   const [savingToAirtable, setSavingToAirtable] = useState<string | null>(null);
+
+  // Filter history
+  const [filterHistoryItems, setFilterHistoryItems] = useState<FilterHistoryItem[]>([]);
+  const [loadingFilters, setLoadingFilters] = useState(false);
+  const [expandedFilter, setExpandedFilter] = useState<string | null>(null);
 
   // Article filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -119,12 +142,16 @@ export default function DataSourcesPage() {
     loadSources();
     fetch("/api/data-sources?action=status")
       .then((r) => r.json())
-      .then((d) => setApifyConfigured(d.apifyConfigured))
+      .then((d) => {
+        setApifyConfigured(d.apifyConfigured);
+        setOpenrouterConfigured(d.openrouterConfigured);
+      })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     if (activeTab === "articles") loadArticles();
+    if (activeTab === "filters") loadFilterHistory();
   }, [activeTab]);
 
   /* ───────── API helpers ───────── */
@@ -149,6 +176,17 @@ export default function DataSourcesPage() {
       })
       .catch(() => addToast("فشل تحميل الأخبار", "error"))
       .finally(() => setLoadingArticles(false));
+  };
+
+  const loadFilterHistory = () => {
+    setLoadingFilters(true);
+    fetch("/api/data-sources?action=filter-history")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.history) setFilterHistoryItems(data.history);
+      })
+      .catch(() => addToast("فشل تحميل سجل الفلترة", "error"))
+      .finally(() => setLoadingFilters(false));
   };
 
   const handleFetch = async (sourceId: string) => {
@@ -381,6 +419,17 @@ export default function DataSourcesPage() {
             >
               <BookOpen className="w-3.5 h-3.5" />
               الأخبار
+            </button>
+            <button
+              onClick={() => setActiveTab("filters")}
+              className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                activeTab === "filters"
+                  ? "bg-white text-black"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              الفلترة
             </button>
             <button
               onClick={() => setActiveTab("guide")}
@@ -694,6 +743,163 @@ export default function DataSourcesPage() {
                         </button>
                       )}
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ───── Filters Tab ───── */}
+      {activeTab === "filters" && (
+        <>
+          {/* AI filter info banner */}
+          <div className="flex items-center gap-3 bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
+            <Brain className="w-5 h-5 text-purple-400 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-purple-400">فلترة ذكية بالذكاء الاصطناعي</p>
+              <p className="text-xs text-neutral-400">
+                يتم تحليل أخبار RSS تلقائيا عبر <code className="bg-neutral-800 px-1 rounded text-purple-400">GPT-4o-mini</code> عبر OpenRouter لتصفية الأخبار المتعلقة بالشركات الناشئة والاستثمارات فقط. الأخبار المؤهلة فقط يتم حفظها في Airtable.
+                {!openrouterConfigured && (
+                  <span className="text-amber-400 mr-2">
+                    ⚠ مفتاح OpenRouter غير مُعد — جميع الأخبار تمر بدون فلترة.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {loadingFilters ? (
+            <div className="zto-card p-16 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
+            </div>
+          ) : filterHistoryItems.length === 0 ? (
+            <div className="zto-card p-16 text-center">
+              <Filter className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
+              <p className="text-neutral-500 text-sm font-bold mb-1">لا يوجد سجل فلترة بعد</p>
+              <p className="text-neutral-600 text-xs">
+                سيتم تسجيل نتائج الفلترة هنا عند جلب أخبار RSS
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filterHistoryItems.map((item) => {
+                const passRate = item.totalArticles > 0
+                  ? Math.round((item.passedArticles / item.totalArticles) * 100)
+                  : 0;
+                const isExpanded = expandedFilter === item.id;
+
+                return (
+                  <div key={item.id} className="zto-card overflow-hidden">
+                    {/* Header */}
+                    <button
+                      onClick={() => setExpandedFilter(isExpanded ? null : item.id)}
+                      className="w-full p-5 flex items-center justify-between hover:bg-neutral-800/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-purple-400/10">
+                          <Brain className="w-5 h-5 text-purple-400" />
+                        </div>
+                        <div className="text-right">
+                          <h3 className="font-bold text-sm text-white">{item.sourceName}</h3>
+                          <p className="text-[0.65rem] text-neutral-500 flex items-center gap-2 mt-0.5">
+                            <Clock className="w-3 h-3" />
+                            {formatDate(item.timestamp)}
+                            <span className="text-neutral-700">•</span>
+                            {item.model}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        {/* Stats */}
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="flex items-center gap-1 text-neutral-400">
+                            {item.totalArticles} خبر
+                          </span>
+                          <span className="flex items-center gap-1 text-emerald-400">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {item.passedArticles} مؤهل
+                          </span>
+                          <span className="flex items-center gap-1 text-red-400">
+                            <XCircle className="w-3.5 h-3.5" />
+                            {item.rejectedArticles} مرفوض
+                          </span>
+                        </div>
+
+                        {/* Pass rate badge */}
+                        <div
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                            passRate >= 50
+                              ? "bg-emerald-400/10 text-emerald-400 border border-emerald-500/20"
+                              : passRate > 0
+                              ? "bg-amber-400/10 text-amber-400 border border-amber-500/20"
+                              : "bg-red-400/10 text-red-400 border border-red-500/20"
+                          }`}
+                        >
+                          {passRate}%
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Expanded details */}
+                    {isExpanded && (
+                      <div className="border-t border-neutral-800">
+                        {/* Article list */}
+                        <div className="p-5 space-y-2">
+                          <p className="text-xs font-bold text-neutral-400 mb-3">تفاصيل الأخبار:</p>
+                          {item.articles.map((article, idx) => (
+                            <div
+                              key={idx}
+                              className={`flex items-start gap-3 p-3 rounded-lg border ${
+                                article.passed
+                                  ? "bg-emerald-500/5 border-emerald-500/20"
+                                  : "bg-red-500/5 border-red-500/10"
+                              }`}
+                            >
+                              {article.passed ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-white font-medium truncate">{article.title}</p>
+                                {article.url && (
+                                  <a
+                                    href={article.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[0.65rem] text-neutral-500 hover:text-amber-400 truncate block"
+                                  >
+                                    {article.url}
+                                  </a>
+                                )}
+                              </div>
+                              <span
+                                className={`text-[0.6rem] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                  article.passed
+                                    ? "bg-emerald-400/20 text-emerald-400"
+                                    : "bg-red-400/20 text-red-400"
+                                }`}
+                              >
+                                {article.passed ? "مؤهل" : "مرفوض"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Raw AI response */}
+                        {item.rawResponse && (
+                          <div className="border-t border-neutral-800 p-5">
+                            <p className="text-xs font-bold text-neutral-400 mb-2">رد الذكاء الاصطناعي:</p>
+                            <pre className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 text-xs text-neutral-400 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap" dir="ltr">
+                              {item.rawResponse}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
