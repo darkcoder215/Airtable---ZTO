@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAgents, getAgentById, createAgent, updateAgent, deleteAgent, executeAgent, addExecution } from "@/lib/agents";
+import {
+  getAgents,
+  getAgentById,
+  createAgent,
+  updateAgent,
+  deleteAgent,
+  executeAgent,
+  addExecution,
+  getOpenRouterKey,
+  OPENROUTER_MODELS,
+} from "@/lib/agents";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 
@@ -15,6 +25,14 @@ export async function GET(request: NextRequest) {
   const user = getUser(request);
   if (!user) {
     return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const action = searchParams.get("action");
+
+  if (action === "status") {
+    const hasKey = !!getOpenRouterKey();
+    return NextResponse.json({ configured: hasKey, models: OPENROUTER_MODELS });
   }
 
   const agents = getAgents();
@@ -77,6 +95,8 @@ export async function POST(request: NextRequest) {
 
         const execution = addExecution({
           agentId: agent.id,
+          agentName: agent.name,
+          modelUsed: data.modelOverride || agent.modelName,
           input: data.input,
           output: "",
           status: "running",
@@ -85,10 +105,10 @@ export async function POST(request: NextRequest) {
         });
 
         try {
-          const output = await executeAgent(agent, data.input);
+          const output = await executeAgent(agent, data.input, data.modelOverride);
           execution.output = output;
           execution.status = "completed";
-          logger.info(`Agent "${agent.name}" executed successfully`, "Agents", null, user.id);
+          logger.info(`Agent "${agent.name}" executed with ${execution.modelUsed}`, "Agents", null, user.id);
           return NextResponse.json({ execution });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "خطأ غير معروف";
@@ -105,12 +125,43 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }
         try {
-          const output = await executeAgent(agent, data.input);
+          const output = await executeAgent(agent, data.input, data.modelOverride);
           return NextResponse.json({ preview: output });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "خطأ غير معروف";
           return NextResponse.json({ error: errMsg }, { status: 500 });
         }
+      }
+
+      // Multi-model test: run agent against multiple models simultaneously
+      case "test": {
+        const agent = getAgentById(data.agentId);
+        if (!agent) {
+          return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
+        }
+        const models: string[] = data.models || [];
+        if (models.length === 0) {
+          return NextResponse.json({ error: "اختر نموذج واحد على الأقل" }, { status: 400 });
+        }
+
+        const results = await Promise.allSettled(
+          models.map(async (model) => {
+            const start = Date.now();
+            const output = await executeAgent(agent, data.input, model);
+            const duration = Date.now() - start;
+            return { model, output, duration };
+          })
+        );
+
+        const testResults = results.map((r, i) => {
+          if (r.status === "fulfilled") {
+            return { model: models[i], output: r.value.output, duration: r.value.duration, error: null };
+          } else {
+            return { model: models[i], output: null, duration: 0, error: r.reason?.message || "خطأ غير معروف" };
+          }
+        });
+
+        return NextResponse.json({ testResults });
       }
 
       default:

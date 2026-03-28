@@ -189,12 +189,45 @@ export default function DashboardPage() {
   const [offset, setOffset] = useState<string | undefined>();
   const [prevOffsets, setPrevOffsets] = useState<string[]>([]);
 
-  /* filter / sort */
-  const [filterFormula, setFilterFormula] = useState("");
+  /* visual filter */
+  interface FilterRule {
+    field: string;
+    operator: string;
+    value: string;
+  }
+  const [filterRules, setFilterRules] = useState<FilterRule[]>([]);
   const [showFilter, setShowFilter] = useState(false);
   const [sortField, setSortField] = useState("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [quickSearch, setQuickSearch] = useState("");
+
+  /* expanded cells (resizable) */
+  const [expandedCell, setExpandedCell] = useState<string | null>(null); // "recordId:fieldName"
+
+  /* build Airtable formula from visual filter rules */
+  const buildFilterFormula = useCallback((rules: FilterRule[]): string => {
+    const parts = rules
+      .filter((r) => r.field && r.value)
+      .map((r) => {
+        switch (r.operator) {
+          case "=": return `{${r.field}} = "${r.value}"`;
+          case "!=": return `{${r.field}} != "${r.value}"`;
+          case "contains": return `FIND("${r.value}", {${r.field}})`;
+          case "not_contains": return `NOT(FIND("${r.value}", {${r.field}}))`;
+          case ">": return `{${r.field}} > ${r.value}`;
+          case "<": return `{${r.field}} < ${r.value}`;
+          case "empty": return `{${r.field}} = BLANK()`;
+          case "not_empty": return `{${r.field}} != BLANK()`;
+          default: return "";
+        }
+      })
+      .filter(Boolean);
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0];
+    return `AND(${parts.join(", ")})`;
+  }, []);
+
+  const filterFormula = buildFilterFormula(filterRules);
 
   /* per-cell edit: tracks which cell is being edited */
   const [editingCell, setEditingCell] = useState<{ recordId: string; fieldName: string } | null>(null);
@@ -830,7 +863,7 @@ export default function DashboardPage() {
             <button
               onClick={() => setShowFilter(!showFilter)}
               className={`zto-btn zto-btn-ghost zto-btn-sm ${
-                showFilter || filterFormula ? "text-amber-400" : ""
+                showFilter || filterRules.length > 0 ? "text-amber-400" : ""
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
@@ -965,35 +998,95 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Advanced filter row ── */}
+      {/* ── Visual filter builder ── */}
       {showFilter && selectedTable && (
-        <div className="bg-[#111] border border-neutral-800 border-t-0 px-4 py-3 flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] text-neutral-500 font-bold shrink-0">Airtable Formula:</span>
-          <input
-            type="text"
-            className="zto-input flex-1 text-[13px] font-mono"
-            placeholder='مثال: {Status} = "Published"'
-            value={filterFormula}
-            onChange={(e) => setFilterFormula(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") loadRecords();
-            }}
-          />
-          <button onClick={() => loadRecords()} className="zto-btn zto-btn-gold zto-btn-sm">
-            تطبيق
-          </button>
-          {filterFormula && (
+        <div className="bg-[#111] border border-neutral-800 border-t-0 px-4 py-3 space-y-2">
+          {filterRules.map((rule, idx) => (
+            <div key={idx} className="flex items-center gap-2 flex-wrap">
+              {idx > 0 && <span className="text-[10px] text-amber-400 font-bold w-8">AND</span>}
+              {idx === 0 && <span className="text-[10px] text-neutral-500 font-bold w-8">أين</span>}
+              <div className="zto-select-wrap w-40">
+                <select
+                  className="zto-input text-[12px]"
+                  value={rule.field}
+                  onChange={(e) => {
+                    const updated = [...filterRules];
+                    updated[idx] = { ...rule, field: e.target.value };
+                    setFilterRules(updated);
+                  }}
+                >
+                  <option value="">-- حقل --</option>
+                  {selectedTable.fields.map((f) => (
+                    <option key={f.id} value={f.name}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="zto-select-wrap w-32">
+                <select
+                  className="zto-input text-[12px]"
+                  value={rule.operator}
+                  onChange={(e) => {
+                    const updated = [...filterRules];
+                    updated[idx] = { ...rule, operator: e.target.value };
+                    setFilterRules(updated);
+                  }}
+                >
+                  <option value="=">يساوي</option>
+                  <option value="!=">لا يساوي</option>
+                  <option value="contains">يحتوي على</option>
+                  <option value="not_contains">لا يحتوي</option>
+                  <option value=">">أكبر من</option>
+                  <option value="<">أصغر من</option>
+                  <option value="empty">فارغ</option>
+                  <option value="not_empty">غير فارغ</option>
+                </select>
+              </div>
+              {rule.operator !== "empty" && rule.operator !== "not_empty" && (
+                <input
+                  type="text"
+                  className="zto-input text-[12px] flex-1 min-w-[120px] max-w-[200px]"
+                  placeholder="القيمة..."
+                  value={rule.value}
+                  onChange={(e) => {
+                    const updated = [...filterRules];
+                    updated[idx] = { ...rule, value: e.target.value };
+                    setFilterRules(updated);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") loadRecords(); }}
+                />
+              )}
+              <button
+                onClick={() => setFilterRules(filterRules.filter((_, i) => i !== idx))}
+                className="text-red-400 hover:text-red-300 p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
             <button
-              onClick={() => {
-                setFilterFormula("");
-                loadRecords();
-              }}
-              className="zto-btn zto-btn-ghost zto-btn-sm text-red-400"
+              onClick={() => setFilterRules([...filterRules, { field: "", operator: "=", value: "" }])}
+              className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
             >
-              <X className="w-3 h-3" />
-              مسح
+              <Plus className="w-3 h-3" />
+              إضافة شرط
             </button>
-          )}
+            {filterRules.length > 0 && (
+              <>
+                <button onClick={() => loadRecords()} className="zto-btn zto-btn-gold zto-btn-sm">
+                  <Filter className="w-3 h-3" />
+                  تطبيق
+                </button>
+                <button
+                  onClick={() => { setFilterRules([]); loadRecords(); }}
+                  className="zto-btn zto-btn-ghost zto-btn-sm text-red-400"
+                >
+                  <X className="w-3 h-3" />
+                  مسح الكل
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -1072,18 +1165,20 @@ export default function DashboardPage() {
                           <span className="text-neutral-600 text-[11px] font-mono">{idx + 1}</span>
                         </div>
                       </td>
-                      {/* Data cells — per-cell editing */}
+                      {/* Data cells — per-cell editing + expandable */}
                       {visibleFields.map((field) => {
+                        const cellKey = `${record.id}:${field.name}`;
                         const isCellEditing =
                           editingCell?.recordId === record.id &&
                           editingCell?.fieldName === field.name;
+                        const isCellExpanded = expandedCell === cellKey;
                         const isReadOnly = READ_ONLY_TYPES.includes(field.type);
                         const cellEditable = canEdit && !isReadOnly;
                         return (
                           <td
                             key={field.id}
                             className={`px-4 ${rowPadding} text-[13px] border-r border-neutral-700/50 align-top ${
-                              isExpanded ? "" : "max-w-[200px]"
+                              isExpanded || isCellExpanded ? "" : "max-w-[200px]"
                             } ${cellEditable && !isCellEditing ? "cursor-pointer hover:bg-amber-400/5" : ""}`}
                             onDoubleClick={() => {
                               if (cellEditable && !isCellEditing) {
@@ -1119,19 +1214,41 @@ export default function DashboardPage() {
                                 </div>
                               </div>
                             ) : (
-                              <div className={`${isExpanded ? "" : "line-clamp-2 overflow-hidden"} relative group/cell`}>
+                              <div
+                                className={`relative group/cell ${
+                                  isCellExpanded
+                                    ? "overflow-auto border border-neutral-700 rounded-lg bg-[#1a1a1a] p-2"
+                                    : isExpanded
+                                    ? ""
+                                    : "line-clamp-2 overflow-hidden"
+                                }`}
+                                style={
+                                  isCellExpanded
+                                    ? { resize: "both", minWidth: 180, minHeight: 60, maxWidth: 600, maxHeight: 400 }
+                                    : undefined
+                                }
+                              >
                                 {renderFieldValue(record.fields[field.name], field)}
-                                {cellEditable && (
+                                <div className="absolute top-0 left-0 flex gap-0.5 opacity-0 group-hover/cell:opacity-100 transition-opacity">
+                                  {cellEditable && (
+                                    <button
+                                      onClick={() =>
+                                        startCellEdit(record.id, field.name, record.fields[field.name])
+                                      }
+                                      className="p-0.5 rounded bg-[#1a1a1a] border border-neutral-700 text-amber-400"
+                                      title="تعديل"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                    </button>
+                                  )}
                                   <button
-                                    onClick={() =>
-                                      startCellEdit(record.id, field.name, record.fields[field.name])
-                                    }
-                                    className="absolute top-0 left-0 p-0.5 rounded bg-[#1a1a1a] border border-neutral-700 text-amber-400 opacity-0 group-hover/cell:opacity-100 transition-opacity"
-                                    title="تعديل"
+                                    onClick={() => setExpandedCell(isCellExpanded ? null : cellKey)}
+                                    className="p-0.5 rounded bg-[#1a1a1a] border border-neutral-700 text-neutral-400 hover:text-amber-400"
+                                    title={isCellExpanded ? "طي الخلية" : "توسيع الخلية"}
                                   >
-                                    <Edit3 className="w-3 h-3" />
+                                    <Maximize2 className="w-3 h-3" />
                                   </button>
-                                )}
+                                </div>
                               </div>
                             )}
                           </td>

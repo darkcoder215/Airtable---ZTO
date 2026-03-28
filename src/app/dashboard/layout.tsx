@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User } from "lucide-react";
+import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss } from "lucide-react";
 
 const NAV = [
   { href: "/dashboard", label: "قاعدة البيانات", icon: Database },
+  { href: "/dashboard/data-sources", label: "مصادر البيانات", icon: Rss },
   { href: "/dashboard/access-control", label: "الصلاحيات", icon: Shield, admin: true },
   { href: "/dashboard/agents", label: "وكلاء الكتابة", icon: Bot },
   { href: "/dashboard/logs", label: "السجلات", icon: ScrollText, admin: true },
