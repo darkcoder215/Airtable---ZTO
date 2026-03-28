@@ -22,6 +22,7 @@ import {
   Clock,
   BookOpen,
   Info,
+  Database,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -46,8 +47,10 @@ interface Article {
   url: string;
   sourceName: string;
   sourceId: string;
+  author: string;
   category: string;
   publishedAt: string;
+  savedToAirtable?: boolean;
 }
 
 /* ───────── Constants ───────── */
@@ -100,6 +103,10 @@ export default function DataSourcesPage() {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"sources" | "articles" | "guide">("sources");
 
+  // Apify status
+  const [apifyConfigured, setApifyConfigured] = useState(false);
+  const [savingToAirtable, setSavingToAirtable] = useState<string | null>(null);
+
   // Article filters
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSource, setFilterSource] = useState("");
@@ -110,6 +117,10 @@ export default function DataSourcesPage() {
 
   useEffect(() => {
     loadSources();
+    fetch("/api/data-sources?action=status")
+      .then((r) => r.json())
+      .then((d) => setApifyConfigured(d.apifyConfigured))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -252,6 +263,28 @@ export default function DataSourcesPage() {
     }
   };
 
+  const handleSaveToAirtable = async (articleId: string, sourceName: string) => {
+    setSavingToAirtable(articleId);
+    try {
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save-to-airtable", articleId, sourceName }),
+      });
+      if (res.ok) {
+        addToast("تم الحفظ في Airtable", "success");
+        loadArticles();
+      } else {
+        const data = await res.json();
+        addToast(data.error || "فشل الحفظ", "error");
+      }
+    } catch {
+      addToast("حدث خطأ أثناء الحفظ", "error");
+    } finally {
+      setSavingToAirtable(null);
+    }
+  };
+
   /* ───────── Modal helpers ───────── */
 
   const openEdit = (source: DataSource) => {
@@ -373,6 +406,19 @@ export default function DataSourcesPage() {
           )}
         </div>
       </div>
+
+      {/* Apify warning */}
+      {!apifyConfigured && (
+        <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+          <Info className="w-5 h-5 text-amber-400 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-amber-400">مفتاح Apify غير مُعد</p>
+            <p className="text-xs text-neutral-400">
+              أضف <code className="bg-neutral-800 px-1 rounded text-amber-400">APIFY_API_TOKEN</code> في إعدادات البيئة لتفعيل جلب X (Twitter). المصادر RSS تعمل بدون مفتاح.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ───── Sources Tab ───── */}
       {activeTab === "sources" && (
@@ -622,10 +668,32 @@ export default function DataSourcesPage() {
                       </span>
                     </div>
 
-                    <p className="text-[0.65rem] text-neutral-600 mt-3 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(article.publishedAt)}
-                    </p>
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-neutral-800">
+                      <p className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDate(article.publishedAt)}
+                      </p>
+                      {article.savedToAirtable ? (
+                        <span className="text-[0.65rem] text-emerald-400 flex items-center gap-1">
+                          <Database className="w-3 h-3" />
+                          محفوظ
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSaveToAirtable(article.id, article.sourceName || "Unknown")}
+                          disabled={savingToAirtable === article.id}
+                          className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
+                          title="حفظ في Airtable"
+                        >
+                          {savingToAirtable === article.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Database className="w-3 h-3" />
+                          )}
+                          حفظ
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -669,18 +737,18 @@ export default function DataSourcesPage() {
               </div>
               <div>
                 <h3 className="font-bold text-sm text-white">X (Twitter)</h3>
-                <p className="text-[0.65rem] text-neutral-500">تغريدات</p>
+                <p className="text-[0.65rem] text-neutral-500">تغريدات عبر Apify</p>
               </div>
             </div>
             <p className="text-sm text-neutral-400">
-              استخدم Apify أو Nitter RSS لجلب التغريدات. التنسيق المطلوب:
+              يتم جلب التغريدات تلقائيا عبر Apify Twitter Scraper Lite. أضف رابط الحساب مباشرة:
             </p>
             <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-1">
-              <code className="text-xs text-amber-400 block">{"nitter.net/{username}/rss"}</code>
-              <code className="text-xs text-amber-400 block">https://api.apify.com/v2/acts/twitter-scraper/...</code>
+              <code className="text-xs text-amber-400 block">https://x.com/username</code>
+              <code className="text-xs text-amber-400 block">https://twitter.com/username</code>
             </div>
             <p className="text-xs text-neutral-500">
-              واجهة Twitter API المباشرة تتطلب مصادقة. استخدم Nitter أو Apify كبديل.
+              يتطلب تعيين <code className="bg-neutral-800 px-1 rounded text-amber-400">APIFY_API_TOKEN</code> في إعدادات البيئة. يتم حفظ النتائج تلقائيا في جدول &quot;Apify - Websites&quot; في Airtable.
             </p>
           </div>
 

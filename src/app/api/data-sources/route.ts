@@ -6,8 +6,12 @@ import {
   updateDataSource,
   deleteDataSource,
   getArticles,
+  getArticleById,
   fetchSource,
   fetchAllSources,
+  saveArticleToAirtable,
+  saveArticlesToAirtable,
+  getApifyToken,
 } from "@/lib/data-sources";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
@@ -55,6 +59,11 @@ export async function GET(request: NextRequest) {
       logger.error(`Data source fetch error: ${msg}`, "DataSources", err, user.id);
       return NextResponse.json({ error: msg }, { status: 500 });
     }
+  }
+
+  // Status check for Apify
+  if (action === "status") {
+    return NextResponse.json({ apifyConfigured: !!getApifyToken() });
   }
 
   // Default: return all sources
@@ -190,6 +199,34 @@ export async function POST(request: NextRequest) {
           );
           return NextResponse.json({ error: msg }, { status: 500 });
         }
+      }
+
+      case "save-to-airtable": {
+        const articleId = data.articleId;
+        const sourceName = data.sourceName || "Unknown";
+        if (articleId) {
+          const article = getArticleById(articleId);
+          if (!article) {
+            return NextResponse.json({ error: "المقال غير موجود" }, { status: 404 });
+          }
+          const ok = await saveArticleToAirtable(article, sourceName);
+          if (ok) {
+            logger.info(`Article saved to Airtable: ${article.title?.slice(0, 50)}`, "DataSources", null, user.id);
+            return NextResponse.json({ success: true });
+          }
+          return NextResponse.json({ error: "فشل الحفظ في Airtable" }, { status: 500 });
+        }
+        // Bulk save — save all unsaved articles from a source
+        const bulkSourceId = data.sourceId;
+        if (bulkSourceId) {
+          const articles = getArticles(bulkSourceId);
+          const unsaved = articles.filter((a) => !a.savedToAirtable);
+          const source = getDataSourceById(bulkSourceId);
+          const count = await saveArticlesToAirtable(unsaved, source?.name || sourceName);
+          logger.info(`Bulk saved ${count} articles to Airtable from "${source?.name}"`, "DataSources", null, user.id);
+          return NextResponse.json({ success: true, saved: count });
+        }
+        return NextResponse.json({ error: "articleId أو sourceId مطلوب" }, { status: 400 });
       }
 
       case "fetch-all": {

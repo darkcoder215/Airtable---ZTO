@@ -1,5 +1,11 @@
-// Data sources management - RSS feeds, social media, custom scrapers
+// Data sources management - RSS feeds, Apify/Twitter, social media, custom scrapers
 // In-memory storage (same pattern as agents.ts)
+
+import { createRecord } from "./airtable";
+
+// Base & table for saving scraped content
+const ZTO_BASE_ID = "appIpXIFs2yxyxaUm";
+const APIFY_TABLE_NAME = "Apify - Websites";
 
 export interface DataSource {
   id: string;
@@ -16,6 +22,7 @@ export interface DataSource {
 export interface FetchedArticle {
   id: string;
   sourceId: string;
+  sourceName?: string;
   title: string;
   description: string;
   url: string;
@@ -24,7 +31,8 @@ export interface FetchedArticle {
   fetchedAt: string;
   categories: string[];
   imageUrl?: string;
-  isInvestmentRelated: boolean; // placeholder for AI filtering later
+  isInvestmentRelated: boolean;
+  savedToAirtable?: boolean;
 }
 
 // In-memory stores
@@ -104,7 +112,41 @@ export function getDefaultSources(): DataSource[] {
       lastFetchedAt: null,
       createdAt: now,
     },
+    // X (Twitter) accounts — scraped via Apify twitter-scraper-lite
+    ...getDefaultTwitterSources(now),
   ];
+}
+
+function getDefaultTwitterSources(now: string): DataSource[] {
+  const accounts = [
+    { handle: "athmnsa", name: "أثمن للعقارات" },
+    { handle: "ahmed_alshuhail", name: "أحمد الشهيل" },
+    { handle: "realEstates_10", name: "عبدالله العباد" },
+    { handle: "aqari__sa", name: "أهل العقار" },
+    { handle: "Bandar_MD", name: "بندر الضحيك" },
+    { handle: "alfageeh9", name: "المهندس احمد الفقيه" },
+    { handle: "Alajelab", name: "عبدالله العجل" },
+    { handle: "dr_alshuwaier", name: "د بدر الشويعر" },
+    { handle: "AZK_SA", name: "عبدالله الخميس" },
+    { handle: "THEWOLFOFTASI", name: "Wolf of Tasi" },
+    { handle: "altuwaim_s", name: "سعد التويم" },
+    { handle: "Brooker_2030", name: "عبدالله القرني" },
+    { handle: "Alaboudi_rei", name: "العبودي بن عبدالله" },
+    { handle: "abdulnassersa", name: "عبدالناصر العبداللطيف" },
+    { handle: "majedawad6", name: "ماجد العرابي الحارثي" },
+    { handle: "U_FUN1", name: "عبدالله اللعبون" },
+  ];
+  return accounts.map((a) => ({
+    id: `src-default-x-${a.handle}`,
+    name: `${a.name} (@${a.handle})`,
+    type: "twitter" as const,
+    url: `https://x.com/${a.handle}`,
+    category: "investment" as const,
+    isActive: true,
+    fetchInterval: 180,
+    lastFetchedAt: null,
+    createdAt: now,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +412,123 @@ export async function fetchRSSFeed(
 // Fetch a single source and store articles
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Apify Twitter Scraper
+// ---------------------------------------------------------------------------
+
+export function getApifyToken(): string | null {
+  return process.env.APIFY_API_TOKEN || null;
+}
+
+interface ApifyTweet {
+  author?: { name?: string; userName?: string };
+  fullText?: string;
+  text?: string;
+  createdAt?: string;
+  twitterUrl?: string;
+  url?: string;
+}
+
+export async function fetchApifyTwitter(
+  profileUrl: string,
+  sourceId: string,
+  sourceName: string,
+  maxItems: number = 5
+): Promise<RSSFetchResult> {
+  const token = getApifyToken();
+  if (!token) {
+    return { articles: [], error: "مفتاح Apify API غير مُعد. أضف APIFY_API_TOKEN في إعدادات البيئة." };
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.apify.com/v2/acts/apidojo~twitter-scraper-lite/run-sync-get-dataset-items?token=${token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxItems,
+          sort: "Latest",
+          startUrls: [profileUrl],
+        }),
+        signal: AbortSignal.timeout(120000), // 2 min — Apify sync runs can be slow
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { articles: [], error: `Apify error (${response.status}): ${errText.slice(0, 200)}` };
+    }
+
+    const tweets: ApifyTweet[] = await response.json();
+    const now = new Date().toISOString();
+    const articles: FetchedArticle[] = tweets.map((tweet) => {
+      const text = tweet.fullText || tweet.text || "";
+      const authorName = tweet.author?.name || tweet.author?.userName || sourceName;
+      return {
+        id: `art-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sourceId,
+        sourceName,
+        title: `${authorName}: ${text.slice(0, 80)}${text.length > 80 ? "..." : ""}`,
+        description: text,
+        url: tweet.twitterUrl || tweet.url || profileUrl,
+        author: authorName,
+        publishedAt: tweet.createdAt ? new Date(tweet.createdAt).toISOString() : now,
+        fetchedAt: now,
+        categories: ["twitter"],
+        isInvestmentRelated: false,
+        savedToAirtable: false,
+      };
+    });
+
+    return { articles };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown Apify error";
+    return { articles: [], error: msg };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Save article to Airtable "Apify - Websites" table
+// ---------------------------------------------------------------------------
+
+export async function saveArticleToAirtable(
+  article: FetchedArticle,
+  sourceName: string
+): Promise<boolean> {
+  try {
+    await createRecord(ZTO_BASE_ID, APIFY_TABLE_NAME, {
+      Source: sourceName,
+      "Original Post": article.description || article.title,
+      Status: "New",
+      "Link to Post (If Applicable)": article.url,
+    });
+    // Mark as saved
+    const idx = fetchedArticles.findIndex((a) => a.id === article.id);
+    if (idx !== -1) fetchedArticles[idx].savedToAirtable = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function saveArticlesToAirtable(
+  articles: FetchedArticle[],
+  sourceName: string
+): Promise<number> {
+  let saved = 0;
+  for (const article of articles) {
+    if (article.savedToAirtable) continue;
+    const ok = await saveArticleToAirtable(article, sourceName);
+    if (ok) saved++;
+  }
+  return saved;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch a single source and store articles
+// ---------------------------------------------------------------------------
+
 export async function fetchSource(
   sourceId: string
 ): Promise<RSSFetchResult> {
@@ -377,18 +536,27 @@ export async function fetchSource(
   const source = dataSources.find((s) => s.id === sourceId);
   if (!source) return { articles: [], error: "Source not found" };
 
-  if (source.type !== "rss") {
+  let result: RSSFetchResult;
+
+  if (source.type === "rss") {
+    result = await fetchRSSFeed(source.url, source.id);
+  } else if (source.type === "twitter") {
+    result = await fetchApifyTwitter(source.url, source.id, source.name);
+  } else if (source.type === "apify") {
+    // Generic Apify — treat URL as direct dataset endpoint
+    result = await fetchApifyGeneric(source.url, source.id, source.name);
+  } else {
     return { articles: [], error: `Fetching not yet supported for type "${source.type}"` };
   }
-
-  const result = await fetchRSSFeed(source.url, source.id);
 
   if (result.articles.length > 0) {
     // De-duplicate by URL – keep existing articles, add new ones
     const existingUrls = new Set(
       fetchedArticles.filter((a) => a.sourceId === sourceId).map((a) => a.url)
     );
-    const newArticles = result.articles.filter((a) => !existingUrls.has(a.url));
+    const newArticles = result.articles.filter((a) => a.url && !existingUrls.has(a.url));
+    // Attach source name
+    newArticles.forEach((a) => (a.sourceName = source.name));
     fetchedArticles.push(...newArticles);
 
     // Update lastFetchedAt
@@ -396,9 +564,56 @@ export async function fetchSource(
     if (idx !== -1) {
       dataSources[idx].lastFetchedAt = new Date().toISOString();
     }
+
+    // Auto-save new articles to Airtable
+    try {
+      await saveArticlesToAirtable(newArticles, source.name);
+    } catch {
+      // Non-blocking — don't fail the fetch if Airtable save fails
+    }
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Generic Apify dataset fetch (for custom Apify actor URLs)
+// ---------------------------------------------------------------------------
+
+async function fetchApifyGeneric(
+  url: string,
+  sourceId: string,
+  sourceName: string
+): Promise<RSSFetchResult> {
+  try {
+    const response = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) {
+      return { articles: [], error: `HTTP ${response.status}` };
+    }
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : [];
+    const now = new Date().toISOString();
+    const articles: FetchedArticle[] = items.slice(0, 50).map((item: Record<string, unknown>) => ({
+      id: `art-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sourceId,
+      sourceName,
+      title: String(item.title || item.name || item.fullText || "").slice(0, 120) || "Untitled",
+      description: String(item.description || item.fullText || item.text || item.content || ""),
+      url: String(item.url || item.link || item.twitterUrl || ""),
+      author: String(item.author || item.userName || item.authorName || sourceName),
+      publishedAt: item.createdAt ? new Date(String(item.createdAt)).toISOString() : now,
+      fetchedAt: now,
+      categories: ["apify"],
+      isInvestmentRelated: false,
+      savedToAirtable: false,
+    }));
+    return { articles };
+  } catch (err) {
+    return { articles: [], error: err instanceof Error ? err.message : "Fetch error" };
+  }
 }
 
 // ---------------------------------------------------------------------------
