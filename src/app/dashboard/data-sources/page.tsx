@@ -135,6 +135,11 @@ export default function DataSourcesPage() {
   const [filterSource, setFilterSource] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
 
+  // Source filters
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<string>("all");
+  const [sourceCategoryFilter, setSourceCategoryFilter] = useState<string>("all");
+  const [sourceSearch, setSourceSearch] = useState("");
+
   // Form state
   const [formData, setFormData] = useState({ ...defaultFormData });
 
@@ -199,8 +204,10 @@ export default function DataSourcesPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast("تم جلب البيانات بنجاح", "success");
+        const count = data.count || data.articles?.length || 0;
+        addToast(`تم جلب ${count} خبر بنجاح`, "success");
         loadSources();
+        loadArticles();
       } else {
         addToast(data.error || "فشل الجلب", "error");
       }
@@ -221,8 +228,10 @@ export default function DataSourcesPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast("تم جلب جميع المصادر", "success");
+        const total = data.totalArticles || 0;
+        addToast(`تم جلب ${total} خبر من ${data.sourcesProcessed || 0} مصدر`, "success");
         loadSources();
+        loadArticles();
       } else {
         addToast(data.error || "فشل الجلب", "error");
       }
@@ -343,6 +352,31 @@ export default function DataSourcesPage() {
     setEditingSource(null);
     setFormData({ ...defaultFormData });
   };
+
+  /* ───────── Filtered sources ───────── */
+
+  const filteredSources = sources.filter((s) => {
+    if (sourceTypeFilter !== "all" && s.type !== sourceTypeFilter) return false;
+    if (sourceCategoryFilter !== "all" && s.category !== sourceCategoryFilter) return false;
+    if (sourceSearch) {
+      const q = sourceSearch.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.url.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  // Group filtered sources by type for display
+  const sourcesByType: Record<string, DataSource[]> = {};
+  for (const s of filteredSources) {
+    if (!sourcesByType[s.type]) sourcesByType[s.type] = [];
+    sourcesByType[s.type].push(s);
+  }
+
+  // Type counts for filter badges (from unfiltered sources)
+  const typeCounts: Record<string, number> = {};
+  for (const s of sources) {
+    typeCounts[s.type] = (typeCounts[s.type] || 0) + 1;
+  }
 
   /* ───────── Filtered articles ───────── */
 
@@ -472,136 +506,224 @@ export default function DataSourcesPage() {
       {/* ───── Sources Tab ───── */}
       {activeTab === "sources" && (
         <>
-          {/* Fetch All button */}
-          {sources.length > 0 && (
-            <div className="flex items-center justify-between">
-              <p className="text-neutral-500 text-sm">
-                {sources.length} مصدر مسجل
-              </p>
+          {/* Filter bar */}
+          <div className="zto-card p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Type filter pills */}
+              <div className="flex items-center gap-1.5 flex-wrap flex-1">
+                <button
+                  onClick={() => setSourceTypeFilter("all")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                    sourceTypeFilter === "all"
+                      ? "bg-white text-black border-white"
+                      : "border-neutral-700 text-neutral-400 hover:border-neutral-500"
+                  }`}
+                >
+                  الكل
+                  <span className="mr-1.5 text-[0.6rem] opacity-60">{sources.length}</span>
+                </button>
+                {SOURCE_TYPES.map((t) => {
+                  const count = typeCounts[t.value] || 0;
+                  if (count === 0) return null;
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.value}
+                      onClick={() => setSourceTypeFilter(sourceTypeFilter === t.value ? "all" : t.value)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                        sourceTypeFilter === t.value
+                          ? `${t.bg} ${t.color} border-current`
+                          : "border-neutral-700 text-neutral-400 hover:border-neutral-500"
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {t.label}
+                      <span className="text-[0.6rem] opacity-60">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Category filter */}
+              <div className="zto-select-wrap min-w-[130px]">
+                <select
+                  className="zto-input text-xs"
+                  value={sourceCategoryFilter}
+                  onChange={(e) => setSourceCategoryFilter(e.target.value)}
+                >
+                  <option value="all">كل الفئات</option>
+                  {CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Search */}
+              <div className="relative min-w-[180px]">
+                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <input
+                  type="text"
+                  className="zto-input pr-9 text-xs"
+                  placeholder="بحث..."
+                  value={sourceSearch}
+                  onChange={(e) => setSourceSearch(e.target.value)}
+                />
+              </div>
+
+              {/* Fetch all */}
               <button
                 onClick={handleFetchAll}
                 disabled={fetchingAll}
-                className="zto-btn zto-btn-outline"
+                className="zto-btn zto-btn-outline zto-btn-sm"
               >
                 {fetchingAll ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className="w-3.5 h-3.5" />
                 )}
                 جلب الكل
               </button>
             </div>
-          )}
+          </div>
 
           {loading ? (
             <div className="zto-card p-16 flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
             </div>
-          ) : sources.length === 0 ? (
+          ) : filteredSources.length === 0 ? (
             <div className="zto-card p-16 text-center">
               <Rss className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
-              <p className="text-neutral-500 text-sm font-bold mb-1">لا توجد مصادر بعد</p>
-              <p className="text-neutral-600 text-xs mb-4">أضف مصدرا جديدا للبدء في جمع الأخبار</p>
-              {user?.role === "admin" && (
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="zto-btn zto-btn-gold"
-                >
+              <p className="text-neutral-500 text-sm font-bold mb-1">
+                {sources.length === 0 ? "لا توجد مصادر بعد" : "لا توجد نتائج للفلتر"}
+              </p>
+              <p className="text-neutral-600 text-xs mb-4">
+                {sources.length === 0 ? "أضف مصدرا جديدا للبدء في جمع الأخبار" : "جرب تغيير معايير الفلترة"}
+              </p>
+              {sources.length === 0 && user?.role === "admin" && (
+                <button onClick={() => setShowModal(true)} className="zto-btn zto-btn-gold">
                   <Plus className="w-4 h-4" />
                   إضافة مصدر جديد
                 </button>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {sources.map((source) => {
-                const st = getSourceType(source.type);
-                const Icon = st.icon;
-                const cat = getCategoryInfo(source.category);
+            <div className="space-y-6">
+              {/* Render grouped by type */}
+              {Object.entries(sourcesByType).map(([type, typeSources]) => {
+                const st = getSourceType(type);
+                const TypeIcon = st.icon;
                 return (
-                  <div
-                    key={source.id}
-                    className="zto-card p-5 hover:border-neutral-700 transition-colors"
-                  >
-                    {/* Card top */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-10 h-10 rounded-lg flex items-center justify-center ${st.bg}`}
-                        >
-                          <Icon className={`w-5 h-5 ${st.color}`} />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-sm text-white">{source.name}</h3>
-                          <p className="text-[0.65rem] text-neutral-500 font-bold uppercase tracking-wider">
-                            {st.label}
-                          </p>
-                        </div>
+                  <div key={type}>
+                    {/* Group header */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className={`w-7 h-7 rounded-md flex items-center justify-center ${st.bg}`}>
+                        <TypeIcon className={`w-4 h-4 ${st.color}`} />
                       </div>
-                      <button
-                        onClick={() => handleToggleActive(source)}
-                        title={source.isActive ? "مفعل" : "معطل"}
-                        className="transition-colors"
-                      >
-                        {source.isActive ? (
-                          <ToggleRight className="w-6 h-6 text-emerald-400" />
-                        ) : (
-                          <ToggleLeft className="w-6 h-6 text-neutral-600" />
-                        )}
-                      </button>
+                      <h3 className="text-sm font-black text-white">{st.label}</h3>
+                      <span className="text-xs text-neutral-500">{typeSources.length} مصدر</span>
                     </div>
 
-                    {/* URL */}
-                    <p className="text-xs text-neutral-400 mb-3 truncate" title={source.url}>
-                      {source.url}
-                    </p>
+                    {/* Table */}
+                    <div className="zto-card overflow-hidden">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-neutral-800 text-[0.65rem] text-neutral-500 font-bold uppercase tracking-wider">
+                            <th className="text-right px-4 py-3">المصدر</th>
+                            <th className="text-right px-4 py-3 hidden md:table-cell">الرابط</th>
+                            <th className="text-right px-4 py-3">الفئة</th>
+                            <th className="text-right px-4 py-3 hidden lg:table-cell">آخر جلب</th>
+                            <th className="text-center px-4 py-3">الحالة</th>
+                            <th className="text-left px-4 py-3">إجراءات</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {typeSources.map((source) => {
+                            const cat = getCategoryInfo(source.category);
+                            return (
+                              <tr
+                                key={source.id}
+                                className="border-b border-neutral-800/50 last:border-0 hover:bg-neutral-800/20 transition-colors"
+                              >
+                                {/* Name */}
+                                <td className="px-4 py-3">
+                                  <p className="font-bold text-sm text-white truncate max-w-[200px]">{source.name}</p>
+                                </td>
 
-                    {/* Badges */}
-                    <div className="flex items-center gap-2 mb-3 flex-wrap">
-                      <span className={`zto-badge ${cat.badge}`}>
-                        {cat.label}
-                      </span>
-                      <span className="zto-badge zto-badge-default">
-                        كل {source.fetchInterval} دقيقة
-                      </span>
-                    </div>
+                                {/* URL */}
+                                <td className="px-4 py-3 hidden md:table-cell">
+                                  <p className="text-xs text-neutral-500 truncate max-w-[250px]" title={source.url}>
+                                    {source.url}
+                                  </p>
+                                </td>
 
-                    {/* Last fetched */}
-                    <div className="flex items-center gap-1.5 text-[0.65rem] text-neutral-600 mb-4">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(source.lastFetched)}
-                    </div>
+                                {/* Category */}
+                                <td className="px-4 py-3">
+                                  <span className={`zto-badge text-[0.6rem] ${cat.badge}`}>{cat.label}</span>
+                                </td>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 pt-3 border-t border-neutral-800">
-                      <button
-                        onClick={() => handleFetch(source.id)}
-                        disabled={fetchingId === source.id}
-                        className="zto-btn zto-btn-ghost zto-btn-sm flex-1 text-amber-400"
-                      >
-                        {fetchingId === source.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-3.5 h-3.5" />
-                        )}
-                        جلب الآن
-                      </button>
-                      {user?.role === "admin" && (
-                        <>
-                          <button
-                            onClick={() => openEdit(source)}
-                            className="zto-btn zto-btn-ghost zto-btn-sm"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(source.id)}
-                            className="zto-btn zto-btn-ghost zto-btn-sm text-red-400 hover:text-red-300"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
+                                {/* Last fetched */}
+                                <td className="px-4 py-3 hidden lg:table-cell">
+                                  <span className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {formatDate(source.lastFetched)}
+                                  </span>
+                                </td>
+
+                                {/* Active toggle */}
+                                <td className="px-4 py-3 text-center">
+                                  <button
+                                    onClick={() => handleToggleActive(source)}
+                                    title={source.isActive ? "مفعل" : "معطل"}
+                                    className="transition-colors inline-block"
+                                  >
+                                    {source.isActive ? (
+                                      <ToggleRight className="w-5 h-5 text-emerald-400" />
+                                    ) : (
+                                      <ToggleLeft className="w-5 h-5 text-neutral-600" />
+                                    )}
+                                  </button>
+                                </td>
+
+                                {/* Actions */}
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-1 justify-end">
+                                    <button
+                                      onClick={() => handleFetch(source.id)}
+                                      disabled={fetchingId === source.id}
+                                      className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
+                                      title="جلب البيانات"
+                                    >
+                                      {fetchingId === source.id ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                    {user?.role === "admin" && (
+                                      <>
+                                        <button
+                                          onClick={() => openEdit(source)}
+                                          className="zto-btn zto-btn-ghost zto-btn-sm"
+                                          title="تعديل"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDelete(source.id)}
+                                          className="zto-btn zto-btn-ghost zto-btn-sm text-red-400 hover:text-red-300"
+                                          title="حذف"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 );
