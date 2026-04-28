@@ -3,6 +3,7 @@
 
 import { createRecord, listRecords } from "./airtable";
 import { logger } from "./logger";
+import { getBrandIntervalMap, DEFAULT_BRAND_INTERVAL_MINUTES } from "./brands";
 
 // Base & table for saving scraped content
 const ZTO_BASE_ID = "appIpXIFs2yxyxaUm";
@@ -20,8 +21,9 @@ export interface DataSource {
   type: "rss" | "twitter" | "linkedin" | "apify" | "custom";
   url: string;
   category: "startups" | "investment" | "tech" | "general";
+  brand: string;
   isActive: boolean;
-  fetchInterval: number; // minutes
+  fetchInterval: number; // minutes — legacy field, retained but no longer authoritative
   lastFetchedAt: string | null;
   createdAt: string;
 }
@@ -77,6 +79,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://techcrunch.com/feed/",
       category: "tech",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 30,
       lastFetchedAt: null,
@@ -88,6 +91,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://feeds.feedburner.com/venturebeat/SZYF",
       category: "tech",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 30,
       lastFetchedAt: null,
@@ -99,6 +103,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://jawlah.co/feed",
       category: "startups",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 60,
       lastFetchedAt: null,
@@ -110,6 +115,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://waya.media/feed/",
       category: "general",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 60,
       lastFetchedAt: null,
@@ -121,6 +127,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://www.finsmes.com/feed",
       category: "investment",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 30,
       lastFetchedAt: null,
@@ -132,6 +139,7 @@ export function getDefaultSources(): DataSource[] {
       type: "rss",
       url: "https://www.zawya.com/sitemaps/en/rss",
       category: "investment",
+      brand: "Zero to One",
       isActive: true,
       fetchInterval: 30,
       lastFetchedAt: null,
@@ -167,6 +175,7 @@ function getDefaultTwitterSources(now: string): DataSource[] {
     type: "twitter" as const,
     url: `https://x.com/${a.handle}`,
     category: "investment" as const,
+    brand: "Zero to One",
     isActive: true,
     fetchInterval: 180,
     lastFetchedAt: null,
@@ -204,6 +213,7 @@ export function createDataSource(
   ensureInitialized();
   const source: DataSource = {
     ...config,
+    brand: config.brand?.trim() || "Zero to One",
     id: `src-${Date.now()}`,
     lastFetchedAt: null,
     createdAt: new Date().toISOString(),
@@ -1030,34 +1040,76 @@ async function fetchApifyGeneric(
 // ---------------------------------------------------------------------------
 
 export async function fetchAllSources(): Promise<
-  { sourceId: string; sourceName: string; result: RSSFetchResult }[]
+  {
+    sourceId: string;
+    sourceName: string;
+    result: RSSFetchResult;
+    skipped?: boolean;
+    skipReason?: string;
+  }[]
 > {
   ensureInitialized();
   const activeSources = dataSources.filter((s) => s.isActive);
 
+  // Per-brand scrape interval gating. Cron fires often; we only fetch a source
+  // when `now - lastFetchedAt >= brand.scrapeIntervalMinutes`.
+  const brandIntervals = await getBrandIntervalMap();
+  const nowMs = Date.now();
+  const dueSources: DataSource[] = [];
+  const skipped: {
+    sourceId: string;
+    sourceName: string;
+    result: RSSFetchResult;
+    skipped: true;
+    skipReason: string;
+  }[] = [];
+
+  for (const source of activeSources) {
+    const intervalMin =
+      brandIntervals[source.brand] ?? DEFAULT_BRAND_INTERVAL_MINUTES;
+    const lastFetchedMs = source.lastFetchedAt
+      ? new Date(source.lastFetchedAt).getTime()
+      : 0;
+    const dueAt = lastFetchedMs + intervalMin * 60_000;
+    if (lastFetchedMs > 0 && nowMs < dueAt) {
+      const minutesLeft = Math.ceil((dueAt - nowMs) / 60_000);
+      skipped.push({
+        sourceId: source.id,
+        sourceName: source.name,
+        result: { articles: [] },
+        skipped: true,
+        skipReason: `Not due for ${minutesLeft} more min (interval: ${intervalMin}m)`,
+      });
+    } else {
+      dueSources.push(source);
+    }
+  }
+
   // One Airtable read up front: builds the cursor + dedup set shared across
-  // all parallel fetches. Skipping this when there are no active sources.
+  // all parallel fetches. Skipping this when there are no due sources.
   const ctx =
-    activeSources.length > 0
-      ? await loadAirtableState(activeSources.map((s) => s.name))
+    dueSources.length > 0
+      ? await loadAirtableState(dueSources.map((s) => s.name))
       : { cursorByName: {}, seenUrls: new Set<string>() };
 
   const results = await Promise.allSettled(
-    activeSources.map(async (source) => {
+    dueSources.map(async (source) => {
       const result = await fetchSource(source.id, ctx);
       return { sourceId: source.id, sourceName: source.name, result };
     })
   );
 
-  return results.map((r, i) => {
+  const fetched = results.map((r, i) => {
     if (r.status === "fulfilled") return r.value;
     return {
-      sourceId: activeSources[i].id,
-      sourceName: activeSources[i].name,
+      sourceId: dueSources[i].id,
+      sourceName: dueSources[i].name,
       result: {
         articles: [],
         error: r.reason?.message || "Unknown error",
       },
     };
   });
+
+  return [...fetched, ...skipped];
 }

@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   XCircle,
   Brain,
+  Tag,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -37,11 +38,18 @@ interface DataSource {
   type: "rss" | "twitter" | "linkedin" | "apify" | "custom";
   url: string;
   category: "startups" | "investment" | "tech" | "general";
+  brand: string;
   fetchInterval: number;
   isActive: boolean;
   lastFetched: string | null;
   createdAt: string;
   createdBy: string;
+}
+
+interface Brand {
+  id: string;
+  name: string;
+  scrapeIntervalMinutes: number;
 }
 
 interface Article {
@@ -100,6 +108,7 @@ const defaultFormData = {
   type: "rss" as DataSource["type"],
   url: "",
   category: "general" as DataSource["category"],
+  brand: "Zero to One",
   fetchInterval: 60,
   isActive: true,
 };
@@ -140,11 +149,21 @@ export default function DataSourcesPage() {
   const [sourceCategoryFilter, setSourceCategoryFilter] = useState<string>("all");
   const [sourceSearch, setSourceSearch] = useState("");
 
+  // Brands
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [showBrandModal, setShowBrandModal] = useState(false);
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [brandFormName, setBrandFormName] = useState("");
+  const [brandFormInterval, setBrandFormInterval] = useState(30);
+  const [savingBrand, setSavingBrand] = useState(false);
+
   // Form state
   const [formData, setFormData] = useState({ ...defaultFormData });
 
   useEffect(() => {
     loadSources();
+    loadBrands();
     fetch("/api/data-sources?action=status")
       .then((r) => r.json())
       .then((d) => {
@@ -170,6 +189,95 @@ export default function DataSourcesPage() {
       })
       .catch(() => addToast("فشل تحميل المصادر", "error"))
       .finally(() => setLoading(false));
+  };
+
+  const loadBrands = () => {
+    setLoadingBrands(true);
+    fetch("/api/brands")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.brands) setBrands(data.brands);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingBrands(false));
+  };
+
+  const openBrandModal = (brand: Brand | null) => {
+    setEditingBrand(brand);
+    setBrandFormName(brand?.name || "");
+    setBrandFormInterval(brand?.scrapeIntervalMinutes || 30);
+    setShowBrandModal(true);
+  };
+
+  const closeBrandModal = () => {
+    setShowBrandModal(false);
+    setEditingBrand(null);
+    setBrandFormName("");
+    setBrandFormInterval(30);
+  };
+
+  const saveBrand = async () => {
+    if (!brandFormName.trim()) {
+      addToast("أدخل اسم البراند", "warning");
+      return;
+    }
+    if (!brandFormInterval || brandFormInterval < 1) {
+      addToast("أدخل فترة جلب صحيحة", "warning");
+      return;
+    }
+    setSavingBrand(true);
+    try {
+      const action = editingBrand ? "update" : "create";
+      const body = editingBrand
+        ? {
+            action,
+            id: editingBrand.id,
+            name: brandFormName.trim(),
+            scrapeIntervalMinutes: brandFormInterval,
+          }
+        : {
+            action,
+            name: brandFormName.trim(),
+            scrapeIntervalMinutes: brandFormInterval,
+          };
+      const res = await fetch("/api/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast(editingBrand ? "تم تحديث البراند" : "تم إنشاء البراند", "success");
+        loadBrands();
+        closeBrandModal();
+      } else {
+        addToast(data.error || "فشل الحفظ", "error");
+      }
+    } catch {
+      addToast("حدث خطأ", "error");
+    } finally {
+      setSavingBrand(false);
+    }
+  };
+
+  const deleteBrand = async (id: string, name: string) => {
+    if (!confirm(`حذف البراند "${name}"؟ المصادر التابعة لن تُحذف.`)) return;
+    try {
+      const res = await fetch("/api/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast("تم حذف البراند", "success");
+        loadBrands();
+      } else {
+        addToast(data.error || "فشل الحذف", "error");
+      }
+    } catch {
+      addToast("حدث خطأ", "error");
+    }
   };
 
   const loadArticles = () => {
@@ -341,6 +449,7 @@ export default function DataSourcesPage() {
       type: source.type,
       url: source.url,
       category: source.category,
+      brand: source.brand || "Zero to One",
       fetchInterval: source.fetchInterval,
       isActive: source.isActive,
     });
@@ -506,6 +615,90 @@ export default function DataSourcesPage() {
       {/* ───── Sources Tab ───── */}
       {activeTab === "sources" && (
         <>
+          {/* Brands management card */}
+          <div className="zto-card">
+            <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+              <h2 className="text-sm font-black text-white flex items-center gap-2">
+                <Tag className="w-4 h-4 text-purple-400" />
+                البراندات وفترات الجلب
+              </h2>
+              {user?.role === "admin" && (
+                <button
+                  onClick={() => openBrandModal(null)}
+                  className="zto-btn zto-btn-gold text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  براند جديد
+                </button>
+              )}
+            </div>
+            <div className="p-4">
+              {loadingBrands ? (
+                <div className="text-center text-neutral-500 text-sm py-4">
+                  <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                  جارٍ التحميل...
+                </div>
+              ) : brands.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-sm text-neutral-400 mb-2">
+                    لم يتم إنشاء أي براند بعد
+                  </p>
+                  <p className="text-[11px] text-neutral-500">
+                    أنشئ جدول &quot;Brands&quot; في Airtable مع حقلين: <code className="bg-neutral-800 px-1 rounded">Name</code> و <code className="bg-neutral-800 px-1 rounded">Scrape Interval (Minutes)</code>
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {brands.map((b) => {
+                    const sourceCount = sources.filter(
+                      (s) => s.brand === b.name
+                    ).length;
+                    return (
+                      <div
+                        key={b.id}
+                        className="bg-neutral-900/40 border border-neutral-800 rounded-lg p-3 flex items-start justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <Tag className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                            <span className="text-sm font-bold text-white truncate">
+                              {b.name}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-neutral-500 font-bold mt-1 flex items-center gap-3">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              كل {b.scrapeIntervalMinutes} دقيقة
+                            </span>
+                            <span>{sourceCount} مصدر</span>
+                          </div>
+                        </div>
+                        {user?.role === "admin" && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => openBrandModal(b)}
+                              className="text-neutral-500 hover:text-amber-400 p-1"
+                              title="تعديل"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => deleteBrand(b.id, b.name)}
+                              className="text-neutral-500 hover:text-red-400 p-1"
+                              title="حذف"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Filter bar */}
           <div className="zto-card p-4">
             <div className="flex items-center gap-3 flex-wrap">
@@ -1226,7 +1419,7 @@ export default function DataSourcesPage() {
                 />
               </div>
 
-              {/* Category + Fetch Interval */}
+              {/* Category + Brand */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="zto-label">الفئة</label>
@@ -1250,19 +1443,31 @@ export default function DataSourcesPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="zto-label">فترة الجلب (بالدقائق)</label>
-                  <input
-                    type="number"
-                    className="zto-input"
-                    min={5}
-                    value={formData.fetchInterval}
-                    onChange={(e) =>
-                      setFormData((p) => ({
-                        ...p,
-                        fetchInterval: parseInt(e.target.value) || 60,
-                      }))
-                    }
-                  />
+                  <label className="zto-label flex items-center gap-2">
+                    <Tag className="w-3 h-3" />
+                    البراند
+                  </label>
+                  <div className="zto-select-wrap">
+                    <select
+                      className="zto-input"
+                      value={formData.brand}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, brand: e.target.value }))
+                      }
+                    >
+                      {brands.length === 0 && (
+                        <option value="Zero to One">Zero to One</option>
+                      )}
+                      {brands.map((b) => (
+                        <option key={b.id} value={b.name}>
+                          {b.name} ({b.scrapeIntervalMinutes}د)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-[10px] text-neutral-500 mt-1">
+                    فترة الجلب تُحدَّد من إعدادات البراند
+                  </p>
                 </div>
               </div>
 
@@ -1305,6 +1510,77 @@ export default function DataSourcesPage() {
                   <Save className="w-4 h-4" />
                 )}
                 {editingSource ? "حفظ التغييرات" : "إنشاء"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Brand Modal */}
+      {showBrandModal && (
+        <div className="zto-overlay" onClick={closeBrandModal}>
+          <div
+            className="zto-modal w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-neutral-800 flex items-center justify-between">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Tag className="w-4 h-4 text-purple-400" />
+                {editingBrand ? "تعديل البراند" : "براند جديد"}
+              </h3>
+              <button
+                onClick={closeBrandModal}
+                className="text-neutral-500 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="zto-label">اسم البراند *</label>
+                <input
+                  type="text"
+                  className="zto-input"
+                  placeholder="مثال: Zero to One"
+                  value={brandFormName}
+                  onChange={(e) => setBrandFormName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="zto-label">فترة الجلب (بالدقائق) *</label>
+                <input
+                  type="number"
+                  className="zto-input"
+                  min={1}
+                  value={brandFormInterval}
+                  onChange={(e) =>
+                    setBrandFormInterval(parseInt(e.target.value) || 30)
+                  }
+                />
+                <p className="text-[10px] text-neutral-500 mt-1">
+                  جميع المصادر التابعة لهذا البراند ستُجلب كل {brandFormInterval} دقيقة
+                </p>
+              </div>
+            </div>
+            <div className="p-5 border-t border-neutral-800 flex items-center justify-end gap-2">
+              <button
+                onClick={closeBrandModal}
+                className="zto-btn zto-btn-ghost"
+                disabled={savingBrand}
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={saveBrand}
+                className="zto-btn zto-btn-gold"
+                disabled={savingBrand}
+              >
+                {savingBrand ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {editingBrand ? "حفظ" : "إنشاء"}
               </button>
             </div>
           </div>
