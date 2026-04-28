@@ -34,3 +34,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code (commit settings.json, ignore local overrides)
+.claude/settings.local.json
