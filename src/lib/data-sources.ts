@@ -1,11 +1,18 @@
 // Data sources management - RSS feeds, Apify/Twitter, social media, custom scrapers
 // In-memory storage (same pattern as agents.ts)
 
-import { createRecord } from "./airtable";
+import { createRecord, listRecords } from "./airtable";
+import { logger } from "./logger";
 
 // Base & table for saving scraped content
 const ZTO_BASE_ID = "appIpXIFs2yxyxaUm";
 const APIFY_TABLE_NAME = "Apify - Websites";
+
+// Time-window defaults for the "find latest news" filter
+const TWITTER_FRESHNESS_MIN = 20;
+const RSS_FRESHNESS_HOURS = 24;
+// How far back we read Airtable to build the cursor + dedup set
+const STATE_LOOKBACK_DAYS = 30;
 
 export interface DataSource {
   id: string;
@@ -653,6 +660,39 @@ interface ApifyTweet {
   url?: string;
 }
 
+// Normalize tweet timestamps. Apify's twitter-scraper-lite returns either
+// ISO 8601 ("2024-04-24T12:34:56.000Z") or Twitter's legacy format
+// ("Wed Apr 24 12:34:56 +0000 2024"). Returns ISO string or null.
+function parseTweetDate(raw: string | undefined | null): string | null {
+  if (!raw || typeof raw !== "string") return null;
+
+  const native = new Date(raw);
+  if (!isNaN(native.getTime())) return native.toISOString();
+
+  const legacy = raw.match(
+    /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-]\d{4})\s+(\d{4})$/
+  );
+  if (!legacy) return null;
+  const [, monthStr, day, hh, mm, ss, tz, year] = legacy;
+  const months: Record<string, number> = {
+    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+    Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+  };
+  const month = months[monthStr];
+  if (month === undefined) return null;
+  const tzHours = parseInt(tz.slice(0, 3), 10);
+  const tzMins = parseInt(tz[0] + tz.slice(3), 10);
+  const utcMs = Date.UTC(
+    parseInt(year, 10),
+    month,
+    parseInt(day, 10),
+    parseInt(hh, 10) - tzHours,
+    parseInt(mm, 10) - tzMins,
+    parseInt(ss, 10)
+  );
+  return isNaN(utcMs) ? null : new Date(utcMs).toISOString();
+}
+
 export async function fetchApifyTwitter(
   profileUrl: string,
   sourceId: string,
@@ -686,10 +726,18 @@ export async function fetchApifyTwitter(
 
     const tweets: ApifyTweet[] = await response.json();
     const now = new Date().toISOString();
-    const articles: FetchedArticle[] = tweets.map((tweet) => {
+    const articles: FetchedArticle[] = [];
+    let droppedDates = 0;
+
+    for (const tweet of tweets) {
+      const publishedAt = parseTweetDate(tweet.createdAt);
+      if (!publishedAt) {
+        droppedDates++;
+        continue;
+      }
       const text = tweet.fullText || tweet.text || "";
       const authorName = tweet.author?.name || tweet.author?.userName || sourceName;
-      return {
+      articles.push({
         id: `art-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         sourceId,
         sourceName,
@@ -697,13 +745,20 @@ export async function fetchApifyTwitter(
         description: text,
         url: tweet.twitterUrl || tweet.url || profileUrl,
         author: authorName,
-        publishedAt: tweet.createdAt ? new Date(tweet.createdAt).toISOString() : now,
+        publishedAt,
         fetchedAt: now,
         categories: ["twitter"],
         isInvestmentRelated: false,
         savedToAirtable: false,
-      };
-    });
+      });
+    }
+
+    if (droppedDates > 0) {
+      logger.warn(
+        `Dropped ${droppedDates} tweet(s) with unparseable createdAt from ${sourceName}`,
+        "DataSources"
+      );
+    }
 
     return { articles };
   } catch (err) {
@@ -750,15 +805,102 @@ export async function saveArticlesToAirtable(
 }
 
 // ---------------------------------------------------------------------------
+// Airtable-backed cursor + dedup state
+// ---------------------------------------------------------------------------
+
+export interface FetchContext {
+  // Most recent createdTime in Airtable per source name (ISO string)
+  cursorByName: Record<string, string>;
+  // URLs already in Airtable from the lookback window
+  seenUrls: Set<string>;
+}
+
+function escapeFormulaString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+// Read the destination Airtable table to derive the per-source last-checked
+// timestamp and a set of URLs we've already saved. This replaces the cold-start
+// in-memory dedup so duplicate rows aren't written every time the cron runs on
+// a fresh Lambda.
+export async function loadAirtableState(
+  sourceNames: string[]
+): Promise<FetchContext> {
+  const cursorByName: Record<string, string> = {};
+  const seenUrls = new Set<string>();
+  if (sourceNames.length === 0) return { cursorByName, seenUrls };
+
+  const sourceClause = sourceNames
+    .map((n) => `{Source}="${escapeFormulaString(n)}"`)
+    .join(",");
+  const filterByFormula = `AND(IS_AFTER(CREATED_TIME(),DATEADD(NOW(),-${STATE_LOOKBACK_DAYS},'days')),OR(${sourceClause}))`;
+
+  try {
+    let offset: string | undefined;
+    let pages = 0;
+    const maxPages = 5; // up to 500 records — plenty for cursor + recent dedup
+    do {
+      const result = await listRecords(ZTO_BASE_ID, APIFY_TABLE_NAME, {
+        pageSize: 100,
+        offset,
+        filterByFormula,
+        fields: ["Source", "Link to Post (If Applicable)"],
+      });
+      for (const rec of result.records) {
+        const source = String(rec.fields["Source"] || "");
+        const url = String(rec.fields["Link to Post (If Applicable)"] || "");
+        if (url) seenUrls.add(url);
+        if (source && rec.createdTime) {
+          const existing = cursorByName[source];
+          if (!existing || rec.createdTime > existing) {
+            cursorByName[source] = rec.createdTime;
+          }
+        }
+      }
+      offset = result.offset;
+      pages++;
+    } while (offset && pages < maxPages);
+  } catch (err) {
+    logger.warn(
+      "Failed to load Airtable state for cursor/dedup; proceeding with empty state",
+      "DataSources",
+      err
+    );
+  }
+
+  return { cursorByName, seenUrls };
+}
+
+// Compute the earliest publishedAt timestamp (ms) we'll accept for a source.
+function computeFloorMs(sourceType: string, lastCheckedAt: string | undefined): number {
+  const nowMs = Date.now();
+  const cursorMs = lastCheckedAt ? new Date(lastCheckedAt).getTime() : 0;
+  const validCursor = !isNaN(cursorMs) && cursorMs > 0 ? cursorMs : 0;
+
+  if (sourceType === "twitter") {
+    // Match Make's `addMinutes(now, -20)` floor — never accept tweets older
+    // than the freshness window even if the cursor is very old.
+    const minMs = nowMs - TWITTER_FRESHNESS_MIN * 60_000;
+    return Math.max(validCursor, minMs);
+  }
+  // RSS / apify / generic: cursor when present, else 24h fallback.
+  return validCursor > 0 ? validCursor : nowMs - RSS_FRESHNESS_HOURS * 3600_000;
+}
+
+// ---------------------------------------------------------------------------
 // Fetch a single source and store articles
 // ---------------------------------------------------------------------------
 
 export async function fetchSource(
-  sourceId: string
+  sourceId: string,
+  ctx?: FetchContext
 ): Promise<RSSFetchResult> {
   ensureInitialized();
   const source = dataSources.find((s) => s.id === sourceId);
   if (!source) return { articles: [], error: "Source not found" };
+
+  // Lazy-load state if we weren't given one (single-source manual fetch path).
+  const state = ctx || (await loadAirtableState([source.name]));
 
   let result: RSSFetchResult;
 
@@ -773,44 +915,74 @@ export async function fetchSource(
     return { articles: [], error: `Fetching not yet supported for type "${source.type}"` };
   }
 
-  if (result.articles.length > 0) {
-    // De-duplicate by URL – keep existing articles, add new ones
-    const existingUrls = new Set(
-      fetchedArticles.filter((a) => a.sourceId === sourceId).map((a) => a.url)
-    );
-    const newArticles = result.articles.filter((a) => a.url && !existingUrls.has(a.url));
-    // Attach source name
-    newArticles.forEach((a) => (a.sourceName = source.name));
-    fetchedArticles.push(...newArticles);
+  // Update lastFetchedAt regardless of whether items were fetched, so the UI
+  // can show the source is being polled even on empty cycles.
+  const idx = dataSources.findIndex((s) => s.id === sourceId);
+  if (idx !== -1) {
+    dataSources[idx].lastFetchedAt = new Date().toISOString();
+  }
 
-    // Update lastFetchedAt
-    const idx = dataSources.findIndex((s) => s.id === sourceId);
-    if (idx !== -1) {
-      dataSources[idx].lastFetchedAt = new Date().toISOString();
+  if (result.articles.length === 0) {
+    return result;
+  }
+
+  // 1. Time-window filter: drop items older than the cursor (or freshness floor).
+  const lastCheckedAt = state.cursorByName[source.name];
+  const floorMs = computeFloorMs(source.type, lastCheckedAt);
+  const windowed = result.articles.filter((a) => {
+    const dt = new Date(a.publishedAt).getTime();
+    return !isNaN(dt) && dt >= floorMs;
+  });
+
+  // 2. Dedup against URLs already in Airtable. Mutating state.seenUrls means
+  //    parallel sources in the same run can't double-save the same URL.
+  const newArticles = windowed.filter((a) => {
+    if (!a.url) return false;
+    if (state.seenUrls.has(a.url)) return false;
+    state.seenUrls.add(a.url);
+    return true;
+  });
+
+  // 3. Cache for the dashboard "articles" view.
+  newArticles.forEach((a) => (a.sourceName = source.name));
+  fetchedArticles.push(...newArticles);
+
+  if (newArticles.length === 0) {
+    return { articles: [] };
+  }
+
+  // 4. Persist to Airtable. RSS goes through aggregate-then-classify;
+  //    Twitter/Apify save directly.
+  if (source.type === "rss") {
+    try {
+      const { passed } = await filterArticlesWithAI(
+        newArticles,
+        sourceId,
+        source.name
+      );
+      if (passed.length > 0) {
+        await saveArticlesToAirtable(passed, source.name);
+      }
+    } catch (err) {
+      logger.warn(
+        `AI filter or Airtable save failed for "${source.name}"`,
+        "DataSources",
+        err
+      );
     }
-
-    // For RSS sources, filter through AI before saving to Airtable
-    // Only investment-related articles get saved
-    if (source.type === "rss" && newArticles.length > 0) {
-      try {
-        const { passed } = await filterArticlesWithAI(newArticles, sourceId, source.name);
-        if (passed.length > 0) {
-          await saveArticlesToAirtable(passed, source.name);
-        }
-      } catch {
-        // Non-blocking — don't fail the fetch if AI filter or Airtable save fails
-      }
-    } else {
-      // Non-RSS sources (Twitter, Apify) — save all directly
-      try {
-        await saveArticlesToAirtable(newArticles, source.name);
-      } catch {
-        // Non-blocking
-      }
+  } else {
+    try {
+      await saveArticlesToAirtable(newArticles, source.name);
+    } catch (err) {
+      logger.warn(
+        `Airtable save failed for "${source.name}"`,
+        "DataSources",
+        err
+      );
     }
   }
 
-  return result;
+  return { articles: newArticles };
 }
 
 // ---------------------------------------------------------------------------
@@ -862,9 +1034,17 @@ export async function fetchAllSources(): Promise<
 > {
   ensureInitialized();
   const activeSources = dataSources.filter((s) => s.isActive);
+
+  // One Airtable read up front: builds the cursor + dedup set shared across
+  // all parallel fetches. Skipping this when there are no active sources.
+  const ctx =
+    activeSources.length > 0
+      ? await loadAirtableState(activeSources.map((s) => s.name))
+      : { cursorByName: {}, seenUrls: new Set<string>() };
+
   const results = await Promise.allSettled(
     activeSources.map(async (source) => {
-      const result = await fetchSource(source.id);
+      const result = await fetchSource(source.id, ctx);
       return { sourceId: source.id, sourceName: source.name, result };
     })
   );
