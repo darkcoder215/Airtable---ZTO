@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
         if (!baseId) {
           return NextResponse.json({ error: "معرف القاعدة مطلوب" }, { status: 400 });
         }
-        if (!checkPermission(user.id, user.role, baseId, "*", "canView")) {
+        if (!(await checkPermission(user.id, user.role, baseId, "*", "canView"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
         }
         const tables = await listTables(baseId);
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
         if (!baseId || !tableId) {
           return NextResponse.json({ error: "معرف القاعدة والجدول مطلوبان" }, { status: 400 });
         }
-        if (!checkPermission(user.id, user.role, baseId, tableId, "canView")) {
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canView"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
         }
 
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
         });
 
         // Apply field restrictions
-        const restrictedFields = getFieldRestrictions(user.id, user.role, baseId, tableId);
+        const restrictedFields = await getFieldRestrictions(user.id, user.role, baseId, tableId);
         if (restrictedFields.length > 0) {
           result.records = result.records.map((r) => {
             const filtered = { ...r.fields };
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
         if (!baseId || !tableId || !recordId) {
           return NextResponse.json({ error: "معرف القاعدة والجدول والسجل مطلوبان" }, { status: 400 });
         }
-        if (!checkPermission(user.id, user.role, baseId, tableId, "canView")) {
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canView"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
         }
         const record = await getRecord(baseId, tableId, recordId);
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "create": {
-        if (!checkPermission(user.id, user.role, baseId, tableId, "canCreate")) {
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canCreate"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الإنشاء" }, { status: 403 });
         }
         const newRecord = await createRecord(baseId, tableId, fields);
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
         if (!recordId) {
           return NextResponse.json({ error: "معرف السجل مطلوب" }, { status: 400 });
         }
-        if (!checkPermission(user.id, user.role, baseId, tableId, "canEdit")) {
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canEdit"))) {
           return NextResponse.json({ error: "لا تملك صلاحية التعديل" }, { status: 403 });
         }
         const updated = await updateRecord(baseId, tableId, recordId, fields);
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
         if (!recordId) {
           return NextResponse.json({ error: "معرف السجل مطلوب" }, { status: 400 });
         }
-        if (!checkPermission(user.id, user.role, baseId, tableId, "canDelete")) {
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canDelete"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الحذف" }, { status: 403 });
         }
         await deleteRecord(baseId, tableId, recordId);

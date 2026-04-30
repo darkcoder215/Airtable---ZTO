@@ -1,5 +1,10 @@
-// Access control configuration - stored in memory for now
-// Will be migrated to Supabase later
+// Access control rules persisted in Supabase (scraper_access_rules).
+// All public functions are async.
+
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import type { Database } from "@/lib/supabase/database.types";
+
+type Row = Database["public"]["Tables"]["scraper_access_rules"]["Row"];
 
 export interface AccessRule {
   id: string;
@@ -15,131 +20,165 @@ export interface AccessRule {
     canCreate: boolean;
     canDelete: boolean;
   };
-  fieldRestrictions: string[]; // field IDs that are hidden from this user
-  filterFormula?: string; // Airtable filter formula to restrict records
+  fieldRestrictions: string[];
+  filterFormula?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// In-memory store
-let accessRules: AccessRule[] = [
-  // Default: give all editors access to everything with edit permissions
-  {
-    id: "rule-1",
-    userId: "2",
-    userName: "أحمد الكاتب",
-    baseId: "*",
-    baseName: "جميع القواعد",
-    tableId: "*",
-    tableName: "جميع الجداول",
-    permissions: { canView: true, canEdit: true, canCreate: true, canDelete: false },
-    fieldRestrictions: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: "rule-2",
-    userId: "3",
-    userName: "سارة المحررة",
-    baseId: "*",
-    baseName: "جميع القواعد",
-    tableId: "*",
-    tableName: "جميع الجداول",
-    permissions: { canView: true, canEdit: true, canCreate: true, canDelete: false },
-    fieldRestrictions: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: "rule-3",
-    userId: "4",
-    userName: "خالد المراجع",
-    baseId: "*",
-    baseName: "جميع القواعد",
-    tableId: "*",
-    tableName: "جميع الجداول",
-    permissions: { canView: true, canEdit: false, canCreate: false, canDelete: false },
-    fieldRestrictions: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-export function getAccessRules(): AccessRule[] {
-  return [...accessRules];
+function mapRule(r: Row): AccessRule {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    userName: r.user_name,
+    baseId: r.base_id,
+    baseName: r.base_name,
+    tableId: r.table_id,
+    tableName: r.table_name,
+    permissions: {
+      canView: r.can_view,
+      canEdit: r.can_edit,
+      canCreate: r.can_create,
+      canDelete: r.can_delete,
+    },
+    fieldRestrictions: r.field_restrictions ?? [],
+    filterFormula: r.filter_formula ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
 }
 
-export function getAccessRulesForUser(userId: string): AccessRule[] {
-  return accessRules.filter((r) => r.userId === userId);
+export async function getAccessRules(): Promise<AccessRule[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_access_rules")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`getAccessRules: ${error.message}`);
+  return (data ?? []).map(mapRule);
 }
 
-export function checkPermission(
+export async function getAccessRulesForUser(userId: string): Promise<AccessRule[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_access_rules")
+    .select("*")
+    .eq("user_id", userId);
+  if (error) throw new Error(`getAccessRulesForUser: ${error.message}`);
+  return (data ?? []).map(mapRule);
+}
+
+async function loadMatching(
+  userId: string,
+  baseId: string,
+  tableId: string
+): Promise<Row[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_access_rules")
+    .select("*")
+    .eq("user_id", userId)
+    .or(`base_id.eq.*,base_id.eq.${baseId}`)
+    .or(`table_id.eq.*,table_id.eq.${tableId}`);
+  if (error) throw new Error(`loadMatching: ${error.message}`);
+  return data ?? [];
+}
+
+export async function checkPermission(
   userId: string,
   role: string,
   baseId: string,
   tableId: string,
   action: "canView" | "canEdit" | "canCreate" | "canDelete"
-): boolean {
-  // Admins have full access
+): Promise<boolean> {
   if (role === "admin") return true;
-
-  const rules = accessRules.filter(
-    (r) =>
-      r.userId === userId &&
-      (r.baseId === "*" || r.baseId === baseId) &&
-      (r.tableId === "*" || r.tableId === tableId)
-  );
-
+  const rules = await loadMatching(userId, baseId, tableId);
   if (rules.length === 0) return false;
-  return rules.some((r) => r.permissions[action]);
+  const col = action === "canView" ? "can_view"
+    : action === "canEdit" ? "can_edit"
+    : action === "canCreate" ? "can_create"
+    : "can_delete";
+  return rules.some((r) => r[col]);
 }
 
-export function getFieldRestrictions(
+export async function getFieldRestrictions(
   userId: string,
   role: string,
   baseId: string,
   tableId: string
-): string[] {
+): Promise<string[]> {
   if (role === "admin") return [];
-
-  const rules = accessRules.filter(
-    (r) =>
-      r.userId === userId &&
-      (r.baseId === "*" || r.baseId === baseId) &&
-      (r.tableId === "*" || r.tableId === tableId)
-  );
-
-  // Merge field restrictions from all matching rules
+  const rules = await loadMatching(userId, baseId, tableId);
   const restricted = new Set<string>();
-  rules.forEach((r) => r.fieldRestrictions.forEach((f) => restricted.add(f)));
+  rules.forEach((r) => (r.field_restrictions ?? []).forEach((f) => restricted.add(f)));
   return [...restricted];
 }
 
-export function addAccessRule(rule: Omit<AccessRule, "id" | "createdAt" | "updatedAt">): AccessRule {
-  const newRule: AccessRule = {
-    ...rule,
-    id: `rule-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  accessRules.push(newRule);
-  return newRule;
+export async function addAccessRule(
+  rule: Omit<AccessRule, "id" | "createdAt" | "updatedAt">
+): Promise<AccessRule> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_access_rules")
+    .insert({
+      user_id: rule.userId,
+      user_name: rule.userName,
+      base_id: rule.baseId,
+      base_name: rule.baseName,
+      table_id: rule.tableId,
+      table_name: rule.tableName,
+      can_view: rule.permissions.canView,
+      can_edit: rule.permissions.canEdit,
+      can_create: rule.permissions.canCreate,
+      can_delete: rule.permissions.canDelete,
+      field_restrictions: rule.fieldRestrictions ?? [],
+      filter_formula: rule.filterFormula ?? null,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`addAccessRule: ${error.message}`);
+  return mapRule(data);
 }
 
-export function updateAccessRule(id: string, update: Partial<AccessRule>): AccessRule | null {
-  const index = accessRules.findIndex((r) => r.id === id);
-  if (index === -1) return null;
-  accessRules[index] = {
-    ...accessRules[index],
-    ...update,
-    updatedAt: new Date().toISOString(),
+export async function updateAccessRule(
+  id: string,
+  update: Partial<AccessRule>
+): Promise<AccessRule | null> {
+  const sb = getSupabaseAdmin();
+  const patch: Database["public"]["Tables"]["scraper_access_rules"]["Update"] = {
+    updated_at: new Date().toISOString(),
   };
-  return accessRules[index];
+  if (update.userId !== undefined) patch.user_id = update.userId;
+  if (update.userName !== undefined) patch.user_name = update.userName;
+  if (update.baseId !== undefined) patch.base_id = update.baseId;
+  if (update.baseName !== undefined) patch.base_name = update.baseName;
+  if (update.tableId !== undefined) patch.table_id = update.tableId;
+  if (update.tableName !== undefined) patch.table_name = update.tableName;
+  if (update.permissions) {
+    patch.can_view = update.permissions.canView;
+    patch.can_edit = update.permissions.canEdit;
+    patch.can_create = update.permissions.canCreate;
+    patch.can_delete = update.permissions.canDelete;
+  }
+  if (update.fieldRestrictions !== undefined) patch.field_restrictions = update.fieldRestrictions;
+  if (update.filterFormula !== undefined) patch.filter_formula = update.filterFormula ?? null;
+
+  const { data, error } = await sb
+    .from("scraper_access_rules")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(`updateAccessRule: ${error.message}`);
+  return data ? mapRule(data) : null;
 }
 
-export function deleteAccessRule(id: string): boolean {
-  const index = accessRules.findIndex((r) => r.id === id);
-  if (index === -1) return false;
-  accessRules.splice(index, 1);
-  return true;
+export async function deleteAccessRule(id: string): Promise<boolean> {
+  const sb = getSupabaseAdmin();
+  const { error, count } = await sb
+    .from("scraper_access_rules")
+    .delete({ count: "exact" })
+    .eq("id", id);
+  if (error) throw new Error(`deleteAccessRule: ${error.message}`);
+  return (count ?? 0) > 0;
 }

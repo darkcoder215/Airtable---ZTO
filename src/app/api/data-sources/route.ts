@@ -35,13 +35,11 @@ export async function GET(request: NextRequest) {
   const action = searchParams.get("action");
   const sourceId = searchParams.get("sourceId");
 
-  // Return articles for a source (or all articles)
   if (action === "articles") {
-    const articles = getArticles(sourceId || undefined);
+    const articles = await getArticles(sourceId || undefined);
     return NextResponse.json({ articles });
   }
 
-  // Live fetch from a single source via GET
   if (action === "fetch" && sourceId) {
     try {
       const result = await fetchSource(sourceId);
@@ -62,7 +60,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Status check for Apify + OpenRouter
   if (action === "status") {
     return NextResponse.json({
       apifyConfigured: !!getApifyToken(),
@@ -70,14 +67,12 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Filter history
   if (action === "filter-history") {
-    const history = getFilterHistory();
+    const history = await getFilterHistory();
     return NextResponse.json({ history });
   }
 
-  // Default: return all sources
-  const sources = getDataSources();
+  const sources = await getDataSources();
   return NextResponse.json({ sources });
 }
 
@@ -94,12 +89,9 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case "create": {
         if (user.role !== "admin") {
-          return NextResponse.json(
-            { error: "صلاحيات المدير مطلوبة" },
-            { status: 403 }
-          );
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
-        const source = createDataSource(data);
+        const source = await createDataSource(data);
         logger.info(
           `Data source "${source.name}" created by ${user.name}`,
           "DataSources",
@@ -112,17 +104,11 @@ export async function POST(request: NextRequest) {
       case "update": {
         const { id, ...update } = data;
         if (!id) {
-          return NextResponse.json(
-            { error: "معرّف المصدر مطلوب" },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: "معرّف المصدر مطلوب" }, { status: 400 });
         }
-        const updated = updateDataSource(id, update);
+        const updated = await updateDataSource(id, update);
         if (!updated) {
-          return NextResponse.json(
-            { error: "المصدر غير موجود" },
-            { status: 404 }
-          );
+          return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
         }
         logger.info(
           `Data source ${id} updated by ${user.name}`,
@@ -135,23 +121,14 @@ export async function POST(request: NextRequest) {
 
       case "delete": {
         if (user.role !== "admin") {
-          return NextResponse.json(
-            { error: "صلاحيات المدير مطلوبة" },
-            { status: 403 }
-          );
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
         if (!data.id) {
-          return NextResponse.json(
-            { error: "معرّف المصدر مطلوب" },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: "معرّف المصدر مطلوب" }, { status: 400 });
         }
-        const deleted = deleteDataSource(data.id);
+        const deleted = await deleteDataSource(data.id);
         if (!deleted) {
-          return NextResponse.json(
-            { error: "المصدر غير موجود" },
-            { status: 404 }
-          );
+          return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
         }
         logger.info(
           `Data source ${data.id} deleted by ${user.name}`,
@@ -165,17 +142,11 @@ export async function POST(request: NextRequest) {
       case "fetch": {
         const sourceId = data.sourceId || data.id;
         if (!sourceId) {
-          return NextResponse.json(
-            { error: "معرّف المصدر مطلوب" },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: "معرّف المصدر مطلوب" }, { status: 400 });
         }
-        const source = getDataSourceById(sourceId);
+        const source = await getDataSourceById(sourceId);
         if (!source) {
-          return NextResponse.json(
-            { error: "المصدر غير موجود" },
-            { status: 404 }
-          );
+          return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
         }
         try {
           const result = await fetchSource(sourceId);
@@ -215,25 +186,34 @@ export async function POST(request: NextRequest) {
         const articleId = data.articleId;
         const sourceName = data.sourceName || "Unknown";
         if (articleId) {
-          const article = getArticleById(articleId);
+          const article = await getArticleById(articleId);
           if (!article) {
             return NextResponse.json({ error: "المقال غير موجود" }, { status: 404 });
           }
           const ok = await saveArticleToAirtable(article, sourceName);
           if (ok) {
-            logger.info(`Article saved to Airtable: ${article.title?.slice(0, 50)}`, "DataSources", null, user.id);
+            logger.info(
+              `Article saved to Airtable: ${article.title?.slice(0, 50)}`,
+              "DataSources",
+              null,
+              user.id
+            );
             return NextResponse.json({ success: true });
           }
           return NextResponse.json({ error: "فشل الحفظ في Airtable" }, { status: 500 });
         }
-        // Bulk save — save all unsaved articles from a source
         const bulkSourceId = data.sourceId;
         if (bulkSourceId) {
-          const articles = getArticles(bulkSourceId);
+          const articles = await getArticles(bulkSourceId);
           const unsaved = articles.filter((a) => !a.savedToAirtable);
-          const source = getDataSourceById(bulkSourceId);
+          const source = await getDataSourceById(bulkSourceId);
           const count = await saveArticlesToAirtable(unsaved, source?.name || sourceName);
-          logger.info(`Bulk saved ${count} articles to Airtable from "${source?.name}"`, "DataSources", null, user.id);
+          logger.info(
+            `Bulk saved ${count} articles to Airtable from "${source?.name}"`,
+            "DataSources",
+            null,
+            user.id
+          );
           return NextResponse.json({ success: true, saved: count });
         }
         return NextResponse.json({ error: "articleId أو sourceId مطلوب" }, { status: 400 });
@@ -265,10 +245,7 @@ export async function POST(request: NextRequest) {
       }
 
       default:
-        return NextResponse.json(
-          { error: "إجراء غير صالح" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "إجراء غير صالح" }, { status: 400 });
     }
   } catch (error) {
     logger.error("DataSources API error", "DataSources", error, user?.id);

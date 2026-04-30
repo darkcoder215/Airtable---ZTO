@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
   }
 
-  const rules = getAccessRules();
+  const rules = await getAccessRules();
   return NextResponse.json({ rules });
 }
 
@@ -39,14 +39,14 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "create": {
-        const rule = addAccessRule(data);
+        const rule = await addAccessRule(data);
         logger.info(`Access rule created by ${user.name}`, "AccessControl", rule, user.id);
         return NextResponse.json({ rule });
       }
 
       case "update": {
         const { id, ...update } = data;
-        const updated = updateAccessRule(id, update);
+        const updated = await updateAccessRule(id, update);
         if (!updated) {
           return NextResponse.json({ error: "القاعدة غير موجودة" }, { status: 404 });
         }
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       }
 
       case "delete": {
-        const deleted = deleteAccessRule(data.id);
+        const deleted = await deleteAccessRule(data.id);
         if (!deleted) {
           return NextResponse.json({ error: "القاعدة غير موجودة" }, { status: 404 });
         }

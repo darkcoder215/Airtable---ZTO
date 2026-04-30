@@ -20,6 +20,6 @@ export async function GET(request: NextRequest) {
   const level = searchParams.get("level") as "info" | "warn" | "error" | "debug" | null;
   const limit = parseInt(searchParams.get("limit") || "100");
 
-  const logs = logger.getLogs(level || undefined, limit);
+  const logs = await logger.getLogs(level || undefined, limit);
   return NextResponse.json({ logs });
 }

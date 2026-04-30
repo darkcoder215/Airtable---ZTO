@@ -7,6 +7,7 @@ import {
   deleteAgent,
   executeAgent,
   addExecution,
+  updateExecution,
   getOpenRouterKey,
   OPENROUTER_MODELS,
 } from "@/lib/agents";
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ configured: hasKey, models: OPENROUTER_MODELS });
   }
 
-  const agents = getAgents();
+  const agents = await getAgents();
   return NextResponse.json({ agents });
 }
 
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
         if (user.role !== "admin") {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
-        const agent = createAgent({ ...data, createdBy: user.id });
+        const agent = await createAgent({ ...data, createdBy: user.id });
         logger.info(`Agent "${agent.name}" created by ${user.name}`, "Agents", null, user.id);
         return NextResponse.json({ agent });
       }
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
         const { id, ...update } = data;
-        const updated = updateAgent(id, update);
+        const updated = await updateAgent(id, update);
         if (!updated) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
         if (user.role !== "admin") {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
-        const deleted = deleteAgent(data.id);
+        const deleted = await deleteAgent(data.id);
         if (!deleted) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       }
 
       case "execute": {
-        const agent = getAgentById(data.agentId);
+        const agent = await getAgentById(data.agentId);
         if (!agent) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "الوكيل غير مفعل" }, { status: 400 });
         }
 
-        const execution = addExecution({
+        const execution = await addExecution({
           agentId: agent.id,
           agentName: agent.name,
           modelUsed: data.modelOverride || agent.modelName,
@@ -106,21 +107,22 @@ export async function POST(request: NextRequest) {
 
         try {
           const output = await executeAgent(agent, data.input, data.modelOverride);
-          execution.output = output;
-          execution.status = "completed";
+          const updated = await updateExecution(execution.id, { output, status: "completed" });
           logger.info(`Agent "${agent.name}" executed with ${execution.modelUsed}`, "Agents", null, user.id);
-          return NextResponse.json({ execution });
+          return NextResponse.json({ execution: updated ?? execution });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "خطأ غير معروف";
-          execution.status = "error";
-          execution.error = errMsg;
+          const updated = await updateExecution(execution.id, {
+            status: "error",
+            error: errMsg,
+          });
           logger.error(`Agent "${agent.name}" execution failed`, "Agents", err, user.id);
-          return NextResponse.json({ execution, error: errMsg }, { status: 500 });
+          return NextResponse.json({ execution: updated ?? execution, error: errMsg }, { status: 500 });
         }
       }
 
       case "preview": {
-        const agent = getAgentById(data.agentId);
+        const agent = await getAgentById(data.agentId);
         if (!agent) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }
@@ -133,9 +135,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Multi-model test: run agent against multiple models simultaneously
       case "test": {
-        const agent = getAgentById(data.agentId);
+        const agent = await getAgentById(data.agentId);
         if (!agent) {
           return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
         }

@@ -1110,11 +1110,163 @@ export type Database = {
         }
         Relationships: []
       }
+      scraper_access_rules: {
+        Row: {
+          base_id: string
+          base_name: string
+          can_create: boolean
+          can_delete: boolean
+          can_edit: boolean
+          can_view: boolean
+          created_at: string
+          field_restrictions: string[]
+          filter_formula: string | null
+          id: string
+          table_id: string
+          table_name: string
+          updated_at: string
+          user_id: string
+          user_name: string
+        }
+        Insert: {
+          base_id: string
+          base_name?: string
+          can_create?: boolean
+          can_delete?: boolean
+          can_edit?: boolean
+          can_view?: boolean
+          created_at?: string
+          field_restrictions?: string[]
+          filter_formula?: string | null
+          id?: string
+          table_id: string
+          table_name?: string
+          updated_at?: string
+          user_id: string
+          user_name?: string
+        }
+        Update: {
+          base_id?: string
+          base_name?: string
+          can_create?: boolean
+          can_delete?: boolean
+          can_edit?: boolean
+          can_view?: boolean
+          created_at?: string
+          field_restrictions?: string[]
+          filter_formula?: string | null
+          id?: string
+          table_id?: string
+          table_name?: string
+          updated_at?: string
+          user_id?: string
+          user_name?: string
+        }
+        Relationships: []
+      }
+      scraper_agent_runs: {
+        Row: {
+          agent_id: string | null
+          agent_name: string
+          duration_ms: number | null
+          error: string | null
+          executed_at: string
+          executed_by: string | null
+          id: string
+          input: string
+          model_used: string
+          output: string
+          status: Database["public"]["Enums"]["scraper_agent_run_status"]
+        }
+        Insert: {
+          agent_id?: string | null
+          agent_name: string
+          duration_ms?: number | null
+          error?: string | null
+          executed_at?: string
+          executed_by?: string | null
+          id?: string
+          input: string
+          model_used: string
+          output?: string
+          status?: Database["public"]["Enums"]["scraper_agent_run_status"]
+        }
+        Update: {
+          agent_id?: string | null
+          agent_name?: string
+          duration_ms?: number | null
+          error?: string | null
+          executed_at?: string
+          executed_by?: string | null
+          id?: string
+          input?: string
+          model_used?: string
+          output?: string
+          status?: Database["public"]["Enums"]["scraper_agent_run_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scraper_agent_runs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "scraper_agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scraper_agents: {
+        Row: {
+          agent_type: Database["public"]["Enums"]["scraper_agent_type"]
+          created_at: string
+          created_by: string | null
+          description: string
+          example_posts: Json
+          id: string
+          is_active: boolean
+          max_tokens: number
+          model_name: string
+          name: string
+          system_prompt: string
+          temperature: number
+          updated_at: string
+        }
+        Insert: {
+          agent_type: Database["public"]["Enums"]["scraper_agent_type"]
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          example_posts?: Json
+          id?: string
+          is_active?: boolean
+          max_tokens?: number
+          model_name: string
+          name: string
+          system_prompt?: string
+          temperature?: number
+          updated_at?: string
+        }
+        Update: {
+          agent_type?: Database["public"]["Enums"]["scraper_agent_type"]
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          example_posts?: Json
+          id?: string
+          is_active?: boolean
+          max_tokens?: number
+          model_name?: string
+          name?: string
+          system_prompt?: string
+          temperature?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       scraper_articles: {
         Row: {
           airtable_record_id: string | null
           author: string | null
-          brand_id: string
+          brand_id: string | null
           created_at: string
           description: string | null
           external_id: string | null
@@ -1132,7 +1284,7 @@ export type Database = {
         Insert: {
           airtable_record_id?: string | null
           author?: string | null
-          brand_id: string
+          brand_id?: string | null
           created_at?: string
           description?: string | null
           external_id?: string | null
@@ -1150,7 +1302,7 @@ export type Database = {
         Update: {
           airtable_record_id?: string | null
           author?: string | null
-          brand_id?: string
+          brand_id?: string | null
           created_at?: string
           description?: string | null
           external_id?: string | null
@@ -1233,7 +1385,7 @@ export type Database = {
       }
       scraper_fetch_runs: {
         Row: {
-          brand_id: string
+          brand_id: string | null
           created_at: string
           duration_ms: number | null
           error_message: string | null
@@ -1248,7 +1400,7 @@ export type Database = {
           status: Database["public"]["Enums"]["scraper_run_status"]
         }
         Insert: {
-          brand_id: string
+          brand_id?: string | null
           created_at?: string
           duration_ms?: number | null
           error_message?: string | null
@@ -1263,7 +1415,7 @@ export type Database = {
           status: Database["public"]["Enums"]["scraper_run_status"]
         }
         Update: {
-          brand_id?: string
+          brand_id?: string | null
           created_at?: string
           duration_ms?: number | null
           error_message?: string | null
@@ -1294,9 +1446,86 @@ export type Database = {
           },
         ]
       }
+      scraper_filter_runs: {
+        Row: {
+          articles: Json
+          created_at: string
+          id: string
+          model: string
+          passed_articles: number
+          raw_response: string | null
+          rejected_articles: number
+          source_id: string | null
+          source_name: string
+          total_articles: number
+        }
+        Insert: {
+          articles?: Json
+          created_at?: string
+          id?: string
+          model?: string
+          passed_articles?: number
+          raw_response?: string | null
+          rejected_articles?: number
+          source_id?: string | null
+          source_name?: string
+          total_articles?: number
+        }
+        Update: {
+          articles?: Json
+          created_at?: string
+          id?: string
+          model?: string
+          passed_articles?: number
+          raw_response?: string | null
+          rejected_articles?: number
+          source_id?: string | null
+          source_name?: string
+          total_articles?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scraper_filter_runs_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "scraper_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scraper_logs: {
+        Row: {
+          context: string | null
+          created_at: string
+          details: Json
+          id: number
+          level: Database["public"]["Enums"]["scraper_log_level"]
+          message: string
+          user_id: string | null
+        }
+        Insert: {
+          context?: string | null
+          created_at?: string
+          details?: Json
+          id?: number
+          level?: Database["public"]["Enums"]["scraper_log_level"]
+          message: string
+          user_id?: string | null
+        }
+        Update: {
+          context?: string | null
+          created_at?: string
+          details?: Json
+          id?: number
+          level?: Database["public"]["Enums"]["scraper_log_level"]
+          message?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       scraper_sources: {
         Row: {
-          brand_id: string
+          brand_id: string | null
           category: string
           config: Json
           consecutive_errors: number
@@ -1314,7 +1543,7 @@ export type Database = {
           url: string
         }
         Insert: {
-          brand_id: string
+          brand_id?: string | null
           category?: string
           config?: Json
           consecutive_errors?: number
@@ -1332,7 +1561,7 @@ export type Database = {
           url: string
         }
         Update: {
-          brand_id?: string
+          brand_id?: string | null
           category?: string
           config?: Json
           consecutive_errors?: number
@@ -1702,6 +1931,9 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "member"
+      scraper_agent_run_status: "pending" | "running" | "completed" | "error"
+      scraper_agent_type: "writing" | "filtering" | "editing" | "summarizing"
+      scraper_log_level: "debug" | "info" | "warn" | "error"
       scraper_run_status: "success" | "partial" | "error" | "empty" | "skipped"
       scraper_source_type: "rss" | "twitter" | "linkedin" | "apify" | "custom"
     }
@@ -1832,6 +2064,9 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "member"],
+      scraper_agent_run_status: ["pending", "running", "completed", "error"],
+      scraper_agent_type: ["writing", "filtering", "editing", "summarizing"],
+      scraper_log_level: ["debug", "info", "warn", "error"],
       scraper_run_status: ["success", "partial", "error", "empty", "skipped"],
       scraper_source_type: ["rss", "twitter", "linkedin", "apify", "custom"],
     },

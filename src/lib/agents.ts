@@ -1,21 +1,14 @@
-// AI Agent configuration storage - in memory for now
-// All model calls go through OpenRouter API
+// AI Agent configuration + execution log, persisted in Supabase
+// (scraper_agents, scraper_agent_runs). All model calls go through OpenRouter.
 
-export interface AgentConfig {
-  id: string;
-  name: string;
-  description: string;
-  modelName: string;
-  systemPrompt: string;
-  examplePosts: ExamplePost[];
-  temperature: number;
-  maxTokens: number;
-  agentType: "writing" | "filtering" | "editing" | "summarizing";
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-  createdBy: string;
-}
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import type { Database } from "@/lib/supabase/database.types";
+
+type AgentRow = Database["public"]["Tables"]["scraper_agents"]["Row"];
+type AgentRunRow = Database["public"]["Tables"]["scraper_agent_runs"]["Row"];
+
+export type AgentType = "writing" | "filtering" | "editing" | "summarizing";
+export type ExecutionStatus = "pending" | "running" | "completed" | "error";
 
 export interface ExamplePost {
   id: string;
@@ -30,6 +23,22 @@ export interface ExamplePost {
   };
 }
 
+export interface AgentConfig {
+  id: string;
+  name: string;
+  description: string;
+  modelName: string;
+  systemPrompt: string;
+  examplePosts: ExamplePost[];
+  temperature: number;
+  maxTokens: number;
+  agentType: AgentType;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
 export interface AgentExecution {
   id: string;
   agentId: string;
@@ -37,13 +46,12 @@ export interface AgentExecution {
   modelUsed: string;
   input: string;
   output: string;
-  status: "pending" | "running" | "completed" | "error";
+  status: ExecutionStatus;
   error?: string;
   executedAt: string;
   executedBy: string;
 }
 
-// OpenRouter model list — curated set of popular models
 export const OPENROUTER_MODELS = [
   { id: "openai/gpt-4o", label: "GPT-4o", provider: "OpenAI" },
   { id: "openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
@@ -59,69 +67,201 @@ export const OPENROUTER_MODELS = [
   { id: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B", provider: "Qwen" },
 ];
 
-// In-memory stores
-let agents: AgentConfig[] = [];
-const executions: AgentExecution[] = [];
-
-// OpenRouter API key (set via env or per-request)
 export function getOpenRouterKey(): string | null {
   return process.env.OPENROUTER_API_KEY || null;
 }
 
-export function getAgents(): AgentConfig[] {
-  return [...agents];
-}
+// ---------------------------------------------------------------------------
+// Mappers
+// ---------------------------------------------------------------------------
 
-export function getAgentById(id: string): AgentConfig | null {
-  return agents.find((a) => a.id === id) || null;
-}
-
-export function createAgent(
-  config: Omit<AgentConfig, "id" | "createdAt" | "updatedAt">
-): AgentConfig {
-  const agent: AgentConfig = {
-    ...config,
-    id: `agent-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+function mapAgent(row: AgentRow): AgentConfig {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    modelName: row.model_name,
+    systemPrompt: row.system_prompt,
+    examplePosts: Array.isArray(row.example_posts)
+      ? (row.example_posts as unknown as ExamplePost[])
+      : [],
+    temperature: Number(row.temperature),
+    maxTokens: row.max_tokens,
+    agentType: row.agent_type as AgentType,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: row.created_by ?? "",
   };
-  agents.push(agent);
-  return agent;
 }
 
-export function updateAgent(
+function mapRun(row: AgentRunRow): AgentExecution {
+  return {
+    id: row.id,
+    agentId: row.agent_id ?? "",
+    agentName: row.agent_name,
+    modelUsed: row.model_used,
+    input: row.input,
+    output: row.output,
+    status: row.status as ExecutionStatus,
+    error: row.error ?? undefined,
+    executedAt: row.executed_at,
+    executedBy: row.executed_by ?? "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Agent CRUD
+// ---------------------------------------------------------------------------
+
+export async function getAgents(): Promise<AgentConfig[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_agents")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`getAgents: ${error.message}`);
+  return (data ?? []).map(mapAgent);
+}
+
+export async function getAgentById(id: string): Promise<AgentConfig | null> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_agents")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`getAgentById: ${error.message}`);
+  return data ? mapAgent(data) : null;
+}
+
+export async function createAgent(
+  config: Omit<AgentConfig, "id" | "createdAt" | "updatedAt">
+): Promise<AgentConfig> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_agents")
+    .insert({
+      name: config.name,
+      description: config.description,
+      model_name: config.modelName,
+      system_prompt: config.systemPrompt,
+      example_posts: (config.examplePosts ?? []) as unknown as Database["public"]["Tables"]["scraper_agents"]["Insert"]["example_posts"],
+      temperature: config.temperature,
+      max_tokens: config.maxTokens,
+      agent_type: config.agentType,
+      is_active: config.isActive,
+      created_by: isUuid(config.createdBy) ? config.createdBy : null,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`createAgent: ${error.message}`);
+  return mapAgent(data);
+}
+
+export async function updateAgent(
   id: string,
   update: Partial<AgentConfig>
-): AgentConfig | null {
-  const index = agents.findIndex((a) => a.id === id);
-  if (index === -1) return null;
-  agents[index] = {
-    ...agents[index],
-    ...update,
-    updatedAt: new Date().toISOString(),
+): Promise<AgentConfig | null> {
+  const sb = getSupabaseAdmin();
+  const patch: Database["public"]["Tables"]["scraper_agents"]["Update"] = {
+    updated_at: new Date().toISOString(),
   };
-  return agents[index];
+  if (update.name !== undefined) patch.name = update.name;
+  if (update.description !== undefined) patch.description = update.description;
+  if (update.modelName !== undefined) patch.model_name = update.modelName;
+  if (update.systemPrompt !== undefined) patch.system_prompt = update.systemPrompt;
+  if (update.examplePosts !== undefined) {
+    patch.example_posts = update.examplePosts as unknown as typeof patch.example_posts;
+  }
+  if (update.temperature !== undefined) patch.temperature = update.temperature;
+  if (update.maxTokens !== undefined) patch.max_tokens = update.maxTokens;
+  if (update.agentType !== undefined) patch.agent_type = update.agentType;
+  if (update.isActive !== undefined) patch.is_active = update.isActive;
+
+  const { data, error } = await sb
+    .from("scraper_agents")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(`updateAgent: ${error.message}`);
+  return data ? mapAgent(data) : null;
 }
 
-export function deleteAgent(id: string): boolean {
-  const index = agents.findIndex((a) => a.id === id);
-  if (index === -1) return false;
-  agents.splice(index, 1);
-  return true;
+export async function deleteAgent(id: string): Promise<boolean> {
+  const sb = getSupabaseAdmin();
+  const { error, count } = await sb
+    .from("scraper_agents")
+    .delete({ count: "exact" })
+    .eq("id", id);
+  if (error) throw new Error(`deleteAgent: ${error.message}`);
+  return (count ?? 0) > 0;
 }
 
-export function addExecution(exec: Omit<AgentExecution, "id">): AgentExecution {
-  const execution: AgentExecution = { ...exec, id: `exec-${Date.now()}` };
-  executions.push(execution);
-  return execution;
+// ---------------------------------------------------------------------------
+// Execution log
+// ---------------------------------------------------------------------------
+
+export async function addExecution(
+  exec: Omit<AgentExecution, "id">
+): Promise<AgentExecution> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_agent_runs")
+    .insert({
+      agent_id: isUuid(exec.agentId) ? exec.agentId : null,
+      agent_name: exec.agentName,
+      model_used: exec.modelUsed,
+      input: exec.input,
+      output: exec.output,
+      status: exec.status,
+      error: exec.error ?? null,
+      executed_by: exec.executedBy || null,
+      executed_at: exec.executedAt,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`addExecution: ${error.message}`);
+  return mapRun(data);
 }
 
-export function getExecutions(agentId?: string): AgentExecution[] {
-  if (agentId) return executions.filter((e) => e.agentId === agentId);
-  return [...executions];
+export async function updateExecution(
+  id: string,
+  patch: Partial<Pick<AgentExecution, "output" | "status" | "error">>
+): Promise<AgentExecution | null> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_agent_runs")
+    .update({
+      output: patch.output,
+      status: patch.status,
+      error: patch.error ?? null,
+    })
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(`updateExecution: ${error.message}`);
+  return data ? mapRun(data) : null;
 }
 
-// Execute an agent via OpenRouter
+export async function getExecutions(agentId?: string): Promise<AgentExecution[]> {
+  const sb = getSupabaseAdmin();
+  let q = sb
+    .from("scraper_agent_runs")
+    .select("*")
+    .order("executed_at", { ascending: false })
+    .limit(200);
+  if (agentId) q = q.eq("agent_id", agentId);
+  const { data, error } = await q;
+  if (error) throw new Error(`getExecutions: ${error.message}`);
+  return (data ?? []).map(mapRun);
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter execution
+// ---------------------------------------------------------------------------
+
 export async function executeAgent(
   agent: AgentConfig,
   userInput: string,
@@ -129,10 +269,7 @@ export async function executeAgent(
   apiKeyOverride?: string
 ): Promise<string> {
   const examplesContext = agent.examplePosts
-    .map(
-      (ex, i) =>
-        `مثال ${i + 1}:\nالعنوان: ${ex.title}\nالمحتوى: ${ex.content}`
-    )
+    .map((ex, i) => `مثال ${i + 1}:\nالعنوان: ${ex.title}\nالمحتوى: ${ex.content}`)
     .join("\n\n");
 
   const systemPrompt = `${agent.systemPrompt}\n\n${examplesContext ? `أمثلة مرجعية:\n${examplesContext}` : ""}`;
@@ -183,4 +320,13 @@ async function callOpenRouter(
     throw new Error("لم يتم استلام رد من النموذج");
   }
   return data.choices[0].message.content;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(s: string | null | undefined): boolean {
+  return !!s && UUID_RE.test(s);
 }
