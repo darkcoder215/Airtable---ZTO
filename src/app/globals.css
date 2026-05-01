@@ -1,43 +1,130 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Tailwind theme tokens — these stay in @theme so utilities
+   like bg-brand and text-gold work. Default values match the
+   dark theme; the light theme overrides these vars on <html>
+   below so the same utilities recolor automatically.
+   ============================================================ */
 @theme {
-  --color-brand: #1a1a1a;
-  --color-brand-light: #232323;
-  --color-brand-lighter: #2e2e2e;
-  --color-brand-border: #3a3a3a;
-  --color-brand-hover: #444444;
-  --color-gold: #c9a84c;
-  --color-gold-dark: #a88a3a;
-  --color-gold-light: #e2cc7e;
-  --color-gold-bg: rgba(201, 168, 76, 0.12);
-  --color-txt: #e4e4e4;
-  --color-txt-dim: #9a9a9a;
-  --color-txt-faint: #666666;
-  --color-ok: #34d399;
-  --color-ok-bg: rgba(52, 211, 153, 0.12);
-  --color-warn: #fbbf24;
-  --color-warn-bg: rgba(251, 191, 36, 0.12);
-  --color-err: #f87171;
-  --color-err-bg: rgba(248, 113, 113, 0.12);
-  --color-info: #60a5fa;
-  --color-info-bg: rgba(96, 165, 250, 0.12);
+  --color-brand: var(--c-brand);
+  --color-brand-light: var(--c-brand-light);
+  --color-brand-lighter: var(--c-brand-lighter);
+  --color-brand-border: var(--c-brand-border);
+  --color-brand-hover: var(--c-brand-hover);
+  --color-gold: var(--c-gold);
+  --color-gold-dark: var(--c-gold-dark);
+  --color-gold-light: var(--c-gold-light);
+  --color-gold-bg: var(--c-gold-bg);
+  --color-txt: var(--c-txt);
+  --color-txt-dim: var(--c-txt-dim);
+  --color-txt-faint: var(--c-txt-faint);
+  --color-ok: var(--c-ok);
+  --color-ok-bg: var(--c-ok-bg);
+  --color-warn: var(--c-warn);
+  --color-warn-bg: var(--c-warn-bg);
+  --color-err: var(--c-err);
+  --color-err-bg: var(--c-err-bg);
+  --color-info: var(--c-info);
+  --color-info-bg: var(--c-info-bg);
   --font-sans: 'Noto Kufi Arabic', system-ui, sans-serif;
+}
+
+/* ============================================================
+   Default (dark) theme
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  --c-brand: #1a1a1a;
+  --c-brand-light: #232323;
+  --c-brand-lighter: #2e2e2e;
+  --c-brand-border: #3a3a3a;
+  --c-brand-hover: #444444;
+  --c-gold: #c9a84c;
+  --c-gold-dark: #a88a3a;
+  --c-gold-light: #e2cc7e;
+  --c-gold-bg: rgba(201, 168, 76, 0.12);
+  --c-txt: #e4e4e4;
+  --c-txt-dim: #9a9a9a;
+  --c-txt-faint: #666666;
+  --c-ok: #34d399;
+  --c-ok-bg: rgba(52, 211, 153, 0.12);
+  --c-warn: #fbbf24;
+  --c-warn-bg: rgba(251, 191, 36, 0.12);
+  --c-err: #f87171;
+  --c-err-bg: rgba(248, 113, 113, 0.12);
+  --c-info: #60a5fa;
+  --c-info-bg: rgba(96, 165, 250, 0.12);
+
+  /* Semantic surface tokens used by the override layer below. */
+  --surface-page: #111111;
+  --surface-card: #1a1a1a;
+  --surface-elevated: #232323;
+  --surface-sunken: #0d0d0d;
+  --surface-header: #161616;
+  --border-strong: #3a3a3a;
+  --border-soft: #262626;
+  --text-strong: #ffffff;
+  --text-base: #e4e4e4;
+  --text-dim: #9a9a9a;
+  --text-faint: #666666;
+  --modal-overlay: rgba(0, 0, 0, 0.65);
+}
+
+/* ============================================================
+   Light theme — bold black text on pure white
+   ============================================================ */
+[data-theme="light"] {
+  --c-brand: #ffffff;
+  --c-brand-light: #f4f4f5;
+  --c-brand-lighter: #e7e7e9;
+  --c-brand-border: #d4d4d8;
+  --c-brand-hover: #a1a1aa;
+  --c-gold: #a07a1f;
+  --c-gold-dark: #7a5d18;
+  --c-gold-light: #c9a84c;
+  --c-gold-bg: rgba(160, 122, 31, 0.12);
+  --c-txt: #0a0a0a;
+  --c-txt-dim: #404040;
+  --c-txt-faint: #737373;
+  --c-ok: #047857;
+  --c-ok-bg: rgba(4, 120, 87, 0.10);
+  --c-warn: #b45309;
+  --c-warn-bg: rgba(180, 83, 9, 0.10);
+  --c-err: #b91c1c;
+  --c-err-bg: rgba(185, 28, 28, 0.10);
+  --c-info: #1d4ed8;
+  --c-info-bg: rgba(29, 78, 216, 0.10);
+
+  --surface-page: #ffffff;
+  --surface-card: #ffffff;
+  --surface-elevated: #f4f4f5;
+  --surface-sunken: #fafafa;
+  --surface-header: #f4f4f5;
+  --border-strong: #d4d4d8;
+  --border-soft: #e7e7e9;
+  --text-strong: #000000;
+  --text-base: #0a0a0a;
+  --text-dim: #404040;
+  --text-faint: #737373;
+  --modal-overlay: rgba(15, 23, 42, 0.45);
 }
 
 @layer base {
   html { direction: rtl; }
   body {
-    background: #111111;
-    color: var(--color-txt);
+    background: var(--surface-page);
+    color: var(--text-base);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
-  ::selection { background: var(--color-gold); color: #000; }
+  ::selection { background: var(--c-gold); color: #000; }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-  input[type="checkbox"] { accent-color: var(--color-gold); }
-  input[type="range"] { accent-color: var(--color-gold); }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  input[type="checkbox"] { accent-color: var(--c-gold); }
+  input[type="range"] { accent-color: var(--c-gold); }
 }
 
 /* ========== Buttons ========== */
@@ -53,126 +140,129 @@
 .zto-btn:active:not(:disabled) { transform: scale(0.97); }
 
 .zto-btn-fill {
-  background: #fff; color: #000; border-color: #fff;
+  background: var(--text-strong); color: var(--surface-page); border-color: var(--text-strong);
 }
-.zto-btn-fill:hover:not(:disabled) { background: #e8e8e8; border-color: #e8e8e8; }
+.zto-btn-fill:hover:not(:disabled) { opacity: 0.85; }
 
 .zto-btn-gold {
-  background: var(--color-gold); color: #000; border-color: var(--color-gold);
+  background: var(--c-gold); color: #000; border-color: var(--c-gold);
 }
-.zto-btn-gold:hover:not(:disabled) { background: var(--color-gold-dark); border-color: var(--color-gold-dark); }
+.zto-btn-gold:hover:not(:disabled) { background: var(--c-gold-dark); border-color: var(--c-gold-dark); }
+[data-theme="light"] .zto-btn-gold { color: #fff; }
 
 .zto-btn-ghost {
-  background: transparent; color: var(--color-txt-dim); border-color: transparent;
+  background: transparent; color: var(--c-txt-dim); border-color: transparent;
   padding: 8px 14px;
 }
-.zto-btn-ghost:hover:not(:disabled) { background: var(--color-brand-lighter); color: #fff; }
+.zto-btn-ghost:hover:not(:disabled) { background: var(--c-brand-lighter); color: var(--text-strong); }
 
 .zto-btn-outline {
-  background: transparent; color: var(--color-txt); border-color: var(--color-brand-border);
+  background: transparent; color: var(--c-txt); border-color: var(--c-brand-border);
 }
-.zto-btn-outline:hover:not(:disabled) { background: var(--color-brand-lighter); border-color: var(--color-brand-hover); }
+.zto-btn-outline:hover:not(:disabled) { background: var(--c-brand-lighter); border-color: var(--c-brand-hover); }
 
 .zto-btn-danger {
-  background: var(--color-err); color: #fff; border-color: var(--color-err);
+  background: var(--c-err); color: #fff; border-color: var(--c-err);
 }
-.zto-btn-danger:hover:not(:disabled) { background: #ef4444; }
+.zto-btn-danger:hover:not(:disabled) { opacity: 0.9; }
 
 .zto-btn-ok {
-  background: var(--color-ok); color: #000; border-color: var(--color-ok);
+  background: var(--c-ok); color: #000; border-color: var(--c-ok);
 }
+[data-theme="light"] .zto-btn-ok { color: #fff; }
 
 .zto-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
 
 /* ========== Inputs ========== */
 .zto-input {
   width: 100%; border-radius: 10px;
-  border: 1.5px solid var(--color-brand-border);
-  background: var(--color-brand); padding: 10px 14px;
-  font-size: 14px; font-weight: 500; color: #fff;
+  border: 1.5px solid var(--c-brand-border);
+  background: var(--c-brand); padding: 10px 14px;
+  font-size: 14px; font-weight: 500; color: var(--text-strong);
   outline: none; transition: border-color 0.15s; font-family: inherit;
 }
-.zto-input::placeholder { color: var(--color-txt-faint); }
-.zto-input:focus { border-color: var(--color-gold); }
+.zto-input::placeholder { color: var(--c-txt-faint); }
+.zto-input:focus { border-color: var(--c-gold); }
 textarea.zto-input { resize: vertical; line-height: 1.7; }
 
-/* Select wrapper for RTL chevron */
 .zto-select-wrap { position: relative; }
 .zto-select-wrap select { padding-left: 36px; appearance: none; cursor: pointer; }
 .zto-select-wrap::after {
   content: ""; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   width: 0; height: 0;
   border-right: 5px solid transparent; border-left: 5px solid transparent;
-  border-top: 5px solid var(--color-txt-faint);
+  border-top: 5px solid var(--c-txt-faint);
   pointer-events: none;
 }
 
 /* ========== Cards ========== */
 .zto-card {
-  background: var(--color-brand); border-radius: 14px;
-  border: 1.5px solid var(--color-brand-border);
+  background: var(--c-brand); border-radius: 14px;
+  border: 1.5px solid var(--c-brand-border);
 }
 
 /* ========== Labels / Badges ========== */
-.zto-label { display: block; font-size: 13px; font-weight: 700; color: var(--color-txt-dim); margin-bottom: 6px; }
+.zto-label { display: block; font-size: 13px; font-weight: 700; color: var(--c-txt-dim); margin-bottom: 6px; }
 
 .zto-badge {
   display: inline-flex; align-items: center; gap: 4px;
   border-radius: 6px; padding: 3px 10px;
   font-size: 11px; font-weight: 700;
 }
-.zto-badge-default { background: var(--color-brand-lighter); color: var(--color-txt-dim); }
-.zto-badge-gold { background: var(--color-gold-bg); color: var(--color-gold); }
-.zto-badge-ok { background: var(--color-ok-bg); color: var(--color-ok); }
-.zto-badge-warn { background: var(--color-warn-bg); color: var(--color-warn); }
-.zto-badge-err { background: var(--color-err-bg); color: var(--color-err); }
-.zto-badge-info { background: var(--color-info-bg); color: var(--color-info); }
+.zto-badge-default { background: var(--c-brand-lighter); color: var(--c-txt-dim); }
+.zto-badge-gold { background: var(--c-gold-bg); color: var(--c-gold); }
+.zto-badge-ok { background: var(--c-ok-bg); color: var(--c-ok); }
+.zto-badge-warn { background: var(--c-warn-bg); color: var(--c-warn); }
+.zto-badge-err { background: var(--c-err-bg); color: var(--c-err); }
+.zto-badge-info { background: var(--c-info-bg); color: var(--c-info); }
 
 /* ========== Table ========== */
 .zto-th {
-  background: var(--color-brand-light); padding: 10px 14px; text-align: right;
-  font-size: 11px; font-weight: 800; color: var(--color-txt-faint);
+  background: var(--c-brand-light); padding: 10px 14px; text-align: right;
+  font-size: 11px; font-weight: 800; color: var(--c-txt-faint);
   text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
 }
 .zto-td {
-  padding: 10px 14px; font-size: 13px; color: var(--color-txt);
-  border-bottom: 1px solid var(--color-brand-border); vertical-align: middle;
+  padding: 10px 14px; font-size: 13px; color: var(--c-txt);
+  border-bottom: 1px solid var(--c-brand-border); vertical-align: middle;
 }
-.zto-tr:hover .zto-td { background: var(--color-brand-light); }
+.zto-tr:hover .zto-td { background: var(--c-brand-light); }
 
 /* ========== Sidebar ========== */
 .zto-nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px; border-radius: 10px; font-size: 13px; font-weight: 600;
-  color: var(--color-txt-dim); transition: all 0.15s; text-decoration: none;
+  color: var(--c-txt-dim); transition: all 0.15s; text-decoration: none;
   border: 1.5px solid transparent;
 }
-.zto-nav-item:hover { background: var(--color-brand-lighter); color: #fff; }
+.zto-nav-item:hover { background: var(--c-brand-lighter); color: var(--text-strong); }
 .zto-nav-active {
-  background: var(--color-gold-bg) !important; color: var(--color-gold) !important;
+  background: var(--c-gold-bg) !important; color: var(--c-gold) !important;
   border-color: rgba(201,168,76,0.25) !important;
 }
 
 /* ========== Modal ========== */
 .zto-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
+  position: fixed; inset: 0; background: var(--modal-overlay); backdrop-filter: blur(6px);
   z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .zto-modal {
-  background: var(--color-brand); border-radius: 16px;
-  border: 1.5px solid var(--color-brand-border);
+  background: var(--c-brand); border-radius: 16px;
+  border: 1.5px solid var(--c-brand-border);
   box-shadow: 0 24px 48px rgba(0,0,0,0.5);
   width: 100%; max-height: 85vh; overflow-y: auto;
 }
+[data-theme="light"] .zto-modal { box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18); }
 
 /* ========== Toast ========== */
 .zto-toast {
   position: fixed; bottom: 20px; left: 20px; z-index: 60;
-  background: var(--color-brand); border-radius: 10px;
-  border: 1.5px solid var(--color-brand-border);
+  background: var(--c-brand); border-radius: 10px;
+  border: 1.5px solid var(--c-brand-border);
   padding: 12px 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   display: flex; align-items: center; gap: 10px;
   animation: toastIn 0.25s ease-out; max-width: 380px;
+  color: var(--text-base);
 }
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -184,5 +274,86 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
   display: flex; align-items: center; gap: 10px;
   border-radius: 10px; padding: 12px 16px; font-size: 13px; font-weight: 600;
 }
-.zto-alert-err { background: var(--color-err-bg); color: var(--color-err); border: 1px solid rgba(248,113,113,0.25); }
-.zto-alert-warn { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid rgba(251,191,36,0.25); }
+.zto-alert-err { background: var(--c-err-bg); color: var(--c-err); border: 1px solid var(--c-err-bg); }
+.zto-alert-warn { background: var(--c-warn-bg); color: var(--c-warn); border: 1px solid var(--c-warn-bg); }
+
+/* ============================================================
+   Light-theme shims for legacy hardcoded utility classes.
+   The codebase has ~280 inline color usages (bg-[#1a1a1a],
+   text-white, bg-neutral-9xx). This block reskins them in
+   light mode without touching every component. Dark mode
+   keeps the original Tailwind values untouched.
+   ============================================================ */
+[data-theme="light"] .bg-\[\#0d0d0d\],
+[data-theme="light"] .bg-\[\#111\],
+[data-theme="light"] .bg-\[\#111111\],
+[data-theme="light"] .bg-\[\#0a0a0a\] {
+  background-color: var(--surface-sunken) !important;
+}
+[data-theme="light"] .bg-\[\#1a1a1a\],
+[data-theme="light"] .bg-\[\#151515\],
+[data-theme="light"] .bg-\[\#161616\],
+[data-theme="light"] .bg-\[\#181818\],
+[data-theme="light"] .bg-neutral-900,
+[data-theme="light"] .bg-zinc-900,
+[data-theme="light"] .bg-stone-900 {
+  background-color: var(--surface-card) !important;
+}
+[data-theme="light"] .bg-\[\#232323\],
+[data-theme="light"] .bg-\[\#252525\],
+[data-theme="light"] .bg-\[\#2a2a2a\],
+[data-theme="light"] .bg-\[\#2e2e2e\],
+[data-theme="light"] .bg-neutral-800,
+[data-theme="light"] .bg-zinc-800,
+[data-theme="light"] .bg-stone-800 {
+  background-color: var(--surface-elevated) !important;
+}
+[data-theme="light"] .bg-black {
+  background-color: var(--surface-page) !important;
+}
+[data-theme="light"] .bg-black\/50,
+[data-theme="light"] .bg-black\/40,
+[data-theme="light"] .bg-black\/60 {
+  background-color: rgba(15, 23, 42, 0.30) !important;
+}
+
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-neutral-50,
+[data-theme="light"] .text-neutral-100,
+[data-theme="light"] .text-zinc-50,
+[data-theme="light"] .text-zinc-100 {
+  color: var(--text-strong) !important;
+  font-weight: 700;
+}
+[data-theme="light"] .text-neutral-200,
+[data-theme="light"] .text-neutral-300,
+[data-theme="light"] .text-neutral-400,
+[data-theme="light"] .text-zinc-300,
+[data-theme="light"] .text-zinc-400 {
+  color: var(--text-dim) !important;
+}
+[data-theme="light"] .text-neutral-500,
+[data-theme="light"] .text-neutral-600,
+[data-theme="light"] .text-zinc-500,
+[data-theme="light"] .text-zinc-600 {
+  color: var(--text-faint) !important;
+}
+
+[data-theme="light"] .border-neutral-700,
+[data-theme="light"] .border-neutral-800,
+[data-theme="light"] .border-neutral-900,
+[data-theme="light"] .border-zinc-700,
+[data-theme="light"] .border-zinc-800,
+[data-theme="light"] .border-\[\#3a3a3a\],
+[data-theme="light"] .border-\[\#2a2a2a\],
+[data-theme="light"] .border-\[\#2e2e2e\] {
+  border-color: var(--border-strong) !important;
+}
+
+/* Brand accents (gold/amber) stay as-is for recognizability,
+   but soften for white backgrounds. */
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-amber-500,
+[data-theme="light"] .text-yellow-400 {
+  color: var(--c-gold) !important;
+}

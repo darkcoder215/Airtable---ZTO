@@ -5,6 +5,7 @@ import { useAppStore } from "@/store/app-store";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss, Building2, BarChart3 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/dashboard", label: "قاعدة البيانات", icon: Database },
@@ -100,6 +101,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex-1" />
+          <ThemeToggle />
           <span className="zto-badge zto-badge-gold">{roleName}</span>
           <span className="text-[13px] text-neutral-400 font-bold hidden sm:inline">{user.name}</span>
         </header>

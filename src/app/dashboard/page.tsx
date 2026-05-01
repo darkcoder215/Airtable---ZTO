@@ -36,6 +36,8 @@ import {
   Eye,
   EyeOff,
   Rows3,
+  LayoutGrid,
+  Columns,
 } from "lucide-react";
 
 /* ────────── Types ────────── */
@@ -69,6 +71,34 @@ interface AirtableRecord {
 }
 
 /* ────────── Helpers ────────── */
+
+function renderCellPreview(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => {
+        if (v == null) return "";
+        if (typeof v === "string" || typeof v === "number") return String(v);
+        if (typeof v === "object" && v !== null) {
+          const o = v as Record<string, unknown>;
+          if (typeof o.name === "string") return o.name;
+          if (typeof o.url === "string") return o.url;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("، ");
+  }
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (typeof o.name === "string") return o.name;
+    if (typeof o.url === "string") return o.url;
+    if (typeof o.text === "string") return o.text;
+  }
+  return "";
+}
 
 function getFieldIcon(type: string) {
   switch (type) {
@@ -275,6 +305,60 @@ export default function DashboardPage() {
   /* row height */
   const [rowSize, setRowSize] = useState<"compact" | "normal" | "tall">("normal");
   const rowPadding = rowSize === "compact" ? "py-1.5" : rowSize === "tall" ? "py-5" : "py-3";
+
+  /* view mode */
+  const [view, setView] = useState<"grid" | "kanban">("grid");
+  const [kanbanGroupField, setKanbanGroupField] = useState<string | null>(null);
+  const [kanbanMoving, setKanbanMoving] = useState<string | null>(null);
+
+  // Reset kanban grouping when the table changes; auto-pick first singleSelect.
+  useEffect(() => {
+    if (!selectedTable) {
+      setKanbanGroupField(null);
+      return;
+    }
+    const firstSingleSelect = selectedTable.fields.find((f) => f.type === "singleSelect");
+    setKanbanGroupField(firstSingleSelect ? firstSingleSelect.name : null);
+  }, [selectedTable]);
+
+  const singleSelectFields = selectedTable?.fields.filter((f) => f.type === "singleSelect") || [];
+
+  type ChoiceOption = { name: string; color?: string };
+  function readChoices(field: Field | undefined): ChoiceOption[] {
+    if (!field || field.type !== "singleSelect") return [];
+    const opts = field.options as { choices?: ChoiceOption[] } | undefined;
+    return Array.isArray(opts?.choices) ? opts.choices : [];
+  }
+
+  // Update a single field on a record (used by Kanban "move card" buttons).
+  const updateRecordField = async (recordId: string, fieldName: string, value: unknown) => {
+    if (!selectedBase || !selectedTable) return;
+    setKanbanMoving(recordId);
+    try {
+      const res = await fetch("/api/airtable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          baseId: selectedBase.id,
+          tableId: selectedTable.id,
+          recordId,
+          fields: { [fieldName]: value },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRecords((prev) => prev.map((r) => (r.id === recordId ? data.record : r)));
+        addToast("تم النقل", "success");
+      } else {
+        addToast(data.error || "فشل النقل", "error");
+      }
+    } catch {
+      addToast("حدث خطأ أثناء النقل", "error");
+    } finally {
+      setKanbanMoving(null);
+    }
+  };
 
   /* ──── Fetch bases ──── */
   useEffect(() => {
@@ -956,21 +1040,65 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Row height */}
+            {/* View switcher */}
             <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
-              {(["compact", "normal", "tall"] as const).map((size) => (
-                <button
-                  key={size}
-                  onClick={() => setRowSize(size)}
-                  className={`px-2 py-1 text-[10px] font-bold transition-colors ${
-                    rowSize === size ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
-                  }`}
-                  title={size === "compact" ? "مضغوط" : size === "normal" ? "عادي" : "واسع"}
-                >
-                  <Rows3 className={`w-3 h-3 ${size === "compact" ? "scale-75" : size === "tall" ? "scale-125" : ""}`} />
-                </button>
-              ))}
+              <button
+                onClick={() => setView("grid")}
+                className={`px-2.5 py-1 text-[10px] font-bold transition-colors flex items-center gap-1 ${
+                  view === "grid" ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+                title="عرض الجدول"
+              >
+                <LayoutGrid className="w-3 h-3" />
+                جدول
+              </button>
+              <button
+                onClick={() => setView("kanban")}
+                disabled={singleSelectFields.length === 0}
+                className={`px-2.5 py-1 text-[10px] font-bold transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  view === "kanban" ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+                title={singleSelectFields.length === 0 ? "لا يوجد حقل اختيار واحد للتجميع" : "عرض كانبان"}
+              >
+                <Columns className="w-3 h-3" />
+                كانبان
+              </button>
             </div>
+
+            {/* Kanban group-by selector */}
+            {view === "kanban" && singleSelectFields.length > 1 && (
+              <div className="zto-select-wrap">
+                <select
+                  className="zto-input text-[11px] !py-1 !pr-2 !pl-7 w-36"
+                  value={kanbanGroupField ?? ""}
+                  onChange={(e) => setKanbanGroupField(e.target.value || null)}
+                >
+                  {singleSelectFields.map((f) => (
+                    <option key={f.id} value={f.name}>
+                      التجميع حسب: {f.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Row height (grid view only) */}
+            {view === "grid" && (
+              <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
+                {(["compact", "normal", "tall"] as const).map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setRowSize(size)}
+                    className={`px-2 py-1 text-[10px] font-bold transition-colors ${
+                      rowSize === size ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                    }`}
+                    title={size === "compact" ? "مضغوط" : size === "normal" ? "عادي" : "واسع"}
+                  >
+                    <Rows3 className={`w-3 h-3 ${size === "compact" ? "scale-75" : size === "tall" ? "scale-125" : ""}`} />
+                  </button>
+                ))}
+              </div>
+            )}
 
             <span className="text-[11px] text-neutral-500 font-bold">
               {filteredRecords.length} سجل
@@ -1110,8 +1238,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Records table ── */}
-      {selectedTable && !loadingRecords && !recordsError && filteredRecords.length > 0 && (
+      {/* ── Records table (grid view) ── */}
+      {view === "grid" && selectedTable && !loadingRecords && !recordsError && filteredRecords.length > 0 && (
         <div className="border border-neutral-800 border-t-0 rounded-b-xl overflow-hidden bg-[#0d0d0d]">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
@@ -1336,6 +1464,136 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ── Records kanban (kanban view) ── */}
+      {view === "kanban" && selectedTable && !loadingRecords && !recordsError && filteredRecords.length > 0 && (() => {
+        const groupField = selectedTable.fields.find((f) => f.name === kanbanGroupField);
+        if (!groupField || groupField.type !== "singleSelect") {
+          return (
+            <div className="border border-neutral-800 border-t-0 rounded-b-xl p-12 flex flex-col items-center justify-center text-center bg-[#0d0d0d]">
+              <Columns className="w-10 h-10 text-neutral-700 mb-3" />
+              <p className="text-neutral-400 text-[14px] font-bold">اختر حقل تجميع</p>
+              <p className="text-neutral-600 text-[12px] mt-1">يتطلب عرض كانبان حقلاً من نوع &quot;اختيار واحد&quot;.</p>
+            </div>
+          );
+        }
+        const choices = readChoices(groupField);
+        const noneKey = "__none__";
+        const groups: Record<string, AirtableRecord[]> = { [noneKey]: [] };
+        choices.forEach((c) => { groups[c.name] = []; });
+        for (const rec of filteredRecords) {
+          const v = rec.fields[groupField.name];
+          const key = typeof v === "string" && v in groups ? v : (typeof v === "string" ? v : noneKey);
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(rec);
+        }
+        const orderedKeys = [...choices.map((c) => c.name).filter((k) => k in groups), ...Object.keys(groups).filter((k) => k !== noneKey && !choices.some((c) => c.name === k)), noneKey];
+        const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
+        const cardFields = visibleFields.filter((f) => f.id !== selectedTable.primaryFieldId && f.name !== groupField.name).slice(0, 3);
+
+        const colorMap: Record<string, string> = {
+          redLight2: "#7f1d1d", orangeLight2: "#7c2d12", yellowLight2: "#713f12",
+          greenLight2: "#14532d", tealLight2: "#134e4a", cyanLight2: "#155e75",
+          blueLight2: "#1e3a8a", purpleLight2: "#581c87", pinkLight2: "#831843",
+          grayLight2: "#374151",
+          redBright: "#ef4444", orangeBright: "#f97316", yellowBright: "#eab308",
+          greenBright: "#22c55e", tealBright: "#14b8a6", cyanBright: "#06b6d4",
+          blueBright: "#3b82f6", purpleBright: "#a855f7", pinkBright: "#ec4899",
+          grayBright: "#6b7280",
+        };
+        const choiceColor = (name: string) => {
+          const c = choices.find((x) => x.name === name);
+          return (c?.color && colorMap[c.color]) || "var(--c-brand-lighter)";
+        };
+
+        return (
+          <div className="border border-neutral-800 border-t-0 rounded-b-xl p-3 bg-[#0d0d0d]">
+            <div className="flex gap-3 overflow-x-auto pb-2" dir="rtl">
+              {orderedKeys.map((key) => {
+                const list = groups[key] || [];
+                const isNone = key === noneKey;
+                return (
+                  <div
+                    key={key}
+                    className="shrink-0 w-[280px] bg-[#161616] border border-neutral-800 rounded-xl flex flex-col max-h-[calc(100vh-280px)]"
+                  >
+                    <div className="px-3 py-2.5 border-b border-neutral-800 flex items-center justify-between gap-2 sticky top-0 bg-[#161616] rounded-t-xl">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm shrink-0"
+                          style={{ background: isNone ? "var(--c-txt-faint)" : choiceColor(key) }}
+                        />
+                        <span className="text-[12px] font-bold text-white truncate">
+                          {isNone ? "بدون قيمة" : key}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-neutral-500 font-bold bg-[#1f1f1f] rounded px-1.5 py-0.5">
+                        {list.length}
+                      </span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                      {list.length === 0 && (
+                        <p className="text-[11px] text-neutral-600 text-center py-4">لا سجلات</p>
+                      )}
+                      {list.map((rec) => {
+                        const titleVal = primary ? rec.fields[primary.name] : null;
+                        const title = renderCellPreview(titleVal) || rec.id;
+                        return (
+                          <div
+                            key={rec.id}
+                            className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-2.5 hover:border-neutral-700 transition-colors group"
+                          >
+                            <p className="text-[12px] font-bold text-white leading-snug line-clamp-2 break-words">
+                              {title}
+                            </p>
+                            {cardFields.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                {cardFields.map((f) => {
+                                  const v = rec.fields[f.name];
+                                  if (v == null || v === "") return null;
+                                  const preview = renderCellPreview(v);
+                                  if (!preview) return null;
+                                  return (
+                                    <div key={f.id} className="flex items-start gap-1.5">
+                                      <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
+                                        {f.name}
+                                      </span>
+                                      <span className="text-[11px] text-neutral-300 break-words line-clamp-2">
+                                        {preview}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {canEdit && choices.length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-neutral-800 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="zto-select-wrap">
+                                  <select
+                                    className="zto-input text-[10px] !py-1 !pr-2 !pl-7"
+                                    value={isNone ? "" : key}
+                                    disabled={kanbanMoving === rec.id}
+                                    onChange={(e) => updateRecordField(rec.id, groupField.name, e.target.value || null)}
+                                  >
+                                    <option value="">— بدون —</option>
+                                    {choices.map((c) => (
+                                      <option key={c.name} value={c.name}>{c.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Empty state ── */}
       {selectedTable && !loadingRecords && !recordsError && filteredRecords.length === 0 && (
