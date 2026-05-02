@@ -662,6 +662,147 @@ export async function fetchApifyTwitter(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Apify LinkedIn Scraper (supreme_coder/linkedin-post)
+// ---------------------------------------------------------------------------
+
+interface LinkedInAuthor {
+  firstName?: string;
+  lastName?: string;
+  occupation?: string;
+}
+
+interface LinkedInVideoArtifact {
+  width?: number;
+  height?: number;
+  fileIdentifyingUrlPathSegment?: string;
+}
+
+interface LinkedInVideoThumbnail {
+  rootUrl?: string;
+  artifacts?: LinkedInVideoArtifact[];
+}
+
+interface LinkedInVideoMetadata {
+  thumbnail?: LinkedInVideoThumbnail;
+}
+
+interface LinkedInPost {
+  type?: string;
+  text?: string;
+  url?: string;
+  urn?: string;
+  images?: string[];
+  postedAtISO?: string;
+  postedAtTimestamp?: number;
+  authorName?: string;
+  authorProfileUrl?: string;
+  author?: LinkedInAuthor;
+  linkedinVideo?: { videoPlayMetadata?: LinkedInVideoMetadata };
+}
+
+function pickLinkedInImage(post: LinkedInPost): string | undefined {
+  if (Array.isArray(post.images) && post.images.length > 0 && typeof post.images[0] === "string") {
+    return post.images[0];
+  }
+  const thumb = post.linkedinVideo?.videoPlayMetadata?.thumbnail;
+  if (thumb?.rootUrl && Array.isArray(thumb.artifacts) && thumb.artifacts.length > 0) {
+    const best = [...thumb.artifacts].sort(
+      (a, b) => (b.width ?? 0) - (a.width ?? 0)
+    )[0];
+    if (best?.fileIdentifyingUrlPathSegment) {
+      return `${thumb.rootUrl}${best.fileIdentifyingUrlPathSegment}`;
+    }
+  }
+  return undefined;
+}
+
+export async function fetchApifyLinkedIn(
+  profileUrl: string,
+  sourceId: string,
+  sourceName: string,
+  maxItems: number = 10
+): Promise<RSSFetchResult> {
+  const token = getApifyToken();
+  if (!token) {
+    return {
+      articles: [],
+      error: "مفتاح Apify API غير مُعد. أضف APIFY_API_TOKEN في إعدادات البيئة.",
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.apify.com/v2/acts/supreme_coder~linkedin-post/run-sync-get-dataset-items?token=${token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deepScrape: false,
+          limitPerSource: maxItems,
+          rawData: false,
+          urls: [profileUrl],
+        }),
+        signal: AbortSignal.timeout(180000),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return {
+        articles: [],
+        error: `Apify LinkedIn error (${response.status}): ${errText.slice(0, 200)}`,
+      };
+    }
+
+    const posts: LinkedInPost[] = await response.json();
+    const now = new Date().toISOString();
+    const articles: FetchedArticle[] = posts
+      .filter((p) => p && (p.url || p.urn))
+      .map((post) => {
+        const text = (post.text ?? "").trim();
+        const authorName =
+          post.authorName ||
+          [post.author?.firstName, post.author?.lastName].filter(Boolean).join(" ") ||
+          sourceName;
+        const titleSnippet = text.slice(0, 80).replace(/\s+/g, " ").trim();
+        const title = titleSnippet
+          ? `${authorName}: ${titleSnippet}${text.length > 80 ? "..." : ""}`
+          : `${authorName} — ${post.type ?? "post"}`;
+        const url = post.url || post.authorProfileUrl || profileUrl;
+        let publishedAt = now;
+        if (post.postedAtISO) {
+          const d = new Date(post.postedAtISO);
+          if (!isNaN(d.getTime())) publishedAt = d.toISOString();
+        } else if (typeof post.postedAtTimestamp === "number") {
+          const d = new Date(post.postedAtTimestamp);
+          if (!isNaN(d.getTime())) publishedAt = d.toISOString();
+        }
+        return {
+          id: `transient-${Math.random().toString(36).slice(2, 10)}`,
+          sourceId,
+          sourceName,
+          title,
+          description: text,
+          url,
+          author: authorName,
+          publishedAt,
+          fetchedAt: now,
+          categories: ["linkedin", post.type ?? "post"].filter(Boolean) as string[],
+          imageUrl: pickLinkedInImage(post),
+          isInvestmentRelated: false,
+          savedToAirtable: false,
+        };
+      });
+    return { articles };
+  } catch (err) {
+    return {
+      articles: [],
+      error: err instanceof Error ? err.message : "Unknown LinkedIn fetch error",
+    };
+  }
+}
+
 async function fetchApifyGeneric(
   url: string,
   sourceId: string,
@@ -866,6 +1007,8 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
       result = await fetchRSSFeed(source.url, source.id);
     } else if (source.type === "twitter") {
       result = await fetchApifyTwitter(source.url, source.id, source.name);
+    } else if (source.type === "linkedin") {
+      result = await fetchApifyLinkedIn(source.url, source.id, source.name);
     } else if (source.type === "apify") {
       result = await fetchApifyGeneric(source.url, source.id, source.name);
     } else {
