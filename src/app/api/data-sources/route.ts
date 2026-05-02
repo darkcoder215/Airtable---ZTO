@@ -21,6 +21,17 @@ import {
 } from "@/lib/data-sources";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
+import {
+  getDestinationMapping,
+  setDestinationMapping,
+  applyMapping,
+  sanitizeMapping,
+  ARTICLE_TOKENS,
+  DESTINATION_BASE_ID,
+  DESTINATION_TABLE_NAME,
+  type DestinationMapping,
+} from "@/lib/destination-mapping";
+import { listTables } from "@/lib/airtable";
 
 function getUser(request: NextRequest) {
   const token = request.cookies.get("session")?.value;
@@ -77,6 +88,51 @@ export async function GET(request: NextRequest) {
   if (action === "filter-history") {
     const history = await getFilterHistory();
     return NextResponse.json({ history });
+  }
+
+  if (action === "destination-mapping") {
+    try {
+      const mapping = await getDestinationMapping();
+      return NextResponse.json({
+        mapping,
+        baseId: DESTINATION_BASE_ID,
+        tableName: DESTINATION_TABLE_NAME,
+        articleTokens: ARTICLE_TOKENS,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+  }
+
+  if (action === "destination-columns") {
+    // Refresh-from-Airtable: list the live columns of the destination table.
+    try {
+      const tables = await listTables(DESTINATION_BASE_ID);
+      const table = tables.find(
+        (t) => t.name === DESTINATION_TABLE_NAME || t.id === DESTINATION_TABLE_NAME
+      );
+      if (!table) {
+        return NextResponse.json(
+          { error: "جدول الوجهة غير موجود في قاعدة Airtable" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({
+        baseId: DESTINATION_BASE_ID,
+        tableName: table.name,
+        tableId: table.id,
+        columns: table.fields.map((f) => ({
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          description: f.description,
+        })),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
   }
 
   const sources = await getDataSources();
@@ -244,19 +300,31 @@ export async function POST(request: NextRequest) {
 
       case "fetch": {
         const sourceId = data.sourceId || data.id;
-        if (!sourceId) {
+        if (!sourceId || typeof sourceId !== "string") {
           return NextResponse.json({ error: "معرّف المصدر مطلوب" }, { status: 400 });
         }
-        const source = await getDataSourceById(sourceId);
-        if (!source) {
-          return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
-        }
         try {
+          // fetchSource itself does the lookup and short-circuits with
+          // { error: "Source not found" } — no need to pre-fetch the row
+          // (that double round-trip was the source of stale-state 404s
+          // when the page held an ID the DB no longer had).
           const result = await fetchSource(sourceId);
+          if (result.error === "Source not found") {
+            logger.warn(
+              `Manual fetch hit unknown source id ${sourceId}`,
+              "DataSources",
+              { sourceId, requestedBy: user.name },
+              user.id
+            );
+            return NextResponse.json(
+              { error: "المصدر غير موجود — حدّث القائمة وحاول مرة أخرى", stale: true },
+              { status: 404 }
+            );
+          }
           logger.info(
-            `Fetched ${result.articles.length} articles from "${source.name}"`,
+            `Manual fetch returned ${result.articles.length} article(s) for source ${sourceId}`,
             "DataSources",
-            null,
+            { sourceId, articleCount: result.articles.length, error: result.error ?? null },
             user.id
           );
           if (result.error) {
@@ -276,7 +344,7 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
           logger.error(
-            `Fetch failed for source "${source.name}"`,
+            `Manual fetch threw for source ${sourceId}: ${msg}`,
             "DataSources",
             err,
             user.id
@@ -320,6 +388,76 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: true, saved: count });
         }
         return NextResponse.json({ error: "articleId أو sourceId مطلوب" }, { status: 400 });
+      }
+
+      case "save-destination-mapping": {
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        const raw = (data as { mapping?: unknown }).mapping;
+        try {
+          const clean = sanitizeMapping(raw);
+          if (Object.keys(clean.columns).length === 0) {
+            return NextResponse.json(
+              { error: "لا يمكن حفظ مخطّط فارغ" },
+              { status: 400 }
+            );
+          }
+          const saved = await setDestinationMapping(clean);
+          logger.info(
+            `Destination mapping updated by ${user.name} (${
+              Object.keys(saved.columns).length
+            } columns)`,
+            "DataSources",
+            { columnCount: Object.keys(saved.columns).length },
+            user.id
+          );
+          return NextResponse.json({ mapping: saved });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          return NextResponse.json({ error: msg }, { status: 500 });
+        }
+      }
+
+      case "test-destination-mapping": {
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        try {
+          // Use the just-edited mapping if provided, else the persisted one.
+          const incoming = (data as { mapping?: unknown }).mapping;
+          const mapping: DestinationMapping = incoming
+            ? sanitizeMapping(incoming)
+            : await getDestinationMapping();
+
+          // Pull the most recent article overall (any source, any topic) to
+          // give a realistic preview.
+          const recent = await getArticles();
+          const article = recent[0] ?? null;
+          if (!article) {
+            return NextResponse.json({
+              mapping,
+              article: null,
+              preview: {},
+              note: "لا توجد مقالات بعد لاختبار المخطّط",
+            });
+          }
+          const preview = applyMapping(mapping, article);
+          return NextResponse.json({
+            mapping,
+            article: {
+              id: article.id,
+              title: article.title,
+              sourceName: article.sourceName,
+              url: article.url,
+              publishedAt: article.publishedAt,
+            },
+            preview,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          return NextResponse.json({ error: msg }, { status: 500 });
+        }
       }
 
       case "fetch-all": {

@@ -7,9 +7,17 @@ import { createRecord } from "./airtable";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 import { logger } from "@/lib/logger";
+import {
+  applyMapping,
+  getDestinationMapping,
+  DESTINATION_BASE_ID,
+  DESTINATION_TABLE_NAME,
+} from "@/lib/destination-mapping";
 
-const ZTO_BASE_ID = "appIpXIFs2yxyxaUm";
-const APIFY_TABLE_NAME = "Apify - Websites";
+// Hard-coded destination is now sourced from destination-mapping.ts so the
+// dashboard can override the column shape at runtime without redeploying.
+const ZTO_BASE_ID = DESTINATION_BASE_ID;
+const APIFY_TABLE_NAME = DESTINATION_TABLE_NAME;
 
 type SourceRow = Database["public"]["Tables"]["scraper_sources"]["Row"];
 type SourceInsert = Database["public"]["Tables"]["scraper_sources"]["Insert"];
@@ -1339,12 +1347,22 @@ export async function saveArticleToAirtable(
   sourceName: string
 ): Promise<boolean> {
   try {
-    const created = await createRecord(ZTO_BASE_ID, APIFY_TABLE_NAME, {
-      Source: sourceName,
-      "Original Post": article.description || article.title,
-      Status: "New",
-      "Link to Post (If Applicable)": article.url,
-    });
+    // Pull the latest mapping per call (cheap one-row lookup) so admin edits
+    // take effect immediately instead of waiting for a process restart.
+    const mapping = await getDestinationMapping().catch(() => null);
+    const enrichedArticle: FetchedArticle = {
+      ...article,
+      sourceName: article.sourceName || sourceName,
+    };
+    const fields = mapping
+      ? applyMapping(mapping, enrichedArticle)
+      : {
+          Source: sourceName,
+          "Original Post": article.description || article.title,
+          Status: "New",
+          "Link to Post (If Applicable)": article.url,
+        };
+    const created = await createRecord(ZTO_BASE_ID, APIFY_TABLE_NAME, fields);
     if (isUuid(article.id)) {
       const sb = getSupabaseAdmin();
       await sb
@@ -1357,7 +1375,12 @@ export async function saveArticleToAirtable(
     }
     article.savedToAirtable = true;
     return true;
-  } catch {
+  } catch (err) {
+    logger.error(
+      `Save to destination failed for "${article.title?.slice(0, 80)}"`,
+      "DataSources",
+      { error: err instanceof Error ? err.message : String(err) }
+    );
     return false;
   }
 }

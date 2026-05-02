@@ -1523,6 +1523,27 @@ export type Database = {
         }
         Relationships: []
       }
+      scraper_settings: {
+        Row: {
+          key: string
+          value: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          key: string
+          value?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          key?: string
+          value?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       scraper_sources: {
         Row: {
           brand_id: string | null

@@ -269,6 +269,13 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Indeterminate progress bar used by the fetch row indicator. */
+@keyframes ztoFetchProgress {
+  0%   { transform: translateX(-150%); }
+  50%  { transform: translateX(50%); }
+  100% { transform: translateX(250%); }
+}
+
 /* ========== Alert ========== */
 .zto-alert {
   display: flex; align-items: center; gap: 10px;

@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   XCircle,
   Brain,
+  Eye,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -142,7 +143,7 @@ export default function DataSourcesPage() {
   // either after testing, we reset the confirmation so they can't bypass.
   const [testSig, setTestSig] = useState<string | null>(null);
   const [testConfirmed, setTestConfirmed] = useState(false);
-  const [activeTab, setActiveTab] = useState<"sources" | "articles" | "filters" | "guide">("sources");
+  const [activeTab, setActiveTab] = useState<"sources" | "articles" | "filters" | "destination" | "guide">("sources");
 
   // Bulk-add modal
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -172,6 +173,36 @@ export default function DataSourcesPage() {
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [expandedFilter, setExpandedFilter] = useState<string | null>(null);
 
+  /* ───────── Destination mapping ───────── */
+  type FieldEntry = { type: "field"; field: string; fallback?: string };
+  type LiteralEntry = { type: "literal"; value: string };
+  type MappingEntry = FieldEntry | LiteralEntry;
+  interface MappingState {
+    columns: Array<{ column: string; entry: MappingEntry }>;
+    baseId?: string;
+    tableName?: string;
+  }
+  interface DestColumn {
+    id: string;
+    name: string;
+    type: string;
+    description?: string;
+  }
+
+  const [destMapping, setDestMapping] = useState<MappingState>({ columns: [] });
+  const [destTokens, setDestTokens] = useState<string[]>([]);
+  const [destColumns, setDestColumns] = useState<DestColumn[]>([]);
+  const [destLoading, setDestLoading] = useState(false);
+  const [destSaving, setDestSaving] = useState(false);
+  const [destRefreshing, setDestRefreshing] = useState(false);
+  const [destDirty, setDestDirty] = useState(false);
+  const [destTesting, setDestTesting] = useState(false);
+  const [destTestResult, setDestTestResult] = useState<{
+    article: { id: string; title: string; sourceName?: string; url?: string } | null;
+    preview: Record<string, string>;
+    note?: string;
+  } | null>(null);
+
   // Article filters
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSource, setFilterSource] = useState("");
@@ -199,6 +230,10 @@ export default function DataSourcesPage() {
   useEffect(() => {
     if (activeTab === "articles") loadArticles();
     if (activeTab === "filters") loadFilterHistory();
+    if (activeTab === "destination") {
+      loadDestinationMapping();
+      refreshDestinationColumns();
+    }
   }, [activeTab]);
 
   /* ───────── API helpers ───────── */
@@ -236,8 +271,138 @@ export default function DataSourcesPage() {
       .finally(() => setLoadingFilters(false));
   };
 
+  // Destination mapping ↓
+  const loadDestinationMapping = async () => {
+    setDestLoading(true);
+    try {
+      const res = await fetch("/api/data-sources?action=destination-mapping");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل التحميل");
+      // Convert the columns object to an ordered array so the UI can render
+      // it without losing insertion order.
+      const cols = Object.entries(data.mapping?.columns ?? {}).map(([k, v]) => ({
+        column: k,
+        entry: v as MappingEntry,
+      }));
+      setDestMapping({
+        columns: cols,
+        baseId: data.baseId,
+        tableName: data.tableName,
+      });
+      setDestTokens(Array.isArray(data.articleTokens) ? data.articleTokens : []);
+      setDestDirty(false);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل تحميل المخطّط", "error");
+    } finally {
+      setDestLoading(false);
+    }
+  };
+
+  const refreshDestinationColumns = async () => {
+    setDestRefreshing(true);
+    try {
+      const res = await fetch("/api/data-sources?action=destination-columns");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل تحديث الأعمدة");
+      setDestColumns(Array.isArray(data.columns) ? data.columns : []);
+      addToast(`تم تحديث ${data.columns?.length ?? 0} عمود من Airtable`, "success");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل التحديث", "error");
+    } finally {
+      setDestRefreshing(false);
+    }
+  };
+
+  const saveDestinationMapping = async () => {
+    setDestSaving(true);
+    try {
+      // Convert the array back into a column-keyed object before persisting.
+      const cols: Record<string, MappingEntry> = {};
+      for (const r of destMapping.columns) {
+        if (r.column.trim()) cols[r.column.trim()] = r.entry;
+      }
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-destination-mapping",
+          mapping: { columns: cols },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل الحفظ");
+      addToast("تم حفظ مخطّط الوجهة", "success");
+      setDestDirty(false);
+      // Re-hydrate from server to canonicalise.
+      await loadDestinationMapping();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل الحفظ", "error");
+    } finally {
+      setDestSaving(false);
+    }
+  };
+
+  const testDestinationMapping = async () => {
+    setDestTesting(true);
+    try {
+      const cols: Record<string, MappingEntry> = {};
+      for (const r of destMapping.columns) {
+        if (r.column.trim()) cols[r.column.trim()] = r.entry;
+      }
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test-destination-mapping",
+          mapping: { columns: cols },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل الاختبار");
+      setDestTestResult({
+        article: data.article,
+        preview: data.preview ?? {},
+        note: data.note,
+      });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل الاختبار", "error");
+    } finally {
+      setDestTesting(false);
+    }
+  };
+
+  const updateMappingRow = (
+    idx: number,
+    patch: Partial<{ column: string; entry: MappingEntry }>
+  ) => {
+    setDestMapping((p) => ({
+      ...p,
+      columns: p.columns.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
+    }));
+    setDestDirty(true);
+  };
+
+  const removeMappingRow = (idx: number) => {
+    setDestMapping((p) => ({
+      ...p,
+      columns: p.columns.filter((_, i) => i !== idx),
+    }));
+    setDestDirty(true);
+  };
+
+  const addMappingRow = () => {
+    setDestMapping((p) => ({
+      ...p,
+      columns: [...p.columns, { column: "", entry: { type: "field", field: "title" } }],
+    }));
+    setDestDirty(true);
+  };
+
   const handleFetch = async (sourceId: string) => {
+    const source = sources.find((s) => s.id === sourceId);
+    const sourceLabel = source?.name ?? "المصدر";
     setFetchingId(sourceId);
+    addToast(`جارٍ جلب "${sourceLabel}"...`, "info");
     try {
       const res = await fetch("/api/data-sources", {
         method: "POST",
@@ -247,15 +412,24 @@ export default function DataSourcesPage() {
       const data = await res.json();
       if (res.ok) {
         const count = data.count || data.articles?.length || 0;
-        addToast(`تم جلب ${count} خبر بنجاح`, "success");
+        addToast(
+          count > 0
+            ? `✓ "${sourceLabel}" — تم جلب ${count} عنصر`
+            : `✓ "${sourceLabel}" — لا عناصر جديدة`,
+          "success"
+        );
         loadSources();
         loadArticles();
         loadFilterHistory();
+      } else if (data.stale) {
+        // Server lost track of this id — refresh sources so the row vanishes.
+        addToast("القائمة قديمة — تم تحديثها، حاول مرة أخرى", "warning");
+        loadSources();
       } else {
-        addToast(data.error || "فشل الجلب", "error");
+        addToast(`✗ "${sourceLabel}" — ${data.error || "فشل الجلب"}`, "error");
       }
     } catch {
-      addToast("حدث خطأ أثناء الجلب", "error");
+      addToast(`✗ "${sourceLabel}" — حدث خطأ أثناء الجلب`, "error");
     } finally {
       setFetchingId(null);
     }
@@ -596,7 +770,7 @@ export default function DataSourcesPage() {
   const getCategoryInfo = (cat: string) =>
     CATEGORIES.find((c) => c.value === cat) || CATEGORIES[3];
 
-  const formatDate = (dateStr: string | null) => {
+  const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return "لم يتم الجلب بعد";
     const d = new Date(dateStr);
     return d.toLocaleDateString("ar-SA", {
@@ -606,6 +780,30 @@ export default function DataSourcesPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  // Returns the predicted next-fetch time in ms, or null when unknown.
+  const nextFetchAtMs = (s: DataSource): number | null => {
+    if (!s.isActive) return null;
+    const interval = (s.fetchInterval || 60) * 60_000;
+    if (!s.lastFetchedAt) return Date.now(); // never fetched → due now
+    const t = new Date(s.lastFetchedAt).getTime();
+    if (!Number.isFinite(t)) return null;
+    return t + interval;
+  };
+
+  // Renders nextFetchAt as a relative phrase ("بعد X دقيقة" / "متأخر").
+  const formatRelativeFromNow = (ms: number | null): string => {
+    if (ms == null) return "—";
+    const diff = ms - Date.now();
+    const minutes = Math.round(Math.abs(diff) / 60_000);
+    const overdue = diff < 0;
+    if (minutes < 1) return overdue ? "متأخر" : "خلال لحظات";
+    if (minutes < 60) return overdue ? `متأخر بـ${minutes} دقيقة` : `بعد ${minutes} دقيقة`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return overdue ? `متأخر بـ${hours} ساعة` : `بعد ${hours} ساعة`;
+    const days = Math.round(hours / 24);
+    return overdue ? `متأخر بـ${days} يوم` : `بعد ${days} يوم`;
   };
 
   /* ───────── Render ───────── */
@@ -659,6 +857,17 @@ export default function DataSourcesPage() {
             >
               <Filter className="w-3.5 h-3.5" />
               الفلترة
+            </button>
+            <button
+              onClick={() => setActiveTab("destination")}
+              className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                activeTab === "destination"
+                  ? "bg-white text-black"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              الوجهة
             </button>
             <button
               onClick={() => setActiveTab("guide")}
@@ -836,6 +1045,7 @@ export default function DataSourcesPage() {
                             <th className="text-right px-4 py-3 hidden md:table-cell">الرابط</th>
                             <th className="text-right px-4 py-3">الفئة</th>
                             <th className="text-right px-4 py-3 hidden lg:table-cell">آخر جلب</th>
+                            <th className="text-right px-4 py-3 hidden xl:table-cell">الجلب التالي</th>
                             <th className="text-center px-4 py-3">الحالة</th>
                             <th className="text-left px-4 py-3">إجراءات</th>
                           </tr>
@@ -843,14 +1053,37 @@ export default function DataSourcesPage() {
                         <tbody>
                           {typeSources.map((source) => {
                             const cat = getCategoryInfo(source.category);
+                            const isFetching = fetchingId === source.id;
                             return (
                               <tr
                                 key={source.id}
-                                className="border-b border-neutral-800/50 last:border-0 hover:bg-neutral-800/20 transition-colors"
+                                className={`relative border-b border-neutral-800/50 last:border-0 transition-colors ${
+                                  isFetching ? "bg-amber-500/5" : "hover:bg-neutral-800/20"
+                                }`}
                               >
+                                {/* Inline progress indicator while fetching this row. */}
+                                {isFetching && (
+                                  <td className="absolute bottom-0 left-0 right-0 p-0 border-0" colSpan={7}>
+                                    <div
+                                      className="h-0.5 bg-amber-400/30 overflow-hidden"
+                                      role="progressbar"
+                                      aria-label="جلب المصدر"
+                                    >
+                                      <div className="h-full w-1/3 bg-amber-400 animate-[ztoFetchProgress_1.4s_ease-in-out_infinite]" />
+                                    </div>
+                                  </td>
+                                )}
                                 {/* Name */}
                                 <td className="px-4 py-3">
-                                  <p className="font-bold text-sm text-white truncate max-w-[200px]">{source.name}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-sm text-white truncate max-w-[200px]">{source.name}</p>
+                                    {isFetching && (
+                                      <span className="text-[0.6rem] font-bold text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5 flex items-center gap-1">
+                                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                        جارٍ الجلب
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* URL */}
@@ -871,6 +1104,29 @@ export default function DataSourcesPage() {
                                     <Clock className="w-3 h-3" />
                                     {formatDate(source.lastFetchedAt)}
                                   </span>
+                                </td>
+
+                                {/* Next fetch */}
+                                <td className="px-4 py-3 hidden xl:table-cell">
+                                  {(() => {
+                                    const ms = nextFetchAtMs(source);
+                                    const overdue = ms != null && ms < Date.now();
+                                    return (
+                                      <span
+                                        className={`text-[0.65rem] flex items-center gap-1 ${
+                                          !source.isActive
+                                            ? "text-neutral-700"
+                                            : overdue
+                                              ? "text-amber-400"
+                                              : "text-neutral-500"
+                                        }`}
+                                        title={ms ? new Date(ms).toLocaleString("ar-SA") : "—"}
+                                      >
+                                        <Clock className="w-3 h-3" />
+                                        {!source.isActive ? "معطل" : formatRelativeFromNow(ms)}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
 
                                 {/* Active toggle */}
@@ -1248,6 +1504,318 @@ export default function DataSourcesPage() {
       )}
 
       {/* ───── Guide Tab ───── */}
+      {/* ───── Destination tab ───── */}
+      {activeTab === "destination" && (
+        <div className="space-y-4">
+          {/* Instructions card */}
+          <div className="zto-card p-5 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-amber-400/10">
+                <Database className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white">طريقة حفظ البيانات في الوجهة</h3>
+                <p className="text-[0.7rem] text-neutral-500 mt-0.5">
+                  جدول الوجهة:
+                  <code className="text-amber-400 mx-1 font-mono">{destMapping.tableName ?? "..."}</code>
+                </p>
+              </div>
+            </div>
+            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-2 text-[0.7rem] text-neutral-400 leading-relaxed">
+              <p>
+                <span className="text-amber-400 font-bold">عمود الوجهة</span> هو اسم العمود في Airtable كما هو حرفياً.
+                إذا كتبت الاسم بشكل خاطئ، Airtable سيرفض الحفظ.
+              </p>
+              <p>
+                لكل عمود اختر <span className="text-amber-400 font-bold">المصدر</span>:
+              </p>
+              <ul className="list-disc pr-5 space-y-0.5">
+                <li>
+                  <span className="text-purple-400">حقل من المقال</span>: العنوان، الوصف، الرابط، الكاتب، تاريخ النشر، اسم المصدر، إلخ.
+                </li>
+                <li>
+                  <span className="text-purple-400">قيمة ثابتة</span>: نص ثابت يُكتب لكل سجل (مثل
+                  <code className="text-amber-400 mx-1 font-mono">New</code> لعمود الحالة).
+                </li>
+              </ul>
+              <p>
+                يُمكنك تحديد <span className="text-amber-400 font-bold">قيمة بديلة</span> لحقل المقال — تُستخدم تلقائياً عندما يكون الحقل الأساسي فارغاً (مثل
+                "الوصف، وإن كان فارغاً فالعنوان").
+              </p>
+              <p className="text-neutral-500">
+                عند إضافة عمود جديد في Airtable، اضغط <span className="text-amber-400 font-bold">تحديث الأعمدة</span> لجلبه هنا.
+              </p>
+            </div>
+          </div>
+
+          {/* Toolbar */}
+          <div className="zto-card p-4 flex items-center gap-3 flex-wrap">
+            <button
+              onClick={refreshDestinationColumns}
+              disabled={destRefreshing}
+              className="zto-btn zto-btn-outline zto-btn-sm"
+            >
+              {destRefreshing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              تحديث الأعمدة من Airtable
+            </button>
+            <button
+              onClick={testDestinationMapping}
+              disabled={destTesting || destMapping.columns.length === 0}
+              className="zto-btn zto-btn-outline zto-btn-sm"
+            >
+              {destTesting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              )}
+              اختبار على آخر سجل
+            </button>
+            <span className="text-[0.65rem] text-neutral-500 mr-auto">
+              {destColumns.length} عمود في الوجهة · {destMapping.columns.length} عمود مُعرَّف
+            </span>
+            {user?.role === "admin" && (
+              <button
+                onClick={saveDestinationMapping}
+                disabled={destSaving || !destDirty}
+                className="zto-btn zto-btn-gold zto-btn-sm"
+                title={!destDirty ? "لا تغييرات" : "حفظ"}
+              >
+                {destSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                حفظ المخطّط
+              </button>
+            )}
+          </div>
+
+          {/* Mapping table */}
+          {destLoading ? (
+            <div className="zto-card p-12 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
+            </div>
+          ) : (
+            <div className="zto-card overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-neutral-800 text-[0.65rem] text-neutral-500 font-bold uppercase tracking-wider">
+                    <th className="text-right px-4 py-3 w-[34%]">عمود الوجهة</th>
+                    <th className="text-right px-4 py-3 w-[22%]">المصدر</th>
+                    <th className="text-right px-4 py-3 w-[34%]">القيمة</th>
+                    <th className="text-left px-4 py-3 w-[10%]">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {destMapping.columns.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-neutral-500 text-sm">
+                        لا يوجد مخطّط — اضغط "إضافة عمود" أدناه للبدء
+                      </td>
+                    </tr>
+                  )}
+                  {destMapping.columns.map((row, idx) => {
+                    const isReadonly = user?.role !== "admin";
+                    return (
+                      <tr key={idx} className="border-b border-neutral-800/50 last:border-0">
+                        {/* Column name — autocomplete from Airtable schema. */}
+                        <td className="px-4 py-2.5 align-top">
+                          <input
+                            list={`zto-dest-cols-${idx}`}
+                            type="text"
+                            className="zto-input text-xs"
+                            placeholder="مثال: Original Post"
+                            value={row.column}
+                            disabled={isReadonly}
+                            onChange={(e) =>
+                              updateMappingRow(idx, { column: e.target.value })
+                            }
+                          />
+                          <datalist id={`zto-dest-cols-${idx}`}>
+                            {destColumns.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.type}
+                              </option>
+                            ))}
+                          </datalist>
+                        </td>
+
+                        {/* Type selector */}
+                        <td className="px-4 py-2.5 align-top">
+                          <div className="zto-select-wrap">
+                            <select
+                              className="zto-input text-xs"
+                              value={row.entry.type}
+                              disabled={isReadonly}
+                              onChange={(e) => {
+                                const t = e.target.value as "field" | "literal";
+                                if (t === "field") {
+                                  updateMappingRow(idx, {
+                                    entry: { type: "field", field: destTokens[0] ?? "title" },
+                                  });
+                                } else {
+                                  updateMappingRow(idx, {
+                                    entry: { type: "literal", value: "" },
+                                  });
+                                }
+                              }}
+                            >
+                              <option value="field">حقل من المقال</option>
+                              <option value="literal">قيمة ثابتة</option>
+                            </select>
+                          </div>
+                        </td>
+
+                        {/* Value editor */}
+                        <td className="px-4 py-2.5 align-top">
+                          {row.entry.type === "literal" ? (
+                            <input
+                              type="text"
+                              className="zto-input text-xs"
+                              value={row.entry.value}
+                              disabled={isReadonly}
+                              placeholder="مثال: New"
+                              onChange={(e) =>
+                                updateMappingRow(idx, {
+                                  entry: { type: "literal", value: e.target.value },
+                                })
+                              }
+                            />
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <p className="text-[0.6rem] text-neutral-500 mb-1">الحقل</p>
+                                <div className="zto-select-wrap">
+                                  <select
+                                    className="zto-input text-xs"
+                                    value={row.entry.field}
+                                    disabled={isReadonly}
+                                    onChange={(e) =>
+                                      updateMappingRow(idx, {
+                                        entry: {
+                                          type: "field",
+                                          field: e.target.value,
+                                          fallback: row.entry.type === "field" ? row.entry.fallback : undefined,
+                                        },
+                                      })
+                                    }
+                                  >
+                                    {destTokens.map((t) => (
+                                      <option key={t} value={t}>{t}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[0.6rem] text-neutral-500 mb-1">قيمة بديلة (اختياري)</p>
+                                <div className="zto-select-wrap">
+                                  <select
+                                    className="zto-input text-xs"
+                                    value={row.entry.type === "field" ? row.entry.fallback ?? "" : ""}
+                                    disabled={isReadonly}
+                                    onChange={(e) =>
+                                      updateMappingRow(idx, {
+                                        entry: {
+                                          type: "field",
+                                          field: row.entry.type === "field" ? row.entry.field : "title",
+                                          fallback: e.target.value || undefined,
+                                        },
+                                      })
+                                    }
+                                  >
+                                    <option value="">— بدون —</option>
+                                    {destTokens.map((t) => (
+                                      <option key={t} value={t}>{t}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-2.5 align-top">
+                          {!isReadonly && (
+                            <button
+                              onClick={() => removeMappingRow(idx)}
+                              className="zto-btn zto-btn-ghost zto-btn-sm text-red-400"
+                              title="حذف"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {user?.role === "admin" && (
+                <div className="border-t border-neutral-800 p-3">
+                  <button
+                    onClick={addMappingRow}
+                    className="zto-btn zto-btn-outline zto-btn-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    إضافة عمود
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Test result */}
+          {destTestResult && (
+            <div className="zto-card p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-bold text-white">معاينة آخر سجل</h3>
+                {destTestResult.article && (
+                  <span className="text-[0.65rem] text-neutral-500 truncate">
+                    "{destTestResult.article.title?.slice(0, 80)}"
+                  </span>
+                )}
+              </div>
+              {destTestResult.note && (
+                <p className="text-xs text-amber-400">{destTestResult.note}</p>
+              )}
+              {Object.keys(destTestResult.preview).length > 0 ? (
+                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-neutral-800 text-[0.6rem] text-neutral-500 font-bold uppercase tracking-wider">
+                        <th className="text-right px-3 py-2">عمود الوجهة</th>
+                        <th className="text-right px-3 py-2">القيمة المُرسلة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(destTestResult.preview).map(([col, val]) => (
+                        <tr key={col} className="border-b border-neutral-800/50 last:border-0">
+                          <td className="px-3 py-2 text-[0.7rem] font-bold text-amber-400">
+                            {col}
+                          </td>
+                          <td className="px-3 py-2 text-[0.7rem] text-neutral-300 break-words">
+                            {val || <span className="text-neutral-600">— فارغ —</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                !destTestResult.note && (
+                  <p className="text-xs text-neutral-500">لا توجد قيم لعرضها</p>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === "guide" && (
         <div className="space-y-4">
           <div className="zto-card p-5 space-y-3">
