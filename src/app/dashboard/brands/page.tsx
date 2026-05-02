@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import {
   Building2,
@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
+  Info,
 } from "lucide-react";
 
 interface Brand {
@@ -49,12 +50,14 @@ interface Source {
 }
 
 const TYPE_META: Record<Source["type"], { label: string; icon: typeof Rss; color: string }> = {
-  rss: { label: "RSS", icon: Rss, color: "text-orange-400" },
-  twitter: { label: "X", icon: Bird, color: "text-sky-400" },
+  rss: { label: "موقع (RSS)", icon: Rss, color: "text-orange-400" },
+  twitter: { label: "X (تويتر سابقاً)", icon: Bird, color: "text-sky-400" },
   linkedin: { label: "LinkedIn", icon: Share2, color: "text-blue-400" },
-  apify: { label: "Apify", icon: Zap, color: "text-emerald-400" },
-  custom: { label: "Custom", icon: Globe, color: "text-neutral-400" },
+  apify: { label: "—", icon: Zap, color: "text-neutral-500" },
+  custom: { label: "—", icon: Globe, color: "text-neutral-500" },
 };
+
+const SELECTABLE_TYPES: Source["type"][] = ["rss", "twitter", "linkedin"];
 
 const CATEGORIES: Source["category"][] = ["startups", "investment", "tech", "general"];
 
@@ -386,6 +389,28 @@ export default function BrandsPage() {
 
                 {newSourceFor === brand.id && (
                   <div className="zto-card p-4 space-y-3 border-amber-400/30">
+                    <div className="flex items-start gap-2 text-[12px] text-neutral-400 bg-neutral-900/60 border border-neutral-800 rounded-lg p-3 leading-relaxed">
+                      <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div>
+                          <span className="text-white font-bold">X (تويتر سابقاً):</span>{" "}
+                          الصق رابط الحساب كاملاً، مثال:
+                          <code className="text-amber-400 mx-1 font-mono">https://x.com/navy1411</code>
+                        </div>
+                        <div>
+                          <span className="text-white font-bold">LinkedIn:</span>{" "}
+                          الصق رابط الصفحة أو الحساب كاملاً.
+                        </div>
+                        <div>
+                          <span className="text-white font-bold">موقع (RSS):</span>{" "}
+                          الصق رابط خلاصة RSS الخاص بالموقع (عادة ينتهي بـ
+                          <code className="text-amber-400 mx-1 font-mono">/feed</code>
+                          أو
+                          <code className="text-amber-400 mx-1 font-mono">/rss.xml</code>).
+                          إن لم تجده، اطلبه من المسؤول التقني.
+                        </div>
+                      </div>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <input className="zto-input" placeholder="الاسم"
                         value={newSource.name}
@@ -398,8 +423,8 @@ export default function BrandsPage() {
                       <select className="zto-input"
                         value={newSource.type}
                         onChange={(e) => setNewSource({ ...newSource, type: e.target.value as Source["type"] })}>
-                        {Object.entries(TYPE_META).map(([k, v]) => (
-                          <option key={k} value={k}>{v.label}</option>
+                        {SELECTABLE_TYPES.map((k) => (
+                          <option key={k} value={k}>{TYPE_META[k].label}</option>
                         ))}
                       </select>
                       <select className="zto-input"

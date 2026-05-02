@@ -15,7 +15,6 @@ import {
   ExternalLink,
   AtSign,
   Briefcase,
-  Bug,
   Globe,
   ToggleLeft,
   ToggleRight,
@@ -73,12 +72,12 @@ interface FilterHistoryItem {
 /* ───────── Constants ───────── */
 
 const SOURCE_TYPES = [
-  { value: "rss", label: "RSS", icon: Rss, color: "text-orange-400", bg: "bg-orange-400/10" },
-  { value: "twitter", label: "X (Twitter)", icon: AtSign, color: "text-blue-400", bg: "bg-blue-400/10" },
+  { value: "rss", label: "موقع (RSS)", icon: Rss, color: "text-orange-400", bg: "bg-orange-400/10" },
+  { value: "twitter", label: "X (تويتر سابقاً)", icon: AtSign, color: "text-blue-400", bg: "bg-blue-400/10" },
   { value: "linkedin", label: "LinkedIn", icon: Briefcase, color: "text-indigo-400", bg: "bg-indigo-400/10" },
-  { value: "apify", label: "Apify", icon: Bug, color: "text-emerald-400", bg: "bg-emerald-400/10" },
-  { value: "custom", label: "Custom", icon: Globe, color: "text-neutral-400", bg: "bg-neutral-400/10" },
 ];
+
+const LEGACY_TYPE_FALLBACK = { value: "custom", label: "—", icon: Globe, color: "text-neutral-400", bg: "bg-neutral-400/10" };
 
 const CATEGORIES = [
   { value: "startups", label: "شركات ناشئة", color: "text-purple-400", bg: "bg-purple-400/10", badge: "border-purple-500/30 text-purple-400" },
@@ -88,11 +87,9 @@ const CATEGORIES = [
 ];
 
 const TYPE_PLACEHOLDERS: Record<string, string> = {
-  rss: "https://example.com/feed/rss.xml",
-  twitter: "nitter.net/username/rss",
-  linkedin: "https://api.apify.com/v2/acts/.../runs/last/dataset/items?token=...",
-  apify: "https://api.apify.com/v2/acts/{actorId}/runs/last/dataset/items?token={apiToken}",
-  custom: "https://example.com/api/news.json",
+  rss: "https://example.com/feed",
+  twitter: "https://x.com/username",
+  linkedin: "https://www.linkedin.com/in/username",
 };
 
 const defaultFormData = {
@@ -396,7 +393,7 @@ export default function DataSourcesPage() {
   /* ───────── Helpers ───────── */
 
   const getSourceType = (type: string) =>
-    SOURCE_TYPES.find((t) => t.value === type) || SOURCE_TYPES[4];
+    SOURCE_TYPES.find((t) => t.value === type) || LEGACY_TYPE_FALLBACK;
 
   const getCategoryInfo = (cat: string) =>
     CATEGORIES.find((c) => c.value === cat) || CATEGORIES[3];
@@ -490,14 +487,13 @@ export default function DataSourcesPage() {
         </div>
       </div>
 
-      {/* Apify warning */}
       {!apifyConfigured && (
         <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
           <Info className="w-5 h-5 text-amber-400 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-400">مفتاح Apify غير مُعد</p>
+            <p className="text-sm font-bold text-amber-400">جلب X (تويتر) غير مفعّل حالياً</p>
             <p className="text-xs text-neutral-400">
-              أضف <code className="bg-neutral-800 px-1 rounded text-amber-400">APIFY_API_TOKEN</code> في إعدادات البيئة لتفعيل جلب X (Twitter). المصادر RSS تعمل بدون مفتاح.
+              تواصل مع المسؤول التقني لتفعيله. مصادر المواقع (RSS) تعمل بشكل طبيعي.
             </p>
           </div>
         </div>
@@ -880,12 +876,12 @@ export default function DataSourcesPage() {
           <div className="flex items-center gap-3 bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
             <Brain className="w-5 h-5 text-purple-400 shrink-0" />
             <div>
-              <p className="text-sm font-bold text-purple-400">فلترة ذكية بالذكاء الاصطناعي</p>
+              <p className="text-sm font-bold text-purple-400">فلترة ذكية</p>
               <p className="text-xs text-neutral-400">
-                يتم تحليل أخبار RSS تلقائيا عبر <code className="bg-neutral-800 px-1 rounded text-purple-400">GPT-4o-mini</code> عبر OpenRouter لتصفية الأخبار المتعلقة بالشركات الناشئة والاستثمارات فقط. الأخبار المؤهلة فقط يتم حفظها في Airtable.
+                يتم تحليل أخبار المواقع تلقائياً وتصفية ما يتعلق بالشركات الناشئة والاستثمارات فقط، ثم حفظ المؤهل منها في Airtable.
                 {!openrouterConfigured && (
                   <span className="text-amber-400 mr-2">
-                    ⚠ مفتاح OpenRouter غير مُعد — جميع الأخبار تمر بدون فلترة.
+                    ⚠ الفلترة الذكية غير مفعّلة حالياً — جميع الأخبار تمر بدون تصفية. تواصل مع المسؤول التقني.
                   </span>
                 )}
               </p>
@@ -928,8 +924,6 @@ export default function DataSourcesPage() {
                           <p className="text-[0.65rem] text-neutral-500 flex items-center gap-2 mt-0.5">
                             <Clock className="w-3 h-3" />
                             {formatDate(item.timestamp)}
-                            <span className="text-neutral-700">•</span>
-                            {item.model}
                           </p>
                         </div>
                       </div>
@@ -1011,10 +1005,9 @@ export default function DataSourcesPage() {
                           ))}
                         </div>
 
-                        {/* Raw AI response */}
-                        {item.rawResponse && (
+                        {item.rawResponse && user?.role === "admin" && (
                           <div className="border-t border-neutral-800 p-5">
-                            <p className="text-xs font-bold text-neutral-400 mb-2">رد الذكاء الاصطناعي:</p>
+                            <p className="text-xs font-bold text-neutral-400 mb-2">تفاصيل الفلترة:</p>
                             <pre className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 text-xs text-neutral-400 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap" dir="ltr">
                               {item.rawResponse}
                             </pre>
@@ -1033,54 +1026,24 @@ export default function DataSourcesPage() {
       {/* ───── Guide Tab ───── */}
       {activeTab === "guide" && (
         <div className="space-y-4">
-          {/* RSS Feeds */}
-          <div className="zto-card p-5 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-orange-400/10">
-                <Rss className="w-5 h-5 text-orange-400" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-white">RSS Feeds</h3>
-                <p className="text-[0.65rem] text-neutral-500">خلاصات RSS</p>
-              </div>
-            </div>
-            <p className="text-sm text-neutral-400">
-              أضف رابط RSS مباشر. أمثلة على التنسيق:
-            </p>
-            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-1">
-              <code className="text-xs text-amber-400 block">https://example.com/feed/</code>
-              <code className="text-xs text-amber-400 block">https://example.com/rss.xml</code>
-              <code className="text-xs text-amber-400 block">https://example.com/feed/atom</code>
-            </div>
-            <p className="text-xs text-neutral-500">
-              معظم المواقع الإخبارية توفر خلاصات RSS. ابحث عن رابط RSS في الموقع المستهدف.
-            </p>
-          </div>
-
-          {/* X (Twitter) */}
           <div className="zto-card p-5 space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-blue-400/10">
                 <AtSign className="w-5 h-5 text-blue-400" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white">X (Twitter)</h3>
-                <p className="text-[0.65rem] text-neutral-500">تغريدات عبر Apify</p>
+                <h3 className="font-bold text-sm text-white">X (تويتر سابقاً)</h3>
+                <p className="text-[0.65rem] text-neutral-500">حسابات على X</p>
               </div>
             </div>
             <p className="text-sm text-neutral-400">
-              يتم جلب التغريدات تلقائيا عبر Apify Twitter Scraper Lite. أضف رابط الحساب مباشرة:
+              الصق رابط الحساب كاملاً. مثال:
             </p>
             <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-1">
-              <code className="text-xs text-amber-400 block">https://x.com/username</code>
-              <code className="text-xs text-amber-400 block">https://twitter.com/username</code>
+              <code className="text-xs text-amber-400 block">https://x.com/navy1411</code>
             </div>
-            <p className="text-xs text-neutral-500">
-              يتطلب تعيين <code className="bg-neutral-800 px-1 rounded text-amber-400">APIFY_API_TOKEN</code> في إعدادات البيئة. يتم حفظ النتائج تلقائيا في جدول &quot;Apify - Websites&quot; في Airtable.
-            </p>
           </div>
 
-          {/* LinkedIn */}
           <div className="zto-card p-5 space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-indigo-400/10">
@@ -1088,65 +1051,40 @@ export default function DataSourcesPage() {
               </div>
               <div>
                 <h3 className="font-bold text-sm text-white">LinkedIn</h3>
-                <p className="text-[0.65rem] text-neutral-500">منشورات لينكدإن</p>
+                <p className="text-[0.65rem] text-neutral-500">صفحات وحسابات LinkedIn</p>
               </div>
             </div>
             <p className="text-sm text-neutral-400">
-              استخدم Apify لجلب منشورات LinkedIn. التنسيق:
+              الصق رابط الصفحة أو الحساب كاملاً. مثال:
             </p>
-            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3">
-              <code className="text-xs text-amber-400 block">
-                {"https://api.apify.com/v2/acts/{linkedinActorId}/runs/last/dataset/items?token={apiToken}"}
-              </code>
+            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-1">
+              <code className="text-xs text-amber-400 block">https://www.linkedin.com/company/example</code>
+              <code className="text-xs text-amber-400 block">https://www.linkedin.com/in/username</code>
             </div>
-            <p className="text-xs text-neutral-500">
-              أضف رابط Apify Actor مع معرف الشركة أو الملف الشخصي المستهدف.
-            </p>
           </div>
 
-          {/* Apify Scrapers */}
           <div className="zto-card p-5 space-y-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-400/10">
-                <Bug className="w-5 h-5 text-emerald-400" />
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-orange-400/10">
+                <Rss className="w-5 h-5 text-orange-400" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white">Apify Scrapers</h3>
-                <p className="text-[0.65rem] text-neutral-500">أدوات الكشط</p>
+                <h3 className="font-bold text-sm text-white">موقع (RSS)</h3>
+                <p className="text-[0.65rem] text-neutral-500">خلاصة أخبار الموقع</p>
               </div>
             </div>
             <p className="text-sm text-neutral-400">
-              أضف رابط Apify Actor API مع مفتاح API:
+              الصق رابط خلاصة RSS الخاصة بالموقع. عادةً ينتهي الرابط بـ
+              <code className="text-amber-400 mx-1 font-mono">/feed</code>
+              أو
+              <code className="text-amber-400 mx-1 font-mono">/rss.xml</code>.
             </p>
-            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3">
-              <code className="text-xs text-amber-400 block">
-                {"https://api.apify.com/v2/acts/{actorId}/runs/last/dataset/items?token={apiToken}"}
-              </code>
+            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 space-y-1">
+              <code className="text-xs text-amber-400 block">https://example.com/feed</code>
+              <code className="text-xs text-amber-400 block">https://example.com/rss.xml</code>
             </div>
             <p className="text-xs text-neutral-500">
-              يمكنك استخدام أي Actor من سوق Apify لجمع البيانات من مصادر مختلفة.
-            </p>
-          </div>
-
-          {/* Custom URL */}
-          <div className="zto-card p-5 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-neutral-400/10">
-                <Globe className="w-5 h-5 text-neutral-400" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-white">Custom URL</h3>
-                <p className="text-[0.65rem] text-neutral-500">رابط مخصص</p>
-              </div>
-            </div>
-            <p className="text-sm text-neutral-400">
-              أي رابط RSS أو API يرجع JSON/XML
-            </p>
-            <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3">
-              <code className="text-xs text-amber-400 block">https://example.com/api/news.json</code>
-            </div>
-            <p className="text-xs text-neutral-500">
-              يمكن إضافة أي مصدر بيانات يوفر واجهة برمجية عامة.
+              لإيجاد الرابط: ابحث عن أيقونة RSS في الموقع، أو جرّب إضافة <code className="bg-neutral-800 px-1 rounded text-amber-400">/feed</code> في نهاية رابط الموقع. إن لم تجده، اطلبه من المسؤول التقني.
             </p>
           </div>
         </div>
