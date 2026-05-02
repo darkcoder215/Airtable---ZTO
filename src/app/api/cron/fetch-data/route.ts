@@ -33,6 +33,10 @@ function authorized(request: NextRequest): boolean {
 async function runHeartbeat() {
   const due = await listDueSources();
   if (due.length === 0) {
+    // Log proof-of-life every tick. Without this, an admin debugging
+    // "why hasn't anything been fetched?" sees nothing in /dashboard/logs
+    // and can't tell whether the cron is firing at all.
+    logger.info("Cron heartbeat tick — no sources due", "Cron", { dueCount: 0 });
     return { ranAt: new Date().toISOString(), dueCount: 0, results: [] };
   }
   const results = await Promise.allSettled(
@@ -56,10 +60,11 @@ async function runHeartbeat() {
           error: r.reason instanceof Error ? r.reason.message : String(r.reason),
         }
   );
+  const errored = flat.filter((f) => f.error).length;
   logger.info(
-    `Cron heartbeat: ran ${due.length} due source(s)`,
+    `Cron heartbeat: ran ${due.length} due source(s) (${errored} errored)`,
     "Cron",
-    { dueCount: due.length, results: flat }
+    { dueCount: due.length, errored, results: flat }
   );
   return { ranAt: new Date().toISOString(), dueCount: due.length, results: flat };
 }

@@ -1464,6 +1464,11 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown fetch error";
+    logger.error(
+      `Fetch threw for "${source.name}" (${source.type}): ${msg}`,
+      "DataSources",
+      { sourceId: source.id, sourceName: source.name, sourceType: source.type, sourceUrl: source.url, error: msg }
+    );
     await bumpSourceStatus(source.id, false, msg);
     await recordRun({
       sourceId: source.id,
@@ -1479,6 +1484,11 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   }
 
   if (result.error) {
+    logger.warn(
+      `Fetch returned error for "${source.name}" (${source.type}): ${result.error}`,
+      "DataSources",
+      { sourceId: source.id, sourceName: source.name, sourceType: source.type, sourceUrl: source.url, error: result.error }
+    );
     await bumpSourceStatus(source.id, false, result.error);
     await recordRun({
       sourceId: source.id,

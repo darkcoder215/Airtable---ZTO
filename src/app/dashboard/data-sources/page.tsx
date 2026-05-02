@@ -39,7 +39,7 @@ interface DataSource {
   topic: "news" | "insights" | "real_estate";
   fetchInterval: number;
   isActive: boolean;
-  lastFetched: string | null;
+  lastFetchedAt: string | null;
   createdAt: string;
   createdBy: string;
 }
@@ -773,7 +773,7 @@ export default function DataSourcesPage() {
                                 <td className="px-4 py-3 hidden lg:table-cell">
                                   <span className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
-                                    {formatDate(source.lastFetched)}
+                                    {formatDate(source.lastFetchedAt)}
                                   </span>
                                 </td>
 
