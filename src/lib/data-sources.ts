@@ -6,6 +6,7 @@
 import { createRecord } from "./airtable";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
+import { logger } from "@/lib/logger";
 
 const ZTO_BASE_ID = "appIpXIFs2yxyxaUm";
 const APIFY_TABLE_NAME = "Apify - Websites";
@@ -17,6 +18,7 @@ type FilterRunRow = Database["public"]["Tables"]["scraper_filter_runs"]["Row"];
 
 export type SourceType = "rss" | "twitter" | "linkedin" | "apify" | "custom";
 export type SourceCategory = "startups" | "investment" | "tech" | "general";
+export type SourceTopic = "news" | "insights" | "real_estate";
 
 export const VALID_SOURCE_TYPES: readonly SourceType[] = [
   "rss",
@@ -30,6 +32,11 @@ export const VALID_SOURCE_CATEGORIES: readonly SourceCategory[] = [
   "investment",
   "tech",
   "general",
+];
+export const VALID_SOURCE_TOPICS: readonly SourceTopic[] = [
+  "news",
+  "insights",
+  "real_estate",
 ];
 
 export class SourceValidationError extends Error {
@@ -107,6 +114,7 @@ interface SourcePayloadInput {
   url?: unknown;
   type?: unknown;
   category?: unknown;
+  topic?: unknown;
   fetchInterval?: unknown;
   isActive?: unknown;
 }
@@ -116,6 +124,7 @@ interface SourcePayloadValidated {
   url?: string;
   type?: SourceType;
   category?: SourceCategory;
+  topic?: SourceTopic;
   fetchInterval?: number;
   isActive?: boolean;
 }
@@ -176,6 +185,18 @@ export function validateSourcePayload(
     out.category = input.category as SourceCategory;
   }
 
+  if (input.topic !== undefined) {
+    if (
+      typeof input.topic !== "string" ||
+      !VALID_SOURCE_TOPICS.includes(input.topic as SourceTopic)
+    ) {
+      throw new SourceValidationError("الموضوع غير صالح (news / insights / real_estate)");
+    }
+    out.topic = input.topic as SourceTopic;
+  } else if (!opts.partial) {
+    throw new SourceValidationError("الموضوع مطلوب");
+  }
+
   if (input.fetchInterval !== undefined) {
     const n =
       typeof input.fetchInterval === "number"
@@ -205,6 +226,7 @@ export interface DataSource {
   type: SourceType;
   url: string;
   category: SourceCategory;
+  topic: SourceTopic;
   isActive: boolean;
   fetchInterval: number;
   lastFetchedAt: string | null;
@@ -258,6 +280,7 @@ function mapSource(r: SourceRow): DataSource {
     type: r.type as SourceType,
     url: r.url,
     category: (r.category as SourceCategory) || "general",
+    topic: (r.topic as SourceTopic) || "insights",
     isActive: r.is_active,
     fetchInterval: r.fetch_interval_minutes,
     lastFetchedAt: r.last_fetched_at,
@@ -340,6 +363,7 @@ export async function createDataSource(
     type: validated.type!,
     url: validated.url!,
     category: validated.category ?? config.category,
+    topic: validated.topic!,
     is_active: validated.isActive ?? config.isActive,
     fetch_interval_minutes: validated.fetchInterval ?? config.fetchInterval,
     brand_id: config.brandId ?? null,
@@ -351,6 +375,118 @@ export async function createDataSource(
     .single();
   if (error) throw new Error(`createDataSource: ${error.message}`);
   return mapSource(data);
+}
+
+// Per-row outcome of a bulk create. We never throw — the route mirrors this
+// shape back to the UI so it can show a per-row pass/fail summary.
+export interface BulkCreateRowResult {
+  index: number;
+  input: Partial<Pick<DataSource, "name" | "url" | "type" | "category" | "topic">>;
+  ok: boolean;
+  source?: DataSource;
+  error?: string;
+}
+
+export interface BulkCreateInputRow {
+  name?: string;
+  url: string;
+  type: SourceType;
+  category?: SourceCategory;
+  topic: SourceTopic;
+  fetchInterval?: number;
+  isActive?: boolean;
+  brandId?: string | null;
+}
+
+const BULK_CREATE_LIMIT = 100;
+
+// Best-effort bulk add. Each row is independent — one bad URL doesn't kill
+// the whole batch. Validation/normalisation runs row-by-row so the report
+// can call out exactly which entries failed and why.
+export async function bulkCreateDataSources(
+  rows: BulkCreateInputRow[]
+): Promise<{ results: BulkCreateRowResult[]; created: number }> {
+  if (!Array.isArray(rows)) {
+    throw new SourceValidationError("قائمة المصادر مطلوبة");
+  }
+  if (rows.length === 0) {
+    throw new SourceValidationError("لا توجد مصادر للإضافة");
+  }
+  if (rows.length > BULK_CREATE_LIMIT) {
+    throw new SourceValidationError(
+      `الحد الأقصى لكل عملية هو ${BULK_CREATE_LIMIT} مصدر`
+    );
+  }
+
+  const results: BulkCreateRowResult[] = [];
+  let created = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] ?? ({} as BulkCreateInputRow);
+    // Auto-fill name from URL host if the user didn't supply one — common
+    // case when bulk-pasting a list of feeds.
+    let derivedName = row.name?.trim();
+    if (!derivedName && typeof row.url === "string") {
+      try {
+        const u = new URL(row.url);
+        const path = u.pathname.replace(/\/$/, "").split("/").filter(Boolean).pop();
+        derivedName = path
+          ? `${u.hostname.replace(/^www\./, "")} — ${path}`
+          : u.hostname.replace(/^www\./, "");
+      } catch {
+        // leave undefined; validator will reject below
+      }
+    }
+
+    const input = {
+      name: derivedName,
+      url: row.url,
+      type: row.type,
+      category: row.category ?? "general",
+      topic: row.topic,
+      fetchInterval: row.fetchInterval ?? 60,
+      isActive: row.isActive ?? true,
+      brandId: row.brandId ?? null,
+    };
+
+    try {
+      const source = await createDataSource(input as never);
+      created++;
+      results.push({
+        index: i,
+        input: {
+          name: source.name,
+          url: source.url,
+          type: source.type,
+          category: source.category,
+          topic: source.topic,
+        },
+        ok: true,
+        source,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof SourceValidationError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      results.push({
+        index: i,
+        input: {
+          name: derivedName,
+          url: row.url,
+          type: row.type,
+          category: row.category,
+          topic: row.topic,
+        },
+        ok: false,
+        error: msg,
+      });
+    }
+  }
+
+  return { results, created };
 }
 
 export async function updateDataSource(
@@ -381,6 +517,7 @@ export async function updateDataSource(
   if (validated.type !== undefined) patch.type = validated.type;
   if (validated.url !== undefined) patch.url = validated.url;
   if (validated.category !== undefined) patch.category = validated.category;
+  if (validated.topic !== undefined) patch.topic = validated.topic;
   if (validated.isActive !== undefined) patch.is_active = validated.isActive;
   if (validated.fetchInterval !== undefined) {
     patch.fetch_interval_minutes = validated.fetchInterval;
@@ -467,6 +604,68 @@ Your output is the following key with values either "yes" or "no".
 Investment_related:
 News:`;
 
+// OpenRouter structured-outputs schema. strict=true so the model can't
+// return extra keys or wrong types — drastically simpler downstream parsing
+// than the old "match any JSON-ish blob" heuristics.
+const AI_FILTER_RESPONSE_SCHEMA = {
+  name: "investment_filter",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      Investment_related: {
+        type: "string",
+        enum: ["yes", "no"],
+        description:
+          "Set to 'yes' if any of the supplied titles are about a startup funding round, investment, or fundraise. Otherwise 'no'.",
+      },
+      News: {
+        type: "string",
+        description:
+          "When Investment_related is 'yes', list ONLY the qualifying titles followed by their link. Each entry separated by a blank line. Keep titles verbatim, never invent links. When Investment_related is 'no', return an empty string.",
+      },
+    },
+    required: ["Investment_related", "News"],
+    additionalProperties: false,
+  },
+} as const;
+
+interface OpenRouterChoice {
+  message?: { content?: string | null };
+}
+interface OpenRouterError {
+  error?: { message?: string };
+}
+interface AIFilterParsed {
+  Investment_related: "yes" | "no";
+  News: string;
+}
+
+function parseStrictFilterResponse(raw: string): AIFilterParsed | null {
+  if (!raw) return null;
+  // strict mode usually returns clean JSON, but some providers prefix/suffix
+  // whitespace or markdown fences. Strip a single fence if present.
+  const trimmed = raw
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed.Investment_related === "yes" || parsed.Investment_related === "no") &&
+      typeof parsed.News === "string"
+    ) {
+      return parsed as AIFilterParsed;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 async function persistFilterRun(args: {
   sourceId: string;
   sourceName: string;
@@ -494,13 +693,37 @@ async function persistFilterRun(args: {
   return mapFilterRun(data);
 }
 
+// Run the article batch through the OpenRouter investment-relevance filter.
+// Uses structured outputs (json_schema, strict) so the response is guaranteed
+// to be a valid object with Investment_related ∈ {yes,no} + News string.
+//
+// Failure policy: if OpenRouter is unreachable, returns an error, or the
+// response can't be parsed, we LOG the failure and pass everything through
+// (better to over-fetch to Airtable than to silently drop news).
 export async function filterArticlesWithAI(
   articles: FetchedArticle[],
   sourceId: string,
   sourceName: string
 ): Promise<{ passed: FetchedArticle[]; filterResult: FilterResult }> {
+  if (articles.length === 0) {
+    const filterResult = await persistFilterRun({
+      sourceId,
+      sourceName,
+      total: 0,
+      passed: 0,
+      articles: [],
+      rawResponse: "no articles to filter",
+    });
+    return { passed: [], filterResult };
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
+    logger.warn(
+      "OpenRouter API key not configured — passing all articles through filter",
+      "AIFilter",
+      { sourceId, sourceName, total: articles.length }
+    );
     const filterResult = await persistFilterRun({
       sourceId,
       sourceName,
@@ -517,6 +740,8 @@ export async function filterArticlesWithAI(
     .join("\n\n");
 
   let rawResponse = "";
+  let parsed: AIFilterParsed | null = null;
+
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -532,21 +757,42 @@ export async function filterArticlesWithAI(
           { role: "system", content: AI_FILTER_SYSTEM_PROMPT },
           { role: "user", content: userMessage },
         ],
-        temperature: 0.1,
+        temperature: 0,
         max_tokens: 4000,
+        response_format: {
+          type: "json_schema",
+          json_schema: AI_FILTER_RESPONSE_SCHEMA,
+        },
+        provider: { require_parameters: true },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(45000),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`OpenRouter error (${response.status}): ${errText.slice(0, 200)}`);
+      let detail = errText.slice(0, 300);
+      try {
+        const j = JSON.parse(errText) as OpenRouterError;
+        if (j.error?.message) detail = j.error.message.slice(0, 300);
+      } catch {
+        // not JSON, keep raw
+      }
+      throw new Error(`OpenRouter ${response.status}: ${detail}`);
     }
 
-    const data = await response.json();
-    rawResponse = data.choices?.[0]?.message?.content || "";
+    const data = (await response.json()) as { choices?: OpenRouterChoice[] };
+    rawResponse = data.choices?.[0]?.message?.content ?? "";
+    parsed = parseStrictFilterResponse(rawResponse);
+    if (!parsed) {
+      throw new Error("Filter response did not match schema");
+    }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown AI error";
+    logger.error(
+      `AI filter call failed for "${sourceName}" — passing all articles through`,
+      "AIFilter",
+      { sourceId, sourceName, error: errorMsg, total: articles.length }
+    );
     const filterResult = await persistFilterRun({
       sourceId,
       sourceName,
@@ -558,67 +804,37 @@ export async function filterArticlesWithAI(
     return { passed: articles, filterResult };
   }
 
+  // Build the "passed" set strictly from the structured response. We match
+  // by URL when present (definitive), then fall back to title substring for
+  // entries the model rendered as "Title\nlink" without an exact URL match.
   const passedUrls = new Set<string>();
-  const passedTitles = new Set<string>();
+  const passedTitles: string[] = [];
 
-  try {
-    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.Investment_related === "yes" || parsed.investment_related === "yes") {
-        articles.forEach((a) => passedUrls.add(a.url));
-      } else if (parsed.Investment_related === "no" || parsed.investment_related === "no") {
-        if (parsed.News) {
-          const urls = (parsed.News as string).match(/https?:\/\/[^\s"<>]+/g) || [];
-          urls.forEach((u: string) => passedUrls.add(u));
-        }
-      } else if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (item.Investment_related === "yes" || item.investment_related === "yes") {
-            if (item.link) passedUrls.add(item.link);
-            if (item.News || item.news || item.title) {
-              passedTitles.add(String(item.News || item.news || item.title).trim());
-            }
-          }
-        }
-      } else {
-        for (const key of Object.keys(parsed)) {
-          const val = parsed[key];
-          if (Array.isArray(val)) {
-            for (const item of val) {
-              if (typeof item === "object" && item !== null) {
-                if (item.Investment_related === "yes" || item.investment_related === "yes") {
-                  if (item.link) passedUrls.add(item.link);
-                  if (item.News || item.news || item.title) {
-                    passedTitles.add(String(item.News || item.news || item.title).trim());
-                  }
-                }
-              }
-            }
-          } else if (typeof val === "string" && key.toLowerCase().includes("news")) {
-            const urls = val.match(/https?:\/\/[^\s"<>]+/g) || [];
-            urls.forEach((u: string) => passedUrls.add(u));
-          }
-        }
-      }
+  if (parsed.Investment_related === "yes" && parsed.News) {
+    const urlMatches = parsed.News.match(/https?:\/\/[^\s"<>)]+/g) ?? [];
+    for (const u of urlMatches) {
+      passedUrls.add(u.replace(/[.,;:)]+$/, ""));
     }
-  } catch {
-    const urls = rawResponse.match(/https?:\/\/[^\s"<>]+/g) || [];
-    urls.forEach((u) => passedUrls.add(u));
+    // Each entry is title-then-link separated by blank lines. Pull title
+    // candidates: any non-empty line that isn't a URL.
+    for (const line of parsed.News.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t && !/^https?:\/\//i.test(t)) passedTitles.push(t);
+    }
   }
 
   const passed: FetchedArticle[] = [];
   const articleResults: FilterResult["articles"] = [];
 
   for (const article of articles) {
+    const titleNorm = article.title.trim();
     const isRelevant =
       passedUrls.has(article.url) ||
-      passedTitles.has(article.title.trim()) ||
-      Array.from(passedTitles).some(
+      passedTitles.some(
         (t) =>
           t.length > 10 &&
-          (article.title.toLowerCase().includes(t.toLowerCase()) ||
-            t.toLowerCase().includes(article.title.toLowerCase()))
+          (titleNorm.toLowerCase().includes(t.toLowerCase()) ||
+            t.toLowerCase().includes(titleNorm.toLowerCase()))
       );
     if (isRelevant) {
       article.isInvestmentRelated = true;
@@ -626,6 +842,18 @@ export async function filterArticlesWithAI(
     }
     articleResults.push({ title: article.title, url: article.url, passed: isRelevant });
   }
+
+  logger.info(
+    `AI filter "${sourceName}": ${passed.length}/${articles.length} passed`,
+    "AIFilter",
+    {
+      sourceId,
+      sourceName,
+      total: articles.length,
+      passed: passed.length,
+      investmentRelated: parsed.Investment_related,
+    }
+  );
 
   const filterResult = await persistFilterRun({
     sourceId,
@@ -1280,19 +1508,27 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   let savedCount = 0;
   let passedCount = fresh.length;
   if (fresh.length > 0) {
-    if (source.type === "rss") {
+    if (source.topic === "news") {
       try {
         const { passed } = await filterArticlesWithAI(fresh, source.id, source.name);
         passedCount = passed.length;
         if (passed.length > 0) savedCount = await saveArticlesToAirtable(passed, source.name);
-      } catch {
-        // Non-blocking
+      } catch (err) {
+        logger.error(
+          `AI filter+save pipeline failed for "${source.name}"`,
+          "DataSources",
+          err
+        );
       }
     } else {
       try {
         savedCount = await saveArticlesToAirtable(fresh, source.name);
-      } catch {
-        // Non-blocking
+      } catch (err) {
+        logger.error(
+          `Airtable save failed for "${source.name}"`,
+          "DataSources",
+          err
+        );
       }
     }
   }

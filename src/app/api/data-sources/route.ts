@@ -5,6 +5,7 @@ import {
   createDataSource,
   updateDataSource,
   deleteDataSource,
+  bulkCreateDataSources,
   getArticles,
   getArticleById,
   fetchSource,
@@ -101,6 +102,37 @@ export async function POST(request: NextRequest) {
             user.id
           );
           return NextResponse.json({ source });
+        } catch (err) {
+          if (err instanceof SourceValidationError) {
+            return NextResponse.json({ error: err.message }, { status: 400 });
+          }
+          throw err;
+        }
+      }
+
+      case "bulk-create": {
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        const sources = Array.isArray(data.sources) ? data.sources : null;
+        if (!sources) {
+          return NextResponse.json({ error: "sources يجب أن يكون مصفوفة" }, { status: 400 });
+        }
+        try {
+          const { results, created } = await bulkCreateDataSources(sources);
+          logger.info(
+            `Bulk create: ${created}/${results.length} sources created by ${user.name}`,
+            "DataSources",
+            null,
+            user.id
+          );
+          const failed = results.filter((r) => !r.ok).length;
+          return NextResponse.json({
+            results,
+            created,
+            failed,
+            total: results.length,
+          });
         } catch (err) {
           if (err instanceof SourceValidationError) {
             return NextResponse.json({ error: err.message }, { status: 400 });

@@ -1538,6 +1538,7 @@ export type Database = {
           last_fetched_at: string | null
           last_success_at: string | null
           name: string
+          topic: Database["public"]["Enums"]["scraper_source_topic"]
           type: Database["public"]["Enums"]["scraper_source_type"]
           updated_at: string
           url: string
@@ -1556,6 +1557,7 @@ export type Database = {
           last_fetched_at?: string | null
           last_success_at?: string | null
           name: string
+          topic?: Database["public"]["Enums"]["scraper_source_topic"]
           type: Database["public"]["Enums"]["scraper_source_type"]
           updated_at?: string
           url: string
@@ -1574,6 +1576,7 @@ export type Database = {
           last_fetched_at?: string | null
           last_success_at?: string | null
           name?: string
+          topic?: Database["public"]["Enums"]["scraper_source_topic"]
           type?: Database["public"]["Enums"]["scraper_source_type"]
           updated_at?: string
           url?: string
@@ -1935,6 +1938,7 @@ export type Database = {
       scraper_agent_type: "writing" | "filtering" | "editing" | "summarizing"
       scraper_log_level: "debug" | "info" | "warn" | "error"
       scraper_run_status: "success" | "partial" | "error" | "empty" | "skipped"
+      scraper_source_topic: "news" | "insights" | "real_estate"
       scraper_source_type: "rss" | "twitter" | "linkedin" | "apify" | "custom"
     }
     CompositeTypes: {
@@ -2068,6 +2072,7 @@ export const Constants = {
       scraper_agent_type: ["writing", "filtering", "editing", "summarizing"],
       scraper_log_level: ["debug", "info", "warn", "error"],
       scraper_run_status: ["success", "partial", "error", "empty", "skipped"],
+      scraper_source_topic: ["news", "insights", "real_estate"],
       scraper_source_type: ["rss", "twitter", "linkedin", "apify", "custom"],
     },
   },

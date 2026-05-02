@@ -36,6 +36,7 @@ interface DataSource {
   type: "rss" | "twitter" | "linkedin" | "apify" | "custom";
   url: string;
   category: "startups" | "investment" | "tech" | "general";
+  topic: "news" | "insights" | "real_estate";
   fetchInterval: number;
   isActive: boolean;
   lastFetched: string | null;
@@ -86,6 +87,12 @@ const CATEGORIES = [
   { value: "general", label: "عام", color: "text-neutral-400", bg: "bg-neutral-400/10", badge: "border-neutral-500/30 text-neutral-400" },
 ];
 
+const TOPICS = [
+  { value: "news", label: "أخبار (News)", description: "يمر عبر فلترة AI لاكتشاف أخبار التمويل قبل الحفظ في Airtable" },
+  { value: "insights", label: "رؤى (Insights)", description: "محتوى رأي وتحليل — يحفظ كاملاً بدون فلترة" },
+  { value: "real_estate", label: "عقارات (Real Estate)", description: "محتوى عقاري — يحفظ كاملاً بدون فلترة" },
+] as const;
+
 const TYPE_PLACEHOLDERS: Record<string, string> = {
   rss: "https://example.com/feed",
   twitter: "https://x.com/username",
@@ -97,6 +104,7 @@ const defaultFormData = {
   type: "rss" as DataSource["type"],
   url: "",
   category: "general" as DataSource["category"],
+  topic: "insights" as DataSource["topic"],
   fetchInterval: 60,
   isActive: true,
 };
@@ -116,6 +124,24 @@ export default function DataSourcesPage() {
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"sources" | "articles" | "filters" | "guide">("sources");
+
+  // Bulk-add modal
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkType, setBulkType] = useState<DataSource["type"]>("rss");
+  const [bulkTopic, setBulkTopic] = useState<DataSource["topic"]>("news");
+  const [bulkCategory, setBulkCategory] = useState<DataSource["category"]>("general");
+  const [bulkInterval, setBulkInterval] = useState(60);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResults, setBulkResults] = useState<
+    | {
+        results: { index: number; ok: boolean; error?: string; input?: { url?: string; name?: string } }[];
+        created: number;
+        failed: number;
+        total: number;
+      }
+    | null
+  >(null);
 
   // Apify + OpenRouter status
   const [apifyConfigured, setApifyConfigured] = useState(false);
@@ -338,6 +364,7 @@ export default function DataSourcesPage() {
       type: source.type,
       url: source.url,
       category: source.category,
+      topic: source.topic ?? "insights",
       fetchInterval: source.fetchInterval,
       isActive: source.isActive,
     });
@@ -348,6 +375,81 @@ export default function DataSourcesPage() {
     setShowModal(false);
     setEditingSource(null);
     setFormData({ ...defaultFormData });
+  };
+
+  const closeBulkModal = () => {
+    setShowBulkModal(false);
+    setBulkResults(null);
+    setBulkText("");
+  };
+
+  // Each non-empty line is one source. Three accepted formats:
+  //   - "URL"
+  //   - "URL | Name"
+  //   - "Name | URL"  (auto-detected: whichever side parses as a URL)
+  const parseBulkLines = (
+    text: string
+  ): { url: string; name?: string }[] => {
+    const out: { url: string; name?: string }[] = [];
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const parts = line.split("|").map((p) => p.trim()).filter(Boolean);
+      if (parts.length === 1) {
+        out.push({ url: parts[0] });
+      } else {
+        const looksUrl = (s: string) => /^https?:\/\//i.test(s);
+        if (looksUrl(parts[0])) {
+          out.push({ url: parts[0], name: parts.slice(1).join(" | ") });
+        } else if (looksUrl(parts[1])) {
+          out.push({ url: parts[1], name: parts[0] });
+        } else {
+          out.push({ url: parts[0], name: parts.slice(1).join(" | ") });
+        }
+      }
+    }
+    return out;
+  };
+
+  const handleBulkSubmit = async () => {
+    const parsed = parseBulkLines(bulkText);
+    if (parsed.length === 0) {
+      addToast("ألصق رابطاً واحداً على الأقل", "warning");
+      return;
+    }
+    setBulkSubmitting(true);
+    setBulkResults(null);
+    try {
+      const sources = parsed.map((p) => ({
+        url: p.url,
+        name: p.name,
+        type: bulkType,
+        topic: bulkTopic,
+        category: bulkCategory,
+        fetchInterval: bulkInterval,
+        isActive: true,
+      }));
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk-create", sources }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || "فشلت العملية", "error");
+        return;
+      }
+      setBulkResults(data);
+      addToast(
+        `تم إنشاء ${data.created} من ${data.total} مصدر`,
+        data.failed > 0 ? "warning" : "success"
+      );
+      loadSources();
+    } catch {
+      addToast("حدث خطأ أثناء الإضافة", "error");
+    } finally {
+      setBulkSubmitting(false);
+    }
   };
 
   /* ───────── Filtered sources ───────── */
@@ -476,13 +578,23 @@ export default function DataSourcesPage() {
           </div>
 
           {user?.role === "admin" && activeTab === "sources" && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="zto-btn zto-btn-gold"
-            >
-              <Plus className="w-4 h-4" />
-              مصدر جديد
-            </button>
+            <>
+              <button
+                onClick={() => setShowBulkModal(true)}
+                className="zto-btn zto-btn-outline"
+                title="إضافة عدة مصادر دفعة واحدة"
+              >
+                <Plus className="w-4 h-4" />
+                دفعة
+              </button>
+              <button
+                onClick={() => setShowModal(true)}
+                className="zto-btn zto-btn-gold"
+              >
+                <Plus className="w-4 h-4" />
+                مصدر جديد
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1090,6 +1202,190 @@ export default function DataSourcesPage() {
         </div>
       )}
 
+      {/* ───── Bulk Add Modal ───── */}
+      {showBulkModal && (
+        <div className="zto-overlay" onClick={closeBulkModal}>
+          <div
+            className="zto-modal w-full max-w-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-neutral-800 flex items-center justify-between">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Plus className="w-4 h-4 text-amber-400" />
+                إضافة مصادر دفعة واحدة
+              </h3>
+              <button
+                onClick={closeBulkModal}
+                className="text-neutral-500 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
+                <p className="text-xs text-neutral-300 leading-relaxed">
+                  الصق روابط (واحد في كل سطر). يمكن إضافة اسم اختياري بعد
+                  <code className="text-amber-400 mx-1 font-mono">|</code>
+                  مثل:
+                </p>
+                <pre className="mt-2 text-[0.7rem] text-amber-400 bg-neutral-900 border border-neutral-800 rounded p-2 font-mono overflow-x-auto" dir="ltr">
+{`https://techcrunch.com/feed
+https://wamda.com/feed | Wamda
+TechCrunch | https://techcrunch.com/feed
+# سطر يبدأ بـ # يتم تجاهله`}
+                </pre>
+              </div>
+
+              {/* Shared settings */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="zto-label">النوع لكل المصادر</label>
+                  <div className="zto-select-wrap">
+                    <select
+                      className="zto-input"
+                      value={bulkType}
+                      onChange={(e) => setBulkType(e.target.value as DataSource["type"])}
+                    >
+                      {SOURCE_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="zto-label">الموضوع</label>
+                  <div className="zto-select-wrap">
+                    <select
+                      className="zto-input"
+                      value={bulkTopic}
+                      onChange={(e) => setBulkTopic(e.target.value as DataSource["topic"])}
+                    >
+                      {TOPICS.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="zto-label">الفئة</label>
+                  <div className="zto-select-wrap">
+                    <select
+                      className="zto-input"
+                      value={bulkCategory}
+                      onChange={(e) =>
+                        setBulkCategory(e.target.value as DataSource["category"])
+                      }
+                    >
+                      {CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="zto-label">فترة الجلب (دقائق)</label>
+                  <input
+                    type="number"
+                    className="zto-input"
+                    min={5}
+                    max={10080}
+                    value={bulkInterval}
+                    onChange={(e) =>
+                      setBulkInterval(parseInt(e.target.value) || 60)
+                    }
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="zto-label">
+                  الروابط (سطر لكل مصدر) — حد أقصى 100
+                </label>
+                <textarea
+                  className="zto-input min-h-[180px] font-mono text-xs"
+                  dir="ltr"
+                  placeholder={"https://techcrunch.com/feed\nhttps://wamda.com/feed | Wamda"}
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                />
+                <p className="text-[0.65rem] text-neutral-500 mt-1">
+                  الأسطر الفارغة وتلك التي تبدأ بـ # يتم تجاهلها
+                </p>
+              </div>
+
+              {bulkResults && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="zto-badge zto-badge-info">
+                      {bulkResults.total} إجمالي
+                    </span>
+                    <span className="zto-badge border border-emerald-500/30 text-emerald-400">
+                      {bulkResults.created} نجح
+                    </span>
+                    {bulkResults.failed > 0 && (
+                      <span className="zto-badge border border-red-500/30 text-red-400">
+                        {bulkResults.failed} فشل
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg max-h-48 overflow-y-auto divide-y divide-neutral-800">
+                    {bulkResults.results.map((r) => (
+                      <div
+                        key={r.index}
+                        className={`flex items-start gap-2 px-3 py-2 text-xs ${
+                          r.ok ? "" : "bg-red-500/5"
+                        }`}
+                      >
+                        {r.ok ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1 min-w-0" dir="ltr">
+                          <p className="text-neutral-300 truncate font-mono text-[0.7rem]">
+                            {r.input?.url ?? `سطر ${r.index + 1}`}
+                          </p>
+                          {!r.ok && r.error && (
+                            <p className="text-red-400 text-[0.65rem] mt-0.5" dir="rtl">
+                              {r.error}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-neutral-800 flex items-center gap-3 justify-end">
+              <button onClick={closeBulkModal} className="zto-btn zto-btn-ghost">
+                إغلاق
+              </button>
+              <button
+                onClick={handleBulkSubmit}
+                disabled={bulkSubmitting || !bulkText.trim()}
+                className="zto-btn zto-btn-gold"
+              >
+                {bulkSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                إضافة الكل
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ───── Create / Edit Modal ───── */}
       {showModal && (
         <div className="zto-overlay" onClick={closeModal}>
@@ -1162,6 +1458,32 @@ export default function DataSourcesPage() {
                     setFormData((p) => ({ ...p, url: e.target.value }))
                   }
                 />
+              </div>
+
+              {/* Topic (news / insights / real estate) */}
+              <div>
+                <label className="zto-label">الموضوع *</label>
+                <div className="zto-select-wrap">
+                  <select
+                    className="zto-input"
+                    value={formData.topic}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        topic: e.target.value as DataSource["topic"],
+                      }))
+                    }
+                  >
+                    {TOPICS.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[0.65rem] text-neutral-500 mt-1">
+                  {TOPICS.find((t) => t.value === formData.topic)?.description}
+                </p>
               </div>
 
               {/* Category + Fetch Interval */}
