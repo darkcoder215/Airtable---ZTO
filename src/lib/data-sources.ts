@@ -9,15 +9,17 @@ import type { Database } from "@/lib/supabase/database.types";
 import { logger } from "@/lib/logger";
 import {
   applyMapping,
-  getDestinationMapping,
+  getMappingForType,
+  getPerTypeMapping,
   DESTINATION_BASE_ID,
-  DESTINATION_TABLE_NAME,
+  DEFAULT_TABLE_NAME,
+  type TypeMapping,
 } from "@/lib/destination-mapping";
+import { listTables, type AirtableField } from "@/lib/airtable";
 
-// Hard-coded destination is now sourced from destination-mapping.ts so the
-// dashboard can override the column shape at runtime without redeploying.
+// Destination base is fixed per environment; per-type table + columns come
+// from the dashboard-editable mapping.
 const ZTO_BASE_ID = DESTINATION_BASE_ID;
-const APIFY_TABLE_NAME = DESTINATION_TABLE_NAME;
 
 type SourceRow = Database["public"]["Tables"]["scraper_sources"]["Row"];
 type SourceInsert = Database["public"]["Tables"]["scraper_sources"]["Insert"];
@@ -1342,27 +1344,129 @@ async function persistArticles(
 // Airtable destination (writes record id back into scraper_articles)
 // ---------------------------------------------------------------------------
 
+// Cache of column-name sets keyed by Airtable table name. Refreshed lazily;
+// invalidated whenever a save sees an unknown column so a freshly-added
+// Airtable column starts working on the next attempt without a restart.
+const tableColumnCache = new Map<string, Set<string>>();
+
+async function getKnownColumns(
+  tableName: string,
+  forceRefresh = false
+): Promise<Set<string> | null> {
+  if (!forceRefresh && tableColumnCache.has(tableName)) {
+    return tableColumnCache.get(tableName)!;
+  }
+  try {
+    const tables = await listTables(ZTO_BASE_ID);
+    const t = tables.find((tt) => tt.name === tableName || tt.id === tableName);
+    if (!t) {
+      logger.warn(
+        `Destination table "${tableName}" not found in base — falling back to send-everything`,
+        "DataSources",
+        { tableName, baseId: ZTO_BASE_ID }
+      );
+      return null;
+    }
+    const set = new Set(t.fields.map((f: AirtableField) => f.name));
+    tableColumnCache.set(tableName, set);
+    return set;
+  } catch (err) {
+    logger.warn(
+      `Could not list destination columns — proceeding without column validation`,
+      "DataSources",
+      { tableName, error: err instanceof Error ? err.message : String(err) }
+    );
+    return null;
+  }
+}
+
 export async function saveArticleToAirtable(
   article: FetchedArticle,
-  sourceName: string
+  sourceName: string,
+  sourceType: SourceType = "rss"
 ): Promise<boolean> {
+  // Pick the per-type mapping. Fall back to a sane default mapping shape if
+  // the settings store is unreachable so saves don't silently disappear.
+  let mapping: TypeMapping;
   try {
-    // Pull the latest mapping per call (cheap one-row lookup) so admin edits
-    // take effect immediately instead of waiting for a process restart.
-    const mapping = await getDestinationMapping().catch(() => null);
-    const enrichedArticle: FetchedArticle = {
-      ...article,
-      sourceName: article.sourceName || sourceName,
+    const perType = await getPerTypeMapping();
+    mapping = getMappingForType(perType, sourceType);
+  } catch (err) {
+    logger.warn(
+      "Could not load destination mapping — using default shape",
+      "DataSources",
+      { error: err instanceof Error ? err.message : String(err) }
+    );
+    mapping = {
+      tableName: DEFAULT_TABLE_NAME,
+      columns: {
+        Source: { type: "field", field: "sourceName" },
+        "Original Post": { type: "field", field: "description", fallback: "title" },
+        Status: { type: "literal", value: "New" },
+        "Link to Post (If Applicable)": { type: "field", field: "url" },
+      },
     };
-    const fields = mapping
-      ? applyMapping(mapping, enrichedArticle)
-      : {
-          Source: sourceName,
-          "Original Post": article.description || article.title,
-          Status: "New",
-          "Link to Post (If Applicable)": article.url,
-        };
-    const created = await createRecord(ZTO_BASE_ID, APIFY_TABLE_NAME, fields);
+  }
+
+  const enrichedArticle: FetchedArticle = {
+    ...article,
+    sourceName: article.sourceName || sourceName,
+  };
+
+  const known = await getKnownColumns(mapping.tableName);
+  const { fields, unknownColumns } = applyMapping(
+    mapping,
+    enrichedArticle,
+    known ?? undefined
+  );
+
+  if (unknownColumns.length > 0) {
+    // Bust the cache so a column added in Airtable a moment ago isn't held
+    // off forever, then re-resolve once before giving up.
+    tableColumnCache.delete(mapping.tableName);
+    const refreshed = await getKnownColumns(mapping.tableName, true);
+    if (refreshed) {
+      const recheck = applyMapping(mapping, enrichedArticle, refreshed);
+      if (recheck.unknownColumns.length === 0) {
+        Object.assign(fields, recheck.fields);
+        unknownColumns.length = 0;
+      } else {
+        unknownColumns.length = 0;
+        unknownColumns.push(...recheck.unknownColumns);
+      }
+    }
+  }
+
+  if (unknownColumns.length > 0) {
+    logger.error(
+      `Destination table "${mapping.tableName}" missing ${unknownColumns.length} mapped column(s) — they were skipped`,
+      "DataSources",
+      {
+        sourceType,
+        sourceName,
+        articleTitle: enrichedArticle.title?.slice(0, 80),
+        tableName: mapping.tableName,
+        unknownColumns,
+      }
+    );
+  }
+
+  if (Object.keys(fields).length === 0) {
+    logger.error(
+      `Destination save aborted — no valid columns left after pruning unknowns`,
+      "DataSources",
+      {
+        sourceType,
+        sourceName,
+        tableName: mapping.tableName,
+        articleTitle: enrichedArticle.title?.slice(0, 80),
+      }
+    );
+    return false;
+  }
+
+  try {
+    const created = await createRecord(ZTO_BASE_ID, mapping.tableName, fields);
     if (isUuid(article.id)) {
       const sb = getSupabaseAdmin();
       await sb
@@ -1377,9 +1481,14 @@ export async function saveArticleToAirtable(
     return true;
   } catch (err) {
     logger.error(
-      `Save to destination failed for "${article.title?.slice(0, 80)}"`,
+      `Save to destination failed for "${enrichedArticle.title?.slice(0, 80)}"`,
       "DataSources",
-      { error: err instanceof Error ? err.message : String(err) }
+      {
+        sourceType,
+        sourceName,
+        tableName: mapping.tableName,
+        error: err instanceof Error ? err.message : String(err),
+      }
     );
     return false;
   }
@@ -1387,12 +1496,13 @@ export async function saveArticleToAirtable(
 
 export async function saveArticlesToAirtable(
   articles: FetchedArticle[],
-  sourceName: string
+  sourceName: string,
+  sourceType: SourceType = "rss"
 ): Promise<number> {
   let saved = 0;
   for (const article of articles) {
     if (article.savedToAirtable) continue;
-    const ok = await saveArticleToAirtable(article, sourceName);
+    const ok = await saveArticleToAirtable(article, sourceName, sourceType);
     if (ok) saved++;
   }
   return saved;
@@ -1602,7 +1712,7 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
       try {
         const { passed } = await filterArticlesWithAI(fresh, source.id, source.name);
         passedCount = passed.length;
-        if (passed.length > 0) savedCount = await saveArticlesToAirtable(passed, source.name);
+        if (passed.length > 0) savedCount = await saveArticlesToAirtable(passed, source.name, source.type);
       } catch (err) {
         logger.error(
           `AI filter+save pipeline failed for "${source.name}"`,
@@ -1612,7 +1722,7 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
       }
     } else {
       try {
-        savedCount = await saveArticlesToAirtable(fresh, source.name);
+        savedCount = await saveArticlesToAirtable(fresh, source.name, source.type);
       } catch (err) {
         logger.error(
           `Airtable save failed for "${source.name}"`,

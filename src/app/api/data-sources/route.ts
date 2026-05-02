@@ -22,14 +22,15 @@ import {
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import {
-  getDestinationMapping,
-  setDestinationMapping,
+  getPerTypeMapping,
+  setPerTypeMapping,
+  getMappingForType,
   applyMapping,
-  sanitizeMapping,
+  sanitizePerTypeMapping,
   ARTICLE_TOKENS,
+  MAPPABLE_SOURCE_TYPES,
   DESTINATION_BASE_ID,
-  DESTINATION_TABLE_NAME,
-  type DestinationMapping,
+  type TypeMapping,
 } from "@/lib/destination-mapping";
 import { listTables } from "@/lib/airtable";
 
@@ -92,12 +93,12 @@ export async function GET(request: NextRequest) {
 
   if (action === "destination-mapping") {
     try {
-      const mapping = await getDestinationMapping();
+      const mapping = await getPerTypeMapping();
       return NextResponse.json({
         mapping,
         baseId: DESTINATION_BASE_ID,
-        tableName: DESTINATION_TABLE_NAME,
         articleTokens: ARTICLE_TOKENS,
+        sourceTypes: MAPPABLE_SOURCE_TYPES,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -105,16 +106,42 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (action === "destination-columns") {
-    // Refresh-from-Airtable: list the live columns of the destination table.
+  // List all tables in the destination base — used by the table picker so the
+  // admin can choose a different table per source type.
+  if (action === "destination-tables") {
     try {
       const tables = await listTables(DESTINATION_BASE_ID);
-      const table = tables.find(
-        (t) => t.name === DESTINATION_TABLE_NAME || t.id === DESTINATION_TABLE_NAME
-      );
+      return NextResponse.json({
+        baseId: DESTINATION_BASE_ID,
+        tables: tables.map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          fieldCount: t.fields.length,
+        })),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
+  }
+
+  // Columns for a specific table. Caller passes ?tableName=...; returns the
+  // live schema so the mapping UI can flag mismatches in real time.
+  if (action === "destination-columns") {
+    try {
+      const tableName = searchParams.get("tableName");
+      if (!tableName) {
+        return NextResponse.json(
+          { error: "يجب تحديد اسم الجدول" },
+          { status: 400 }
+        );
+      }
+      const tables = await listTables(DESTINATION_BASE_ID);
+      const table = tables.find((t) => t.name === tableName || t.id === tableName);
       if (!table) {
         return NextResponse.json(
-          { error: "جدول الوجهة غير موجود في قاعدة Airtable" },
+          { error: `الجدول "${tableName}" غير موجود في قاعدة Airtable` },
           { status: 404 }
         );
       }
@@ -396,20 +423,29 @@ export async function POST(request: NextRequest) {
         }
         const raw = (data as { mapping?: unknown }).mapping;
         try {
-          const clean = sanitizeMapping(raw);
-          if (Object.keys(clean.columns).length === 0) {
+          const clean = sanitizePerTypeMapping(raw);
+          // At least one type must have at least one column.
+          const totalCols = Object.values(clean).reduce(
+            (n, m) => n + (m ? Object.keys(m.columns).length : 0),
+            0
+          );
+          if (totalCols === 0) {
             return NextResponse.json(
               { error: "لا يمكن حفظ مخطّط فارغ" },
               { status: 400 }
             );
           }
-          const saved = await setDestinationMapping(clean);
+          const saved = await setPerTypeMapping(clean);
+          const summary = Object.entries(saved)
+            .map(
+              ([t, m]) =>
+                `${t}=${m ? Object.keys(m.columns).length : 0}c@${m?.tableName ?? "?"}`
+            )
+            .join(" ");
           logger.info(
-            `Destination mapping updated by ${user.name} (${
-              Object.keys(saved.columns).length
-            } columns)`,
+            `Destination mapping updated by ${user.name} — ${summary}`,
             "DataSources",
-            { columnCount: Object.keys(saved.columns).length },
+            { mapping: saved },
             user.id
           );
           return NextResponse.json({ mapping: saved });
@@ -424,27 +460,68 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
         try {
-          // Use the just-edited mapping if provided, else the persisted one.
+          // Caller chooses the source type to preview against. Default to rss
+          // for backward compat with the old single-mapping contract.
+          const sourceType = ((data as { type?: unknown }).type ?? "rss") as
+            | "rss"
+            | "twitter"
+            | "linkedin"
+            | "apify"
+            | "custom";
           const incoming = (data as { mapping?: unknown }).mapping;
-          const mapping: DestinationMapping = incoming
-            ? sanitizeMapping(incoming)
-            : await getDestinationMapping();
+          const perType = incoming
+            ? sanitizePerTypeMapping(incoming)
+            : await getPerTypeMapping();
+          const mapping: TypeMapping = getMappingForType(perType, sourceType);
 
-          // Pull the most recent article overall (any source, any topic) to
-          // give a realistic preview.
-          const recent = await getArticles();
-          const article = recent[0] ?? null;
+          // Pull the most recent article matching this type when possible so
+          // the preview reflects the actual data shape that flows through.
+          const allRecent = await getArticles();
+          // We don't have type on the article — articles inherit from source.
+          // Best-effort: pick the most recent article whose source still
+          // exists and matches; fall back to the most recent article overall.
+          const sources = await getDataSources();
+          const sourceById = new Map(sources.map((s) => [s.id, s]));
+          let article = allRecent.find(
+            (a) => sourceById.get(a.sourceId)?.type === sourceType
+          );
+          if (!article) article = allRecent[0];
+
           if (!article) {
             return NextResponse.json({
               mapping,
               article: null,
               preview: {},
               note: "لا توجد مقالات بعد لاختبار المخطّط",
+              missingColumns: [],
+              tableName: mapping.tableName,
+              sourceType,
             });
           }
-          const preview = applyMapping(mapping, article);
+
+          // Verify mapped columns against the live destination schema so the
+          // UI can surface mismatches in the same response.
+          let missingColumns: string[] = [];
+          let liveColumns: string[] = [];
+          try {
+            const tables = await listTables(DESTINATION_BASE_ID);
+            const t = tables.find(
+              (tt) => tt.name === mapping.tableName || tt.id === mapping.tableName
+            );
+            if (t) {
+              liveColumns = t.fields.map((f) => f.name);
+              const known = new Set(liveColumns);
+              missingColumns = Object.keys(mapping.columns).filter((c) => !known.has(c));
+            }
+          } catch {
+            // Non-fatal — the preview can still render without the schema
+          }
+
+          const { fields: preview } = applyMapping(mapping, article);
           return NextResponse.json({
             mapping,
+            sourceType,
+            tableName: mapping.tableName,
             article: {
               id: article.id,
               title: article.title,
@@ -453,6 +530,8 @@ export async function POST(request: NextRequest) {
               publishedAt: article.publishedAt,
             },
             preview,
+            missingColumns,
+            liveColumns,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
