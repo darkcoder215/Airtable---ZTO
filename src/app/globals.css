@@ -177,7 +177,10 @@
 .zto-input {
   width: 100%; border-radius: 10px;
   border: 1.5px solid var(--c-brand-border);
-  background: var(--c-brand); padding: 10px 14px;
+  background: var(--c-brand);
+  /* Use longhand so per-side Tailwind utilities (pr-10, pl-3, etc.) can
+     override individual edges instead of being clobbered by the shorthand. */
+  padding-block: 10px; padding-inline: 14px;
   font-size: 14px; font-weight: 500; color: var(--text-strong);
   outline: none; transition: border-color 0.15s; font-family: inherit;
 }

@@ -127,6 +127,7 @@ interface SourcePayloadInput {
   topic?: unknown;
   fetchInterval?: unknown;
   isActive?: unknown;
+  filterAgentId?: unknown;
 }
 
 interface SourcePayloadValidated {
@@ -137,6 +138,7 @@ interface SourcePayloadValidated {
   topic?: SourceTopic;
   fetchInterval?: number;
   isActive?: boolean;
+  filterAgentId?: string | null;
 }
 
 // Throws SourceValidationError on bad input. With { partial: true } only the
@@ -227,6 +229,19 @@ export function validateSourcePayload(
     out.isActive = input.isActive;
   }
 
+  // filterAgentId may be a UUID string, null, or undefined (= leave unchanged).
+  // Empty string is normalised to null so the column can clear cleanly.
+  if (input.filterAgentId !== undefined) {
+    const v = input.filterAgentId;
+    if (v === null || v === "") {
+      out.filterAgentId = null;
+    } else if (typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
+      out.filterAgentId = v;
+    } else {
+      throw new SourceValidationError("filterAgentId غير صالح");
+    }
+  }
+
   return out;
 }
 
@@ -242,6 +257,7 @@ export interface DataSource {
   lastFetchedAt: string | null;
   createdAt: string;
   brandId?: string | null;
+  filterAgentId?: string | null;
 }
 
 export interface FetchedArticle {
@@ -296,6 +312,7 @@ function mapSource(r: SourceRow): DataSource {
     lastFetchedAt: r.last_fetched_at,
     createdAt: r.created_at,
     brandId: r.brand_id,
+    filterAgentId: r.filter_agent_id,
   };
 }
 
@@ -377,6 +394,10 @@ export async function createDataSource(
     is_active: validated.isActive ?? config.isActive,
     fetch_interval_minutes: validated.fetchInterval ?? config.fetchInterval,
     brand_id: config.brandId ?? null,
+    filter_agent_id:
+      validated.filterAgentId !== undefined
+        ? validated.filterAgentId
+        : config.filterAgentId ?? null,
   };
   const { data, error } = await sb
     .from("scraper_sources")
@@ -534,6 +555,7 @@ export async function updateDataSource(
   }
   if (update.lastFetchedAt !== undefined) patch.last_fetched_at = update.lastFetchedAt;
   if (update.brandId !== undefined) patch.brand_id = update.brandId;
+  if (validated.filterAgentId !== undefined) patch.filter_agent_id = validated.filterAgentId;
 
   const { data, error } = await sb
     .from("scraper_sources")
@@ -605,14 +627,82 @@ export async function getFilterHistory(): Promise<FilterResult[]> {
 // AI Filtering
 // ---------------------------------------------------------------------------
 
-const AI_FILTER_MODEL = "openai/gpt-4o-mini";
+// Baseline fallback when the source has no filter_agent_id set AND no
+// filtering agent exists in scraper_agents (e.g. fresh DB before the seed
+// runs). Kept identical to the historical hard-coded behaviour.
+const AI_FILTER_FALLBACK_MODEL = "openai/gpt-4o-mini";
 
-const AI_FILTER_SYSTEM_PROMPT = `You're an agent that analyzes the titles of some news and ONLY OUTPUTS JSON ONLY. Just analyze the title of the news and output whether it's related to startups & rounds of investments of startups or not. If you have multiple titles, extract the ones that have to do with startups & funding and remove the rest. Don't tweak anything in them, keep them as is with the headline & the link. Output them within the json as news with the value being the news and then the link leading to each. Stack all the news in the 2nd key as a paragraph where an empty row in between each news and its corresponding link. Don't create a collection.
+const AI_FILTER_FALLBACK_PROMPT = `You're an agent that analyzes the titles of some news and ONLY OUTPUTS JSON ONLY. Just analyze the title of the news and output whether it's related to startups & rounds of investments of startups or not. If you have multiple titles, extract the ones that have to do with startups & funding and remove the rest. Don't tweak anything in them, keep them as is with the headline & the link. Output them within the json as news with the value being the news and then the link leading to each. Stack all the news in the 2nd key as a paragraph where an empty row in between each news and its corresponding link. Don't create a collection.
 
 Your output is the following key with values either "yes" or "no".
 
 Investment_related:
 News:`;
+
+export interface FilterAgentSpec {
+  agentId: string | null;
+  agentName: string;
+  model: string;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+}
+
+const FILTER_AGENT_FALLBACK: FilterAgentSpec = {
+  agentId: null,
+  agentName: "فلتر افتراضي",
+  model: AI_FILTER_FALLBACK_MODEL,
+  systemPrompt: AI_FILTER_FALLBACK_PROMPT,
+  temperature: 0,
+  maxTokens: 4000,
+};
+
+// Resolve which filter agent applies to this source. Order:
+//   1. The source's explicit filter_agent_id, if any (active or not — admin
+//      override wins).
+//   2. The first active scraper_agents row with type 'filtering'.
+//   3. The hard-coded fallback prompt.
+export async function resolveFilterAgentForSource(
+  source: Pick<DataSource, "filterAgentId">
+): Promise<FilterAgentSpec> {
+  const sb = getSupabaseAdmin();
+  if (source.filterAgentId && isUuid(source.filterAgentId)) {
+    const { data, error } = await sb
+      .from("scraper_agents")
+      .select("id, name, model_name, system_prompt, temperature, max_tokens, is_active")
+      .eq("id", source.filterAgentId)
+      .maybeSingle();
+    if (!error && data) {
+      return {
+        agentId: data.id,
+        agentName: data.name,
+        model: data.model_name,
+        systemPrompt: data.system_prompt,
+        temperature: Number(data.temperature ?? 0),
+        maxTokens: Number(data.max_tokens ?? 4000),
+      };
+    }
+  }
+  const { data: defaults } = await sb
+    .from("scraper_agents")
+    .select("id, name, model_name, system_prompt, temperature, max_tokens")
+    .eq("agent_type", "filtering")
+    .eq("is_active", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (defaults) {
+    return {
+      agentId: defaults.id,
+      agentName: defaults.name,
+      model: defaults.model_name,
+      systemPrompt: defaults.system_prompt,
+      temperature: Number(defaults.temperature ?? 0),
+      maxTokens: Number(defaults.max_tokens ?? 4000),
+    };
+  }
+  return FILTER_AGENT_FALLBACK;
+}
 
 // OpenRouter structured-outputs schema. strict=true so the model can't
 // return extra keys or wrong types — drastically simpler downstream parsing
@@ -683,6 +773,7 @@ async function persistFilterRun(args: {
   passed: number;
   articles: { title: string; url: string; passed: boolean }[];
   rawResponse?: string;
+  model?: string;
 }): Promise<FilterResult> {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
@@ -693,7 +784,7 @@ async function persistFilterRun(args: {
       total_articles: args.total,
       passed_articles: args.passed,
       rejected_articles: args.total - args.passed,
-      model: AI_FILTER_MODEL,
+      model: args.model ?? AI_FILTER_FALLBACK_MODEL,
       articles: args.articles as unknown as Database["public"]["Tables"]["scraper_filter_runs"]["Insert"]["articles"],
       raw_response: args.rawResponse ?? null,
     })
@@ -701,6 +792,107 @@ async function persistFilterRun(args: {
     .single();
   if (error) throw new Error(`persistFilterRun: ${error.message}`);
   return mapFilterRun(data);
+}
+
+// Stateless agent invocation. Returns the parsed structured-output (or null),
+// the raw assistant content for transparency, and an error string when the
+// upstream call fails. No DB writes happen here — the caller decides what to
+// log/persist.
+export interface FilterAgentResult {
+  parsed: AIFilterParsed | null;
+  rawResponse: string;
+  error: string | null;
+}
+
+export async function runFilterAgent(
+  spec: FilterAgentSpec,
+  articles: { title: string; url: string }[]
+): Promise<FilterAgentResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return {
+      parsed: null,
+      rawResponse: "",
+      error: "OPENROUTER_API_KEY not configured",
+    };
+  }
+  const userMessage = articles
+    .map((a, i) => `${i + 1}. ${a.title}\nLink: ${a.url}`)
+    .join("\n\n");
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "ZTO Data Sources Filter",
+      },
+      body: JSON.stringify({
+        model: spec.model,
+        messages: [
+          { role: "system", content: spec.systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        temperature: spec.temperature,
+        max_tokens: spec.maxTokens,
+        response_format: { type: "json_schema", json_schema: AI_FILTER_RESPONSE_SCHEMA },
+        provider: { require_parameters: true },
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      let detail = errText.slice(0, 300);
+      try {
+        const j = JSON.parse(errText) as OpenRouterError;
+        if (j.error?.message) detail = j.error.message.slice(0, 300);
+      } catch {
+        // not JSON
+      }
+      return {
+        parsed: null,
+        rawResponse: "",
+        error: `OpenRouter ${response.status}: ${detail}`,
+      };
+    }
+    const data = (await response.json()) as { choices?: OpenRouterChoice[] };
+    const rawResponse = data.choices?.[0]?.message?.content ?? "";
+    const parsed = parseStrictFilterResponse(rawResponse);
+    return {
+      parsed,
+      rawResponse,
+      error: parsed ? null : "Filter response did not match schema",
+    };
+  } catch (err) {
+    return {
+      parsed: null,
+      rawResponse: "",
+      error: err instanceof Error ? err.message : "Unknown filter error",
+    };
+  }
+}
+
+// Build the (titles, urls) sets that pass an investment-filter response.
+// Public so the test endpoint can reuse the matching logic on a sample.
+export function passSetsFromFilterResult(parsed: AIFilterParsed | null): {
+  passedUrls: Set<string>;
+  passedTitles: string[];
+} {
+  const passedUrls = new Set<string>();
+  const passedTitles: string[] = [];
+  if (!parsed || parsed.Investment_related !== "yes" || !parsed.News) {
+    return { passedUrls, passedTitles };
+  }
+  const urlMatches = parsed.News.match(/https?:\/\/[^\s"<>)]+/g) ?? [];
+  for (const u of urlMatches) {
+    passedUrls.add(u.replace(/[.,;:)]+$/, ""));
+  }
+  for (const line of parsed.News.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t && !/^https?:\/\//i.test(t)) passedTitles.push(t);
+  }
+  return { passedUrls, passedTitles };
 }
 
 // Run the article batch through the OpenRouter investment-relevance filter.
@@ -713,8 +905,17 @@ async function persistFilterRun(args: {
 export async function filterArticlesWithAI(
   articles: FetchedArticle[],
   sourceId: string,
-  sourceName: string
+  sourceName: string,
+  spec?: FilterAgentSpec
 ): Promise<{ passed: FetchedArticle[]; filterResult: FilterResult }> {
+  // Resolve the agent for this source if the caller didn't pre-pass one.
+  // Cheap one-row lookup; admin edits to the agent take effect immediately.
+  const resolvedSpec =
+    spec ??
+    (await resolveFilterAgentForSource({
+      filterAgentId: null,
+    }).catch(() => FILTER_AGENT_FALLBACK));
+
   if (articles.length === 0) {
     const filterResult = await persistFilterRun({
       sourceId,
@@ -723,16 +924,23 @@ export async function filterArticlesWithAI(
       passed: 0,
       articles: [],
       rawResponse: "no articles to filter",
+      model: resolvedSpec.model,
     });
     return { passed: [], filterResult };
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
+  // No API key → record the run as a pass-through and bail.
+  if (!process.env.OPENROUTER_API_KEY) {
     logger.warn(
       "OpenRouter API key not configured — passing all articles through filter",
       "AIFilter",
-      { sourceId, sourceName, total: articles.length }
+      {
+        sourceId,
+        sourceName,
+        agentId: resolvedSpec.agentId,
+        agentName: resolvedSpec.agentName,
+        total: articles.length,
+      }
     );
     const filterResult = await persistFilterRun({
       sourceId,
@@ -741,67 +949,29 @@ export async function filterArticlesWithAI(
       passed: articles.length,
       articles: articles.map((a) => ({ title: a.title, url: a.url, passed: true })),
       rawResponse: "OpenRouter API key not configured — all articles passed through",
+      model: resolvedSpec.model,
     });
     return { passed: articles, filterResult };
   }
 
-  const userMessage = articles
-    .map((a, i) => `${i + 1}. ${a.title}\nLink: ${a.url}`)
-    .join("\n\n");
+  const result = await runFilterAgent(
+    resolvedSpec,
+    articles.map((a) => ({ title: a.title, url: a.url }))
+  );
 
-  let rawResponse = "";
-  let parsed: AIFilterParsed | null = null;
-
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "ZTO Data Sources Filter",
-      },
-      body: JSON.stringify({
-        model: AI_FILTER_MODEL,
-        messages: [
-          { role: "system", content: AI_FILTER_SYSTEM_PROMPT },
-          { role: "user", content: userMessage },
-        ],
-        temperature: 0,
-        max_tokens: 4000,
-        response_format: {
-          type: "json_schema",
-          json_schema: AI_FILTER_RESPONSE_SCHEMA,
-        },
-        provider: { require_parameters: true },
-      }),
-      signal: AbortSignal.timeout(45000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      let detail = errText.slice(0, 300);
-      try {
-        const j = JSON.parse(errText) as OpenRouterError;
-        if (j.error?.message) detail = j.error.message.slice(0, 300);
-      } catch {
-        // not JSON, keep raw
-      }
-      throw new Error(`OpenRouter ${response.status}: ${detail}`);
-    }
-
-    const data = (await response.json()) as { choices?: OpenRouterChoice[] };
-    rawResponse = data.choices?.[0]?.message?.content ?? "";
-    parsed = parseStrictFilterResponse(rawResponse);
-    if (!parsed) {
-      throw new Error("Filter response did not match schema");
-    }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Unknown AI error";
+  if (result.error || !result.parsed) {
     logger.error(
-      `AI filter call failed for "${sourceName}" — passing all articles through`,
+      `AI filter call failed for "${sourceName}" via agent "${resolvedSpec.agentName}" — passing all articles through`,
       "AIFilter",
-      { sourceId, sourceName, error: errorMsg, total: articles.length }
+      {
+        sourceId,
+        sourceName,
+        agentId: resolvedSpec.agentId,
+        agentName: resolvedSpec.agentName,
+        model: resolvedSpec.model,
+        error: result.error,
+        total: articles.length,
+      }
     );
     const filterResult = await persistFilterRun({
       sourceId,
@@ -809,33 +979,17 @@ export async function filterArticlesWithAI(
       total: articles.length,
       passed: articles.length,
       articles: articles.map((a) => ({ title: a.title, url: a.url, passed: true })),
-      rawResponse: `AI Error: ${errorMsg} — all articles passed through`,
+      rawResponse: `AI Error: ${result.error} — all articles passed through`,
+      model: resolvedSpec.model,
     });
     return { passed: articles, filterResult };
   }
 
-  // Build the "passed" set strictly from the structured response. We match
-  // by URL when present (definitive), then fall back to title substring for
-  // entries the model rendered as "Title\nlink" without an exact URL match.
-  const passedUrls = new Set<string>();
-  const passedTitles: string[] = [];
-
-  if (parsed.Investment_related === "yes" && parsed.News) {
-    const urlMatches = parsed.News.match(/https?:\/\/[^\s"<>)]+/g) ?? [];
-    for (const u of urlMatches) {
-      passedUrls.add(u.replace(/[.,;:)]+$/, ""));
-    }
-    // Each entry is title-then-link separated by blank lines. Pull title
-    // candidates: any non-empty line that isn't a URL.
-    for (const line of parsed.News.split(/\r?\n/)) {
-      const t = line.trim();
-      if (t && !/^https?:\/\//i.test(t)) passedTitles.push(t);
-    }
-  }
-
+  // Match every fetched article against what the model returned. URL match
+  // wins; otherwise fall back to substring on the title.
+  const { passedUrls, passedTitles } = passSetsFromFilterResult(result.parsed);
   const passed: FetchedArticle[] = [];
   const articleResults: FilterResult["articles"] = [];
-
   for (const article of articles) {
     const titleNorm = article.title.trim();
     const isRelevant =
@@ -854,14 +1008,17 @@ export async function filterArticlesWithAI(
   }
 
   logger.info(
-    `AI filter "${sourceName}": ${passed.length}/${articles.length} passed`,
+    `AI filter "${sourceName}" via agent "${resolvedSpec.agentName}": ${passed.length}/${articles.length} passed`,
     "AIFilter",
     {
       sourceId,
       sourceName,
+      agentId: resolvedSpec.agentId,
+      agentName: resolvedSpec.agentName,
+      model: resolvedSpec.model,
       total: articles.length,
       passed: passed.length,
-      investmentRelated: parsed.Investment_related,
+      investmentRelated: result.parsed.Investment_related,
     }
   );
 
@@ -871,7 +1028,8 @@ export async function filterArticlesWithAI(
     total: articles.length,
     passed: passed.length,
     articles: articleResults,
-    rawResponse,
+    rawResponse: result.rawResponse,
+    model: resolvedSpec.model,
   });
 
   return { passed, filterResult };
@@ -1710,7 +1868,13 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   if (fresh.length > 0) {
     if (source.topic === "news") {
       try {
-        const { passed } = await filterArticlesWithAI(fresh, source.id, source.name);
+        const filterSpec = await resolveFilterAgentForSource(source);
+        const { passed } = await filterArticlesWithAI(
+          fresh,
+          source.id,
+          source.name,
+          filterSpec
+        );
         passedCount = passed.length;
         if (passed.length > 0) savedCount = await saveArticlesToAirtable(passed, source.name, source.type);
       } catch (err) {

@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   XCircle,
   Brain,
+  Bot,
   Eye,
   ChevronDown,
 } from "lucide-react";
@@ -44,6 +45,7 @@ interface DataSource {
   lastFetchedAt: string | null;
   createdAt: string;
   createdBy: string;
+  filterAgentId?: string | null;
 }
 
 interface Article {
@@ -76,7 +78,7 @@ interface FilterHistoryItem {
 /* ───────── Constants ───────── */
 
 const SOURCE_TYPES = [
-  { value: "rss", label: "موقع (RSS)", icon: Rss, color: "text-orange-400", bg: "bg-orange-400/10" },
+  { value: "rss", label: "موقع", icon: Rss, color: "text-orange-400", bg: "bg-orange-400/10" },
   { value: "twitter", label: "X (تويتر سابقاً)", icon: AtSign, color: "text-blue-400", bg: "bg-blue-400/10" },
   { value: "linkedin", label: "LinkedIn", icon: Briefcase, color: "text-indigo-400", bg: "bg-indigo-400/10" },
 ];
@@ -91,7 +93,7 @@ const CATEGORIES = [
 ];
 
 const TOPICS = [
-  { value: "news", label: "أخبار (News)", description: "يمر عبر فلترة ذكية لاكتشاف أخبار التمويل قبل الإرسال إلى الوجهة" },
+  { value: "news", label: "أخبار (News)", description: "يمر عبر وكيل الفلترة المخصص لهذا المصدر قبل الإرسال إلى الوجهة" },
   { value: "insights", label: "رؤى (Insights)", description: "محتوى رأي وتحليل — يُرسل كاملاً بدون فلترة" },
   { value: "real_estate", label: "عقارات (Real Estate)", description: "محتوى عقاري — يُرسل كاملاً بدون فلترة" },
 ] as const;
@@ -110,6 +112,7 @@ const defaultFormData = {
   topic: "insights" as DataSource["topic"],
   fetchInterval: 60,
   isActive: true,
+  filterAgentId: "" as string, // empty → backend resolves the seeded default
 };
 
 /* ───────── Component ───────── */
@@ -126,6 +129,40 @@ export default function DataSourcesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Filtering agents available for assignment to a source. Loaded once on
+  // mount and refreshed when the modal opens so newly-created agents appear.
+  interface FilterAgentSummary {
+    id: string;
+    name: string;
+    description: string;
+    modelName: string;
+    temperature: number;
+    maxTokens: number;
+    isActive: boolean;
+  }
+  const [filterAgents, setFilterAgents] = useState<FilterAgentSummary[]>([]);
+  const loadFilterAgents = async () => {
+    try {
+      const res = await fetch("/api/data-sources?action=filter-agents");
+      const d = await res.json();
+      if (res.ok && Array.isArray(d.agents)) {
+        setFilterAgents(d.agents);
+      }
+    } catch {
+      // non-fatal
+    }
+  };
+
+  // Per-source agent test results (preview pane).
+  interface FilterTestDecision { title: string; url: string; passed: boolean }
+  const [filterTestRunning, setFilterTestRunning] = useState(false);
+  const [filterTestResult, setFilterTestResult] = useState<{
+    spec?: { agentName: string; model: string };
+    decisions: FilterTestDecision[];
+    error?: string;
+    note?: string;
+  } | null>(null);
 
   // Tick once a second so relative time labels (last-fetched / next-fetch
   // countdown) refresh without forcing a server re-fetch. We only run the
@@ -209,7 +246,7 @@ export default function DataSourcesPage() {
 
   const MAPPABLE_TYPES: MappableType[] = ["rss", "twitter", "linkedin"];
   const TYPE_LABELS: Record<MappableType, string> = {
-    rss: "المواقع (RSS)",
+    rss: "المواقع",
     twitter: "X (تويتر)",
     linkedin: "LinkedIn",
   };
@@ -246,6 +283,7 @@ export default function DataSourcesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
+  const [filterPlatform, setFilterPlatform] = useState<string>("");
 
   // Source filters
   const [sourceTypeFilter, setSourceTypeFilter] = useState<string>("all");
@@ -257,6 +295,7 @@ export default function DataSourcesPage() {
 
   useEffect(() => {
     loadSources();
+    loadFilterAgents();
     fetch("/api/data-sources?action=status")
       .then((r) => r.json())
       .then((d) => {
@@ -635,6 +674,46 @@ export default function DataSourcesPage() {
     }
   };
 
+  // Test the currently-selected filter agent on the editing source's most
+  // recent articles (or the global most-recent batch if the source is new).
+  const handleTestFilterAgent = async () => {
+    setFilterTestRunning(true);
+    setFilterTestResult(null);
+    try {
+      const body: Record<string, unknown> = {
+        action: "test-filter-agent",
+      };
+      if (formData.filterAgentId) body.agentId = formData.filterAgentId;
+      if (editingSource?.id) body.sourceId = editingSource.id;
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok && !data.spec) {
+        setFilterTestResult({
+          decisions: [],
+          error: data.error || "فشل الاختبار",
+        });
+        return;
+      }
+      setFilterTestResult({
+        spec: data.spec,
+        decisions: Array.isArray(data.decisions) ? data.decisions : [],
+        error: data.error,
+        note: data.note,
+      });
+    } catch (err) {
+      setFilterTestResult({
+        decisions: [],
+        error: err instanceof Error ? err.message : "حدث خطأ",
+      });
+    } finally {
+      setFilterTestRunning(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.name) {
       addToast("أدخل اسم المصدر", "warning");
@@ -653,9 +732,15 @@ export default function DataSourcesPage() {
     setSaving(true);
     try {
       const action = editingSource ? "update" : "create";
+      // Coerce empty agent id to null — empty string would fail the UUID
+      // column type. Empty means "use the resolved default" on the server.
+      const cleanForm = {
+        ...formData,
+        filterAgentId: formData.filterAgentId ? formData.filterAgentId : null,
+      };
       const body = editingSource
-        ? { action, id: editingSource.id, ...formData }
-        : { action, ...formData, createdBy: user?.id };
+        ? { action, id: editingSource.id, ...cleanForm }
+        : { action, ...cleanForm, createdBy: user?.id };
 
       const res = await fetch("/api/data-sources", {
         method: "POST",
@@ -743,8 +828,11 @@ export default function DataSourcesPage() {
       topic: source.topic ?? "insights",
       fetchInterval: source.fetchInterval,
       isActive: source.isActive,
+      filterAgentId: source.filterAgentId ?? "",
     });
     setShowModal(true);
+    setFilterTestResult(null);
+    void loadFilterAgents();
   };
 
   const closeModal = () => {
@@ -756,6 +844,7 @@ export default function DataSourcesPage() {
     setTestError(null);
     setTestWarning(null);
     setTestSig(null);
+    setFilterTestResult(null);
   };
 
   const closeBulkModal = () => {
@@ -860,16 +949,23 @@ export default function DataSourcesPage() {
 
   /* ───────── Filtered articles ───────── */
 
-  // Articles inherit their editorial category from the parent source — a feed
-  // doesn't carry a single category of its own.
+  // Articles inherit their editorial category + platform from the parent
+  // source — they don't carry that on their own row.
   const sourceCategoryById = new Map<string, DataSource["category"]>();
-  for (const s of sources) sourceCategoryById.set(s.id, s.category);
+  const sourceTypeById = new Map<string, DataSource["type"]>();
+  for (const s of sources) {
+    sourceCategoryById.set(s.id, s.category);
+    sourceTypeById.set(s.id, s.type);
+  }
   const articleCategory = (a: Article): DataSource["category"] =>
     sourceCategoryById.get(a.sourceId) ?? "general";
+  const articlePlatform = (a: Article): string =>
+    sourceTypeById.get(a.sourceId) ?? "rss";
 
   const filteredArticles = articles.filter((a) => {
     if (filterSource && a.sourceId !== filterSource) return false;
     if (filterCategory && articleCategory(a) !== filterCategory) return false;
+    if (filterPlatform && articlePlatform(a) !== filterPlatform) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
@@ -1102,10 +1198,10 @@ export default function DataSourcesPage() {
 
               {/* Search */}
               <div className="relative min-w-[180px]">
-                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-9 text-xs"
+                  className="zto-input pr-10 text-xs"
                   placeholder="بحث..."
                   value={sourceSearch}
                   onChange={(e) => setSourceSearch(e.target.value)}
@@ -1174,7 +1270,9 @@ export default function DataSourcesPage() {
                             <th className="text-right px-4 py-3 hidden md:table-cell">الرابط</th>
                             <th className="text-right px-4 py-3">الفئة</th>
                             <th className="text-right px-4 py-3 hidden lg:table-cell">آخر جلب</th>
+                            <th className="text-right px-4 py-3 hidden xl:table-cell">وتيرة الجلب</th>
                             <th className="text-right px-4 py-3 hidden xl:table-cell">الجلب التالي</th>
+                            <th className="text-right px-4 py-3 hidden lg:table-cell">الوكيل</th>
                             <th className="text-center px-4 py-3">الحالة</th>
                             <th className="text-left px-4 py-3">إجراءات</th>
                           </tr>
@@ -1233,6 +1331,20 @@ export default function DataSourcesPage() {
                                   )}
                                 </td>
 
+                                {/* Frequency — explicit "every X minutes" so the
+                                    next-fetch countdown isn't the only signal. */}
+                                <td className="px-4 py-3 hidden xl:table-cell">
+                                  <span
+                                    className="text-[0.65rem] text-neutral-400 flex items-center gap-1"
+                                    title={`كل ${source.fetchInterval} دقيقة`}
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    {source.fetchInterval >= 60 && source.fetchInterval % 60 === 0
+                                      ? `كل ${source.fetchInterval / 60} ساعة`
+                                      : `كل ${source.fetchInterval} دقيقة`}
+                                  </span>
+                                </td>
+
                                 {/* Next fetch — live ticking countdown per source */}
                                 <td className="px-4 py-3 hidden xl:table-cell">
                                   {(() => {
@@ -1257,6 +1369,34 @@ export default function DataSourcesPage() {
                                         {!source.isActive
                                           ? "معطل"
                                           : formatLiveRelative(ms, { future: true })}
+                                      </span>
+                                    );
+                                  })()}
+                                </td>
+
+                                {/* Filter agent — only meaningful for news topic;
+                                    insights/real_estate skip filtering entirely. */}
+                                <td className="px-4 py-3 hidden lg:table-cell">
+                                  {source.topic !== "news" ? (
+                                    <span className="text-[0.65rem] text-neutral-600">—</span>
+                                  ) : (() => {
+                                    const a = source.filterAgentId
+                                      ? filterAgents.find((x) => x.id === source.filterAgentId)
+                                      : null;
+                                    const fallback = filterAgents[0];
+                                    const eff = a ?? fallback;
+                                    return (
+                                      <span
+                                        className="text-[0.65rem] text-neutral-300 flex items-center gap-1"
+                                        title={eff ? `${eff.name} (${eff.modelName})` : "لم يُعرَّف وكيل بعد"}
+                                      >
+                                        <Bot className="w-3 h-3 text-purple-400" />
+                                        <span className="truncate max-w-[140px]">
+                                          {eff?.name ?? "افتراضي"}
+                                        </span>
+                                        {!a && fallback && (
+                                          <span className="text-[0.55rem] text-neutral-500">(افتراضي)</span>
+                                        )}
                                       </span>
                                     );
                                   })()}
@@ -1315,7 +1455,7 @@ export default function DataSourcesPage() {
                               </tr>
                               {isFetching && (
                                 <tr className="border-b border-neutral-800/50 bg-amber-500/5">
-                                  <td colSpan={7} className="p-0">
+                                  <td colSpan={9} className="p-0">
                                     <div
                                       className="zto-fetch-progress"
                                       role="progressbar"
@@ -1357,7 +1497,7 @@ export default function DataSourcesPage() {
                 عند كل عملية جلب — يدويّة كانت أو تلقائيّة عبر المؤقّت — نقوم بـ:
               </p>
               <ol className="list-decimal pr-5 space-y-1">
-                <li>طلب القائمة الكاملة من المصدر (RSS / X / LinkedIn).</li>
+                <li>طلب القائمة الكاملة من المصدر (موقع / X / LinkedIn).</li>
                 <li>
                   قراءة كل الروابط المحفوظة لهذا المصدر تحديداً (مفتاح الفلترة:
                   <code className="text-amber-400 mx-1 font-mono">source_id + url</code>).
@@ -1385,16 +1525,34 @@ export default function DataSourcesPage() {
           {/* Filter bar */}
           <div className="zto-card p-4">
             <div className="flex items-center gap-3 flex-wrap">
-              {/* Search */}
+              {/* Search — pr-12 keeps the placeholder away from the right-side
+                  magnifier on RTL layouts (zto-input uses padding-inline so
+                  Tailwind's pr-* utility wins per-edge). */}
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-10"
+                  className="zto-input pr-12"
                   placeholder="بحث في الأخبار..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
+              </div>
+
+              {/* Platform filter */}
+              <div className="zto-select-wrap min-w-[140px]">
+                <select
+                  className="zto-input"
+                  value={filterPlatform}
+                  onChange={(e) => setFilterPlatform(e.target.value)}
+                >
+                  <option value="">كل المنصات</option>
+                  {SOURCE_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Source filter */}
@@ -1584,10 +1742,10 @@ export default function DataSourcesPage() {
                 </select>
               </div>
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-9 text-xs"
+                  className="zto-input pr-10 text-xs"
                   placeholder="بحث في عناوين السجل..."
                   value={filterHistorySearch}
                   onChange={(e) => setFilterHistorySearch(e.target.value)}
@@ -2256,12 +2414,12 @@ export default function DataSourcesPage() {
                 <Rss className="w-5 h-5 text-orange-400" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white">موقع (RSS)</h3>
+                <h3 className="font-bold text-sm text-white">موقع</h3>
                 <p className="text-[0.65rem] text-neutral-500">خلاصة أخبار الموقع</p>
               </div>
             </div>
             <p className="text-sm text-neutral-400">
-              الصق رابط خلاصة RSS الخاصة بالموقع. عادةً ينتهي الرابط بـ
+              الصق رابط خلاصة الموقع. عادةً ينتهي الرابط بـ
               <code className="text-amber-400 mx-1 font-mono">/feed</code>
               أو
               <code className="text-amber-400 mx-1 font-mono">/rss.xml</code>.
@@ -2271,7 +2429,7 @@ export default function DataSourcesPage() {
               <code className="text-xs text-amber-400 block">https://example.com/rss.xml</code>
             </div>
             <p className="text-xs text-neutral-500">
-              لإيجاد الرابط: ابحث عن أيقونة RSS في الموقع، أو جرّب إضافة <code className="bg-neutral-800 px-1 rounded text-amber-400">/feed</code> في نهاية رابط الموقع. إن لم تجده، اطلبه من المسؤول التقني.
+              لإيجاد الرابط: ابحث عن أيقونة الخلاصة في الموقع، أو جرّب إضافة <code className="bg-neutral-800 px-1 rounded text-amber-400">/feed</code> في نهاية رابط الموقع. إن لم تجده، اطلبه من المسؤول التقني.
             </p>
           </div>
         </div>
@@ -2675,6 +2833,102 @@ TechCrunch | https://techcrunch.com/feed
                   {TOPICS.find((t) => t.value === formData.topic)?.description}
                 </p>
               </div>
+
+              {/* Filter agent — only relevant for news topic. Other topics
+                  skip the AI filter entirely so no agent is needed. */}
+              {formData.topic === "news" && (
+                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <label className="zto-label flex items-center gap-2 mb-0">
+                        <Bot className="w-4 h-4 text-purple-400" />
+                        وكيل الفلترة
+                      </label>
+                      <p className="text-[0.65rem] text-neutral-500 mt-0.5">
+                        الوكيل الذي يقرّر أيّ من الأخبار يمر إلى الوجهة. اختر &quot;افتراضي&quot; لاستخدام الوكيل المركزي.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestFilterAgent}
+                      disabled={filterTestRunning}
+                      className="zto-btn zto-btn-outline zto-btn-sm"
+                    >
+                      {filterTestRunning ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      )}
+                      اختبار
+                    </button>
+                  </div>
+                  <div className="zto-select-wrap">
+                    <select
+                      className="zto-input text-xs"
+                      value={formData.filterAgentId}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, filterAgentId: e.target.value }))
+                      }
+                    >
+                      <option value="">— الافتراضي —</option>
+                      {filterAgents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} · {a.modelName}
+                          {!a.isActive ? " (غير مفعّل)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {filterAgents.length === 0 && (
+                    <p className="text-[0.65rem] text-amber-400">
+                      لا توجد وكلاء فلترة بعد. أنشئ وكيلاً من قسم &quot;وكلاء الكتابة&quot;.
+                    </p>
+                  )}
+
+                  {/* Test result */}
+                  {filterTestResult && (
+                    <div className="space-y-2">
+                      {filterTestResult.error && (
+                        <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+                          <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-400">{filterTestResult.error}</p>
+                        </div>
+                      )}
+                      {filterTestResult.note && !filterTestResult.error && (
+                        <p className="text-xs text-amber-400">{filterTestResult.note}</p>
+                      )}
+                      {filterTestResult.spec && (
+                        <p className="text-[0.65rem] text-neutral-400">
+                          نموذج: <span className="text-purple-400 font-mono">{filterTestResult.spec.model}</span>
+                          {" · "}
+                          <span className="text-neutral-300">{filterTestResult.spec.agentName}</span>
+                        </p>
+                      )}
+                      {filterTestResult.decisions.length > 0 && (
+                        <div className="bg-[#0d0d0d] border border-neutral-800 rounded-lg max-h-48 overflow-y-auto divide-y divide-neutral-800">
+                          {filterTestResult.decisions.map((d, i) => (
+                            <div
+                              key={i}
+                              className={`flex items-start gap-2 px-3 py-2 text-[0.7rem] ${
+                                d.passed ? "bg-emerald-500/5" : ""
+                              }`}
+                            >
+                              {d.passed ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <XCircle className="w-3.5 h-3.5 text-neutral-600 shrink-0 mt-0.5" />
+                              )}
+                              <span className={`flex-1 line-clamp-2 ${d.passed ? "text-emerald-300" : "text-neutral-400"}`}>
+                                {d.title}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Category + Fetch Interval */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

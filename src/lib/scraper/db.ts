@@ -143,6 +143,15 @@ export async function deleteSource(id: string): Promise<void> {
 
 // Sources whose interval has elapsed since last_fetched_at (or never fetched).
 // Used by the cron route to decide what to scrape on each tick.
+//
+// Subtle: pg_cron fires every 5 minutes at :00/:05/:10/... but the actual
+// fetch finishes a second or two later, so last_fetched_at drifts. With a
+// strict ">= interval" check, a source set to "every 10 minutes" misses the
+// 10-minute boundary tick by 0.02 minutes and only runs every other tick —
+// effectively a 15-minute cadence. A 30-second grace period bridges that
+// gap without ever firing more than once per cron tick.
+const DUE_GRACE_SECONDS = 30;
+
 export async function listDueSources(now: Date = new Date()): Promise<Source[]> {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
@@ -152,9 +161,9 @@ export async function listDueSources(now: Date = new Date()): Promise<Source[]> 
   if (error) throw error;
   const due = (data ?? []).filter((s) => {
     if (!s.last_fetched_at) return true;
-    const elapsedMin =
-      (now.getTime() - new Date(s.last_fetched_at).getTime()) / 60000;
-    return elapsedMin >= s.fetch_interval_minutes;
+    const elapsedSec =
+      (now.getTime() - new Date(s.last_fetched_at).getTime()) / 1000;
+    return elapsedSec + DUE_GRACE_SECONDS >= s.fetch_interval_minutes * 60;
   });
   return due;
 }

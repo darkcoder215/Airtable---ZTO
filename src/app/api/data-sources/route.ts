@@ -15,10 +15,15 @@ import {
   saveArticlesToAirtable,
   getApifyToken,
   getFilterHistory,
+  resolveFilterAgentForSource,
+  runFilterAgent,
+  passSetsFromFilterResult,
   SourceValidationError,
   VALID_SOURCE_TYPES,
   type SourceType,
+  type FilterAgentSpec,
 } from "@/lib/data-sources";
+import { getAgents, getAgentById } from "@/lib/agents";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import {
@@ -89,6 +94,29 @@ export async function GET(request: NextRequest) {
   if (action === "filter-history") {
     const history = await getFilterHistory();
     return NextResponse.json({ history });
+  }
+
+  // Filtering agents available for assignment to a source. Returns a
+  // resolved-default flag so the UI can show "default" for the seeded one.
+  if (action === "filter-agents") {
+    try {
+      const agents = await getAgents();
+      const filtering = agents
+        .filter((a) => a.agentType === "filtering")
+        .map((a) => ({
+          id: a.id,
+          name: a.name,
+          description: a.description,
+          modelName: a.modelName,
+          temperature: a.temperature,
+          maxTokens: a.maxTokens,
+          isActive: a.isActive,
+        }));
+      return NextResponse.json({ agents: filtering });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
   }
 
   if (action === "destination-mapping") {
@@ -177,6 +205,177 @@ export async function POST(request: NextRequest) {
     const { action, ...data } = body;
 
     switch (action) {
+      case "test-filter-agent": {
+        // Stateless preview of how a filtering agent would classify a small
+        // set of articles. Caller can pass:
+        //   { agentId } → load that agent record from the DB
+        //   { sourceId } → resolve the agent that source uses
+        //   inline override { systemPrompt, model, temperature, maxTokens }
+        // and any combination thereof. Articles default to the latest 10
+        // saved articles so the admin doesn't have to type them out.
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        try {
+          let spec: FilterAgentSpec | null = null;
+
+          const agentId = (data as { agentId?: unknown }).agentId;
+          if (typeof agentId === "string" && agentId.length > 0) {
+            const a = await getAgentById(agentId);
+            if (!a) {
+              return NextResponse.json({ error: "الوكيل غير موجود" }, { status: 404 });
+            }
+            spec = {
+              agentId: a.id,
+              agentName: a.name,
+              model: a.modelName,
+              systemPrompt: a.systemPrompt,
+              temperature: a.temperature,
+              maxTokens: a.maxTokens,
+            };
+          }
+
+          const sourceIdRaw = (data as { sourceId?: unknown }).sourceId;
+          if (!spec && typeof sourceIdRaw === "string" && sourceIdRaw.length > 0) {
+            const src = await getDataSourceById(sourceIdRaw);
+            if (src) {
+              spec = await resolveFilterAgentForSource(src);
+            }
+          }
+
+          // Inline override (admin tweaking the prompt before saving the agent).
+          const overrides = data as {
+            systemPrompt?: unknown;
+            model?: unknown;
+            temperature?: unknown;
+            maxTokens?: unknown;
+          };
+          if (typeof overrides.systemPrompt === "string" && overrides.systemPrompt.length > 0) {
+            spec = {
+              agentId: spec?.agentId ?? null,
+              agentName: spec?.agentName ?? "(تعديل مؤقت)",
+              systemPrompt: overrides.systemPrompt,
+              model:
+                typeof overrides.model === "string" && overrides.model
+                  ? overrides.model
+                  : spec?.model ?? "openai/gpt-4o-mini",
+              temperature:
+                typeof overrides.temperature === "number"
+                  ? overrides.temperature
+                  : spec?.temperature ?? 0,
+              maxTokens:
+                typeof overrides.maxTokens === "number"
+                  ? overrides.maxTokens
+                  : spec?.maxTokens ?? 4000,
+            };
+          }
+
+          if (!spec) {
+            spec = await resolveFilterAgentForSource({ filterAgentId: null });
+          }
+
+          // Pull a sample to test on. Caller can pass their own array, else
+          // we use the most recent 10 articles (any source).
+          let sample: Array<{ title: string; url: string }> = [];
+          const articlesIn = (data as { articles?: unknown }).articles;
+          if (Array.isArray(articlesIn) && articlesIn.length > 0) {
+            sample = articlesIn
+              .filter((a): a is { title: string; url: string } =>
+                !!a &&
+                typeof a === "object" &&
+                typeof (a as { title?: unknown }).title === "string"
+              )
+              .slice(0, 20)
+              .map((a) => ({
+                title: String(a.title).slice(0, 400),
+                url: typeof a.url === "string" ? a.url : "",
+              }));
+          } else {
+            const recent = await getArticles();
+            sample = recent.slice(0, 10).map((a) => ({ title: a.title, url: a.url }));
+          }
+
+          if (sample.length === 0) {
+            return NextResponse.json({
+              spec: { agentId: spec.agentId, agentName: spec.agentName, model: spec.model },
+              parsed: null,
+              rawResponse: "",
+              note: "لا توجد مقالات لاختبار الوكيل",
+              decisions: [],
+            });
+          }
+
+          const result = await runFilterAgent(spec, sample);
+
+          if (result.error || !result.parsed) {
+            logger.warn(
+              `Filter-agent test failed for "${spec.agentName}"`,
+              "AIFilter",
+              { agentId: spec.agentId, error: result.error },
+              user.id
+            );
+            return NextResponse.json(
+              {
+                spec: {
+                  agentId: spec.agentId,
+                  agentName: spec.agentName,
+                  model: spec.model,
+                },
+                parsed: null,
+                rawResponse: result.rawResponse,
+                error: result.error,
+                decisions: [],
+              },
+              { status: 502 }
+            );
+          }
+
+          const { passedUrls, passedTitles } = passSetsFromFilterResult(result.parsed);
+          const decisions = sample.map((a) => {
+            const t = a.title.trim();
+            const passed =
+              (a.url && passedUrls.has(a.url)) ||
+              passedTitles.some(
+                (p) =>
+                  p.length > 10 &&
+                  (t.toLowerCase().includes(p.toLowerCase()) ||
+                    p.toLowerCase().includes(t.toLowerCase()))
+              );
+            return { title: a.title, url: a.url, passed: !!passed };
+          });
+
+          logger.info(
+            `Filter-agent test "${spec.agentName}" — ${decisions.filter((d) => d.passed).length}/${decisions.length} passed`,
+            "AIFilter",
+            {
+              agentId: spec.agentId,
+              model: spec.model,
+              total: decisions.length,
+              passed: decisions.filter((d) => d.passed).length,
+              investmentRelated: result.parsed.Investment_related,
+            },
+            user.id
+          );
+
+          return NextResponse.json({
+            spec: {
+              agentId: spec.agentId,
+              agentName: spec.agentName,
+              model: spec.model,
+              temperature: spec.temperature,
+              maxTokens: spec.maxTokens,
+            },
+            parsed: result.parsed,
+            rawResponse: result.rawResponse,
+            decisions,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          logger.error(`Filter-agent test threw: ${msg}`, "AIFilter", err, user.id);
+          return NextResponse.json({ error: msg }, { status: 500 });
+        }
+      }
+
       case "test-source": {
         // Stateless preview — admin-only since fetching can hit paid APIs.
         if (user.role !== "admin") {

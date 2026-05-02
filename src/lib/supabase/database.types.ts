@@ -1553,6 +1553,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           fetch_interval_minutes: number
+          filter_agent_id: string | null
           id: string
           is_active: boolean
           last_error: string | null
@@ -1572,6 +1573,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           fetch_interval_minutes?: number
+          filter_agent_id?: string | null
           id?: string
           is_active?: boolean
           last_error?: string | null
@@ -1591,6 +1593,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           fetch_interval_minutes?: number
+          filter_agent_id?: string | null
           id?: string
           is_active?: boolean
           last_error?: string | null
