@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import {
   Rss,
@@ -27,6 +27,7 @@ import {
   XCircle,
   Brain,
   Eye,
+  ChevronDown,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -125,6 +126,15 @@ export default function DataSourcesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Tick once a second so relative time labels (last-fetched / next-fetch
+  // countdown) refresh without forcing a server re-fetch. We only run the
+  // ticker while the sources tab is visible to avoid background work.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Test-source flow inside the create modal.
   interface TestPreviewItem {
@@ -786,24 +796,35 @@ export default function DataSourcesPage() {
   const nextFetchAtMs = (s: DataSource): number | null => {
     if (!s.isActive) return null;
     const interval = (s.fetchInterval || 60) * 60_000;
-    if (!s.lastFetchedAt) return Date.now(); // never fetched → due now
+    if (!s.lastFetchedAt) return nowMs; // never fetched → due now
     const t = new Date(s.lastFetchedAt).getTime();
     if (!Number.isFinite(t)) return null;
     return t + interval;
   };
 
-  // Renders nextFetchAt as a relative phrase ("بعد X دقيقة" / "متأخر").
-  const formatRelativeFromNow = (ms: number | null): string => {
-    if (ms == null) return "—";
-    const diff = ms - Date.now();
-    const minutes = Math.round(Math.abs(diff) / 60_000);
-    const overdue = diff < 0;
-    if (minutes < 1) return overdue ? "متأخر" : "خلال لحظات";
-    if (minutes < 60) return overdue ? `متأخر بـ${minutes} دقيقة` : `بعد ${minutes} دقيقة`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return overdue ? `متأخر بـ${hours} ساعة` : `بعد ${hours} ساعة`;
-    const days = Math.round(hours / 24);
-    return overdue ? `متأخر بـ${days} يوم` : `بعد ${days} يوم`;
+  // Live "X ago" / "in X" formatter. Uses the ticking nowMs state so the
+  // label updates every second without polling the server.
+  const formatLiveRelative = (
+    targetMs: number | null,
+    opts: { future?: boolean } = {}
+  ): string => {
+    if (targetMs == null) return "—";
+    const diff = targetMs - nowMs;
+    const past = diff < 0;
+    const seconds = Math.max(0, Math.round(Math.abs(diff) / 1000));
+    const fmt = (n: number, label: string) => `${n} ${label}`;
+    let core: string;
+    if (seconds < 60) core = fmt(seconds, "ثانية");
+    else if (seconds < 3600) core = fmt(Math.floor(seconds / 60), "دقيقة");
+    else if (seconds < 86_400) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      core = m > 0 ? `${h} ساعة و${m} دقيقة` : `${h} ساعة`;
+    } else core = fmt(Math.floor(seconds / 86_400), "يوم");
+    if (opts.future) {
+      return past ? `متأخر بـ${core}` : `خلال ${core}`;
+    }
+    return past ? `قبل ${core}` : `خلال ${core}`;
   };
 
   /* ───────── Render ───────── */
@@ -1055,24 +1076,12 @@ export default function DataSourcesPage() {
                             const cat = getCategoryInfo(source.category);
                             const isFetching = fetchingId === source.id;
                             return (
+                              <Fragment key={source.id}>
                               <tr
-                                key={source.id}
-                                className={`relative border-b border-neutral-800/50 last:border-0 transition-colors ${
-                                  isFetching ? "bg-amber-500/5" : "hover:bg-neutral-800/20"
+                                className={`border-b border-neutral-800/50 transition-colors ${
+                                  isFetching ? "bg-amber-500/5 border-b-0" : "hover:bg-neutral-800/20"
                                 }`}
                               >
-                                {/* Inline progress indicator while fetching this row. */}
-                                {isFetching && (
-                                  <td className="absolute bottom-0 left-0 right-0 p-0 border-0" colSpan={7}>
-                                    <div
-                                      className="h-0.5 bg-amber-400/30 overflow-hidden"
-                                      role="progressbar"
-                                      aria-label="جلب المصدر"
-                                    >
-                                      <div className="h-full w-1/3 bg-amber-400 animate-[ztoFetchProgress_1.4s_ease-in-out_infinite]" />
-                                    </div>
-                                  </td>
-                                )}
                                 {/* Name */}
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-2">
@@ -1098,32 +1107,48 @@ export default function DataSourcesPage() {
                                   <span className={`zto-badge text-[0.6rem] ${cat.badge}`}>{cat.label}</span>
                                 </td>
 
-                                {/* Last fetched */}
+                                {/* Last fetched (per-source, live "X ago") */}
                                 <td className="px-4 py-3 hidden lg:table-cell">
-                                  <span className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    {formatDate(source.lastFetchedAt)}
-                                  </span>
+                                  {source.lastFetchedAt ? (
+                                    <span
+                                      className="text-[0.65rem] text-neutral-400 flex items-center gap-1"
+                                      title={new Date(source.lastFetchedAt).toLocaleString("ar-SA")}
+                                    >
+                                      <Clock className="w-3 h-3" />
+                                      {formatLiveRelative(new Date(source.lastFetchedAt).getTime())}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      لم يتم الجلب بعد
+                                    </span>
+                                  )}
                                 </td>
 
-                                {/* Next fetch */}
+                                {/* Next fetch — live ticking countdown per source */}
                                 <td className="px-4 py-3 hidden xl:table-cell">
                                   {(() => {
                                     const ms = nextFetchAtMs(source);
-                                    const overdue = ms != null && ms < Date.now();
+                                    const overdue = ms != null && ms - nowMs < 0;
                                     return (
                                       <span
-                                        className={`text-[0.65rem] flex items-center gap-1 ${
+                                        className={`text-[0.65rem] flex items-center gap-1 tabular-nums ${
                                           !source.isActive
                                             ? "text-neutral-700"
                                             : overdue
                                               ? "text-amber-400"
-                                              : "text-neutral-500"
+                                              : "text-neutral-400"
                                         }`}
-                                        title={ms ? new Date(ms).toLocaleString("ar-SA") : "—"}
+                                        title={
+                                          ms
+                                            ? `كل ${source.fetchInterval} دقيقة · التالي: ${new Date(ms).toLocaleString("ar-SA")}`
+                                            : "—"
+                                        }
                                       >
                                         <Clock className="w-3 h-3" />
-                                        {!source.isActive ? "معطل" : formatRelativeFromNow(ms)}
+                                        {!source.isActive
+                                          ? "معطل"
+                                          : formatLiveRelative(ms, { future: true })}
                                       </span>
                                     );
                                   })()}
@@ -1180,6 +1205,18 @@ export default function DataSourcesPage() {
                                   </div>
                                 </td>
                               </tr>
+                              {isFetching && (
+                                <tr className="border-b border-neutral-800/50 bg-amber-500/5">
+                                  <td colSpan={7} className="p-0">
+                                    <div
+                                      className="zto-fetch-progress"
+                                      role="progressbar"
+                                      aria-label="جلب المصدر"
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             );
                           })}
                         </tbody>
@@ -1196,6 +1233,47 @@ export default function DataSourcesPage() {
       {/* ───── Articles Tab ───── */}
       {activeTab === "articles" && (
         <>
+          {/* Dedup explainer banner */}
+          <details className="zto-card p-4 group">
+            <summary className="cursor-pointer flex items-center gap-2 list-none">
+              <Info className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="text-sm font-bold text-white">كيف نميّز الجديد من المكرّر؟</span>
+              <ChevronDown className="w-4 h-4 text-neutral-500 mr-auto group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="mt-3 text-xs text-neutral-400 leading-relaxed space-y-2 pr-6">
+              <p>
+                لكل مصدر نحتفظ بسجل لجميع الروابط التي رأيناها سابقاً (في الجدول
+                <code className="text-amber-400 mx-1 font-mono">scraper_articles</code>).
+              </p>
+              <p>
+                عند كل عملية جلب — يدويّة كانت أو تلقائيّة عبر المؤقّت — نقوم بـ:
+              </p>
+              <ol className="list-decimal pr-5 space-y-1">
+                <li>طلب القائمة الكاملة من المصدر (RSS / X / LinkedIn).</li>
+                <li>
+                  قراءة كل الروابط المحفوظة لهذا المصدر تحديداً (مفتاح الفلترة:
+                  <code className="text-amber-400 mx-1 font-mono">source_id + url</code>).
+                </li>
+                <li>
+                  إبقاء العناصر التي رابطها <span className="text-emerald-400">غير موجود</span> ضمن المحفوظات فقط.
+                </li>
+                <li>
+                  تخزين الجدد في قاعدة البيانات تحت قيد فريد على
+                  <code className="text-amber-400 mx-1 font-mono">(source_id, url)</code>،
+                  حتى لو دخل عنصر مكرّر في نفس اللحظة فلن يُسجَّل مرتين.
+                </li>
+                <li>
+                  للأخبار (<span className="text-purple-400">News</span>) فقط: تمرير العناوين الجديدة
+                  عبر فلترة الذكاء الاصطناعي قبل إرسال المؤهل منها للوجهة.
+                </li>
+              </ol>
+              <p className="text-neutral-500">
+                إذا غيّر الناشر رابط مقال (مثلاً تعديل الـslug)، يُعتبر عنصراً جديداً وقد يُحفظ مرتين.
+                نفس المقال إن ظهر تحت مصدرين مختلفين يُحفظ من كل مصدر مستقلّاً.
+              </p>
+            </div>
+          </details>
+
           {/* Filter bar */}
           <div className="zto-card p-4">
             <div className="flex items-center gap-3 flex-wrap">

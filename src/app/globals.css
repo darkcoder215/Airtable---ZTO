@@ -271,9 +271,24 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
 
 /* Indeterminate progress bar used by the fetch row indicator. */
 @keyframes ztoFetchProgress {
-  0%   { transform: translateX(-150%); }
-  50%  { transform: translateX(50%); }
-  100% { transform: translateX(250%); }
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(400%); }
+}
+.zto-fetch-progress {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  background: rgba(251, 191, 36, 0.2);
+  overflow: hidden;
+}
+.zto-fetch-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 25%;
+  background: rgb(251, 191, 36);
+  animation: ztoFetchProgress 1.4s ease-in-out infinite;
 }
 
 /* ========== Alert ========== */
