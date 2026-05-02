@@ -13,6 +13,7 @@ import {
   saveArticlesToAirtable,
   getApifyToken,
   getFilterHistory,
+  SourceValidationError,
 } from "@/lib/data-sources";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
@@ -91,14 +92,21 @@ export async function POST(request: NextRequest) {
         if (user.role !== "admin") {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
         }
-        const source = await createDataSource(data);
-        logger.info(
-          `Data source "${source.name}" created by ${user.name}`,
-          "DataSources",
-          null,
-          user.id
-        );
-        return NextResponse.json({ source });
+        try {
+          const source = await createDataSource(data);
+          logger.info(
+            `Data source "${source.name}" created by ${user.name}`,
+            "DataSources",
+            null,
+            user.id
+          );
+          return NextResponse.json({ source });
+        } catch (err) {
+          if (err instanceof SourceValidationError) {
+            return NextResponse.json({ error: err.message }, { status: 400 });
+          }
+          throw err;
+        }
       }
 
       case "update": {
@@ -106,17 +114,36 @@ export async function POST(request: NextRequest) {
         if (!id) {
           return NextResponse.json({ error: "معرّف المصدر مطلوب" }, { status: 400 });
         }
-        const updated = await updateDataSource(id, update);
-        if (!updated) {
-          return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
+        // Non-admins may only toggle isActive; any other field requires admin.
+        if (user.role !== "admin") {
+          const allowedKeys = ["isActive"];
+          const submittedKeys = Object.keys(update);
+          const disallowed = submittedKeys.filter((k) => !allowedKeys.includes(k));
+          if (disallowed.length > 0) {
+            return NextResponse.json(
+              { error: "صلاحيات المدير مطلوبة لتعديل هذه الحقول" },
+              { status: 403 }
+            );
+          }
         }
-        logger.info(
-          `Data source ${id} updated by ${user.name}`,
-          "DataSources",
-          null,
-          user.id
-        );
-        return NextResponse.json({ source: updated });
+        try {
+          const updated = await updateDataSource(id, update);
+          if (!updated) {
+            return NextResponse.json({ error: "المصدر غير موجود" }, { status: 404 });
+          }
+          logger.info(
+            `Data source ${id} updated by ${user.name}`,
+            "DataSources",
+            null,
+            user.id
+          );
+          return NextResponse.json({ source: updated });
+        } catch (err) {
+          if (err instanceof SourceValidationError) {
+            return NextResponse.json({ error: err.message }, { status: 400 });
+          }
+          throw err;
+        }
       }
 
       case "delete": {

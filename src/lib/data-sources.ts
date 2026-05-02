@@ -18,6 +18,187 @@ type FilterRunRow = Database["public"]["Tables"]["scraper_filter_runs"]["Row"];
 export type SourceType = "rss" | "twitter" | "linkedin" | "apify" | "custom";
 export type SourceCategory = "startups" | "investment" | "tech" | "general";
 
+export const VALID_SOURCE_TYPES: readonly SourceType[] = [
+  "rss",
+  "twitter",
+  "linkedin",
+  "apify",
+  "custom",
+];
+export const VALID_SOURCE_CATEGORIES: readonly SourceCategory[] = [
+  "startups",
+  "investment",
+  "tech",
+  "general",
+];
+
+export class SourceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceValidationError";
+  }
+}
+
+const TWITTER_HOSTS = new Set(["x.com", "twitter.com", "www.x.com", "www.twitter.com"]);
+const LINKEDIN_HOSTS = new Set(["linkedin.com", "www.linkedin.com"]);
+const TWITTER_HANDLE_PATH = /^\/[A-Za-z0-9_]{1,15}\/?$/;
+const LINKEDIN_PROFILE_PATH = /^\/(in|company|school)\/[A-Za-z0-9\-_%.]+\/?$/i;
+
+function parseHttpUrl(raw: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new SourceValidationError("الرابط غير صالح");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new SourceValidationError("يجب أن يبدأ الرابط بـ https://");
+  }
+  return parsed;
+}
+
+// Validate + normalize a URL to the canonical shape for the given source type.
+// Profile-style sources (twitter/linkedin) get scheme + host normalised and
+// any query/fragment stripped so the same person can't be added twice under
+// slightly different links. RSS keeps its query string (often required).
+export function normalizeSourceUrl(type: SourceType, raw: string): string {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) throw new SourceValidationError("الرابط مطلوب");
+  const u = parseHttpUrl(trimmed);
+  const host = u.hostname.toLowerCase();
+
+  switch (type) {
+    case "twitter": {
+      if (!TWITTER_HOSTS.has(host)) {
+        throw new SourceValidationError(
+          "رابط X يجب أن يكون بصيغة https://x.com/username"
+        );
+      }
+      if (!TWITTER_HANDLE_PATH.test(u.pathname)) {
+        throw new SourceValidationError(
+          "رابط X يجب أن يكون بصيغة https://x.com/username"
+        );
+      }
+      return `https://x.com${u.pathname.replace(/\/$/, "")}`;
+    }
+    case "linkedin": {
+      if (!LINKEDIN_HOSTS.has(host)) {
+        throw new SourceValidationError(
+          "رابط LinkedIn يجب أن يكون على نطاق linkedin.com"
+        );
+      }
+      if (!LINKEDIN_PROFILE_PATH.test(u.pathname)) {
+        throw new SourceValidationError(
+          "رابط LinkedIn يجب أن يكون بصيغة https://www.linkedin.com/in/username أو /company/name"
+        );
+      }
+      return `https://www.linkedin.com${u.pathname.replace(/\/$/, "")}`;
+    }
+    case "rss":
+    case "apify":
+    case "custom":
+    default:
+      return u.toString();
+  }
+}
+
+interface SourcePayloadInput {
+  name?: unknown;
+  url?: unknown;
+  type?: unknown;
+  category?: unknown;
+  fetchInterval?: unknown;
+  isActive?: unknown;
+}
+
+interface SourcePayloadValidated {
+  name?: string;
+  url?: string;
+  type?: SourceType;
+  category?: SourceCategory;
+  fetchInterval?: number;
+  isActive?: boolean;
+}
+
+// Throws SourceValidationError on bad input. With { partial: true } only the
+// supplied fields are checked (used by update). With partial=false (create)
+// name/type/url are required and validated together.
+export function validateSourcePayload(
+  input: SourcePayloadInput,
+  opts: { partial?: boolean; existingType?: SourceType } = {}
+): SourcePayloadValidated {
+  const out: SourcePayloadValidated = {};
+
+  if (input.type !== undefined) {
+    if (
+      typeof input.type !== "string" ||
+      !VALID_SOURCE_TYPES.includes(input.type as SourceType)
+    ) {
+      throw new SourceValidationError("نوع المصدر غير صالح");
+    }
+    out.type = input.type as SourceType;
+  } else if (!opts.partial) {
+    throw new SourceValidationError("نوع المصدر مطلوب");
+  }
+
+  if (input.name !== undefined) {
+    if (typeof input.name !== "string") {
+      throw new SourceValidationError("اسم المصدر غير صالح");
+    }
+    const n = input.name.trim();
+    if (!n) throw new SourceValidationError("اسم المصدر مطلوب");
+    if (n.length > 200) throw new SourceValidationError("اسم المصدر طويل جداً");
+    out.name = n;
+  } else if (!opts.partial) {
+    throw new SourceValidationError("اسم المصدر مطلوب");
+  }
+
+  if (input.url !== undefined) {
+    if (typeof input.url !== "string") {
+      throw new SourceValidationError("الرابط غير صالح");
+    }
+    const typeForUrl = out.type ?? opts.existingType;
+    if (!typeForUrl) {
+      throw new SourceValidationError("النوع مطلوب للتحقق من الرابط");
+    }
+    out.url = normalizeSourceUrl(typeForUrl, input.url);
+  } else if (!opts.partial) {
+    throw new SourceValidationError("الرابط مطلوب");
+  }
+
+  if (input.category !== undefined) {
+    if (
+      typeof input.category !== "string" ||
+      !VALID_SOURCE_CATEGORIES.includes(input.category as SourceCategory)
+    ) {
+      throw new SourceValidationError("الفئة غير صالحة");
+    }
+    out.category = input.category as SourceCategory;
+  }
+
+  if (input.fetchInterval !== undefined) {
+    const n =
+      typeof input.fetchInterval === "number"
+        ? input.fetchInterval
+        : Number(input.fetchInterval);
+    if (!Number.isFinite(n) || n < 5 || n > 10080) {
+      throw new SourceValidationError(
+        "فترة الجلب يجب أن تكون بين 5 و 10080 دقيقة"
+      );
+    }
+    out.fetchInterval = Math.round(n);
+  }
+
+  if (input.isActive !== undefined) {
+    if (typeof input.isActive !== "boolean") {
+      throw new SourceValidationError("isActive يجب أن يكون boolean");
+    }
+    out.isActive = input.isActive;
+  }
+
+  return out;
+}
+
 export interface DataSource {
   id: string;
   name: string;
@@ -152,14 +333,15 @@ export async function getDataSourceById(id: string): Promise<DataSource | null> 
 export async function createDataSource(
   config: Omit<DataSource, "id" | "createdAt" | "lastFetchedAt"> & { brandId?: string | null }
 ): Promise<DataSource> {
+  const validated = validateSourcePayload(config, { partial: false });
   const sb = getSupabaseAdmin();
   const insert: SourceInsert = {
-    name: config.name,
-    type: config.type,
-    url: config.url,
-    category: config.category,
-    is_active: config.isActive,
-    fetch_interval_minutes: config.fetchInterval,
+    name: validated.name!,
+    type: validated.type!,
+    url: validated.url!,
+    category: validated.category ?? config.category,
+    is_active: validated.isActive ?? config.isActive,
+    fetch_interval_minutes: validated.fetchInterval ?? config.fetchInterval,
     brand_id: config.brandId ?? null,
   };
   const { data, error } = await sb
@@ -177,15 +359,32 @@ export async function updateDataSource(
 ): Promise<DataSource | null> {
   if (!isUuid(id)) return null;
   const sb = getSupabaseAdmin();
+
+  // If type or url is being changed, we need the existing type so url
+  // validation can run when only the url is supplied.
+  let existingType: SourceType | undefined;
+  if (update.url !== undefined && update.type === undefined) {
+    const current = await getDataSourceById(id);
+    if (!current) return null;
+    existingType = current.type;
+  }
+
+  const validated = validateSourcePayload(update, {
+    partial: true,
+    existingType,
+  });
+
   const patch: Database["public"]["Tables"]["scraper_sources"]["Update"] = {
     updated_at: new Date().toISOString(),
   };
-  if (update.name !== undefined) patch.name = update.name;
-  if (update.type !== undefined) patch.type = update.type;
-  if (update.url !== undefined) patch.url = update.url;
-  if (update.category !== undefined) patch.category = update.category;
-  if (update.isActive !== undefined) patch.is_active = update.isActive;
-  if (update.fetchInterval !== undefined) patch.fetch_interval_minutes = update.fetchInterval;
+  if (validated.name !== undefined) patch.name = validated.name;
+  if (validated.type !== undefined) patch.type = validated.type;
+  if (validated.url !== undefined) patch.url = validated.url;
+  if (validated.category !== undefined) patch.category = validated.category;
+  if (validated.isActive !== undefined) patch.is_active = validated.isActive;
+  if (validated.fetchInterval !== undefined) {
+    patch.fetch_interval_minutes = validated.fetchInterval;
+  }
   if (update.lastFetchedAt !== undefined) patch.last_fetched_at = update.lastFetchedAt;
   if (update.brandId !== undefined) patch.brand_id = update.brandId;
 
@@ -731,17 +930,37 @@ export async function fetchApifyLinkedIn(
     };
   }
 
+  // Defense in depth: re-validate the URL even though create/update
+  // already normalised it — we never want to forward an arbitrary URL
+  // to a paid Apify actor.
+  let safeUrl: string;
+  try {
+    safeUrl = normalizeSourceUrl("linkedin", profileUrl);
+  } catch (err) {
+    return {
+      articles: [],
+      error: err instanceof SourceValidationError ? err.message : "رابط LinkedIn غير صالح",
+    };
+  }
+
+  const cappedMax = Math.max(1, Math.min(50, Math.round(maxItems)));
+
   try {
     const response = await fetch(
-      `https://api.apify.com/v2/acts/supreme_coder~linkedin-post/run-sync-get-dataset-items?token=${token}`,
+      // Token stays in the Authorization header so it never lands in
+      // server logs (URL strings often do).
+      "https://api.apify.com/v2/acts/supreme_coder~linkedin-post/run-sync-get-dataset-items",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           deepScrape: false,
-          limitPerSource: maxItems,
+          limitPerSource: cappedMax,
           rawData: false,
-          urls: [profileUrl],
+          urls: [safeUrl],
         }),
         signal: AbortSignal.timeout(180000),
       }
@@ -755,12 +974,13 @@ export async function fetchApifyLinkedIn(
       };
     }
 
-    const posts: LinkedInPost[] = await response.json();
+    const raw = await response.json();
+    const posts: LinkedInPost[] = Array.isArray(raw) ? raw.slice(0, cappedMax) : [];
     const now = new Date().toISOString();
     const articles: FetchedArticle[] = posts
       .filter((p) => p && (p.url || p.urn))
       .map((post) => {
-        const text = (post.text ?? "").trim();
+        const text = (post.text ?? "").toString().trim().slice(0, 8000);
         const authorName =
           post.authorName ||
           [post.author?.firstName, post.author?.lastName].filter(Boolean).join(" ") ||
@@ -769,7 +989,7 @@ export async function fetchApifyLinkedIn(
         const title = titleSnippet
           ? `${authorName}: ${titleSnippet}${text.length > 80 ? "..." : ""}`
           : `${authorName} — ${post.type ?? "post"}`;
-        const url = post.url || post.authorProfileUrl || profileUrl;
+        const url = post.url || post.authorProfileUrl || safeUrl;
         let publishedAt = now;
         if (post.postedAtISO) {
           const d = new Date(post.postedAtISO);
