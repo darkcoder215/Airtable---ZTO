@@ -38,6 +38,8 @@ import {
   Rows3,
   LayoutGrid,
   Columns,
+  GripVertical,
+  GripHorizontal,
 } from "lucide-react";
 
 /* ────────── Types ────────── */
@@ -310,6 +312,35 @@ export default function DashboardPage() {
   const [view, setView] = useState<"grid" | "kanban">("grid");
   const [kanbanGroupField, setKanbanGroupField] = useState<string | null>(null);
   const [kanbanMoving, setKanbanMoving] = useState<string | null>(null);
+  const [kanbanDensity, setKanbanDensity] = useState<"compact" | "normal" | "comfy">("normal");
+  // Per-column persisted width. Key = `${baseId}:${tableId}:${groupField}:${columnKey}`.
+  const [kanbanColWidth, setKanbanColWidth] = useState<Record<string, number>>({});
+  const [kanbanDragOver, setKanbanDragOver] = useState<string | null>(null);
+  const [kanbanDraggingId, setKanbanDraggingId] = useState<string | null>(null);
+
+  // Hydrate persisted Kanban prefs once.
+  useEffect(() => {
+    try {
+      const w = localStorage.getItem("zto-kanban-col-width");
+      if (w) setKanbanColWidth(JSON.parse(w));
+      const d = localStorage.getItem("zto-kanban-density");
+      if (d === "compact" || d === "normal" || d === "comfy") setKanbanDensity(d);
+    } catch {
+      // localStorage may be unavailable — non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("zto-kanban-col-width", JSON.stringify(kanbanColWidth));
+    } catch {}
+  }, [kanbanColWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("zto-kanban-density", kanbanDensity);
+    } catch {}
+  }, [kanbanDensity]);
 
   // Reset kanban grouping when the table changes; auto-pick first singleSelect.
   useEffect(() => {
@@ -1082,6 +1113,24 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {/* Kanban card density (kanban view only) */}
+            {view === "kanban" && (
+              <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden" title="حجم البطاقات">
+                {(["compact", "normal", "comfy"] as const).map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setKanbanDensity(size)}
+                    className={`px-2 py-1 text-[10px] font-bold transition-colors ${
+                      kanbanDensity === size ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                    }`}
+                    title={size === "compact" ? "مضغوط" : size === "normal" ? "عادي" : "مريح"}
+                  >
+                    <Rows3 className={`w-3 h-3 ${size === "compact" ? "scale-75" : size === "comfy" ? "scale-125" : ""}`} />
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Row height (grid view only) */}
             {view === "grid" && (
               <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
@@ -1506,18 +1555,100 @@ export default function DashboardPage() {
           return (c?.color && colorMap[c.color]) || "var(--c-brand-lighter)";
         };
 
+        const colKeyPrefix = `${selectedBase?.id ?? "?"}:${selectedTable.id}:${groupField.name}`;
+        const widthFor = (k: string) => kanbanColWidth[`${colKeyPrefix}:${k}`] ?? 280;
+        const setWidthFor = (k: string, w: number) =>
+          setKanbanColWidth((p) => ({ ...p, [`${colKeyPrefix}:${k}`]: w }));
+
+        // Drag column resize: pointer events so it works on touch + mouse,
+        // and we can pin/release pointer capture to keep tracking even if
+        // the cursor leaves the handle while dragging.
+        const onResizeStart = (
+          e: React.PointerEvent<HTMLDivElement>,
+          colKey: string
+        ) => {
+          e.preventDefault();
+          const el = e.currentTarget;
+          const startX = e.clientX;
+          const startW = widthFor(colKey);
+          el.setPointerCapture(e.pointerId);
+          const onMove = (ev: PointerEvent) => {
+            // RTL layout: dragging left increases width.
+            const delta = startX - ev.clientX;
+            const next = Math.max(220, Math.min(640, startW + delta));
+            setWidthFor(colKey, next);
+          };
+          const onUp = (ev: PointerEvent) => {
+            try { el.releasePointerCapture(ev.pointerId); } catch {}
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        };
+
+        const densityCard =
+          kanbanDensity === "compact" ? "p-2 text-[11px]" : kanbanDensity === "comfy" ? "p-3.5 text-[13px]" : "p-2.5 text-[12px]";
+        const densityCardSpacing =
+          kanbanDensity === "compact" ? "space-y-1.5" : kanbanDensity === "comfy" ? "space-y-3" : "space-y-2";
+
+        const onCardDragStart = (e: React.DragEvent, recordId: string) => {
+          e.dataTransfer.setData("text/zto-record-id", recordId);
+          e.dataTransfer.effectAllowed = "move";
+          setKanbanDraggingId(recordId);
+        };
+        const onCardDragEnd = () => {
+          setKanbanDraggingId(null);
+          setKanbanDragOver(null);
+        };
+        const onColumnDragOver = (e: React.DragEvent, key: string) => {
+          // Only accept drops if a Kanban card is being dragged.
+          if (!e.dataTransfer.types.includes("text/zto-record-id")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (kanbanDragOver !== key) setKanbanDragOver(key);
+        };
+        const onColumnDrop = (e: React.DragEvent, key: string) => {
+          const recId = e.dataTransfer.getData("text/zto-record-id");
+          setKanbanDragOver(null);
+          setKanbanDraggingId(null);
+          if (!recId || !canEdit) return;
+          const newValue = key === noneKey ? null : key;
+          // Find current record value; skip the API call if nothing changed.
+          const rec = filteredRecords.find((r) => r.id === recId);
+          const current = rec?.fields[groupField.name];
+          if ((current ?? null) === newValue) return;
+          e.preventDefault();
+          updateRecordField(recId, groupField.name, newValue);
+        };
+
         return (
           <div className="border border-neutral-800 border-t-0 rounded-b-xl p-3 bg-[#0d0d0d]">
+            {canEdit && (
+              <p className="text-[10px] text-neutral-500 mb-2 px-1">
+                اسحب البطاقات بين الأعمدة لتغيير الحالة. اسحب الحد الأيسر للعمود لضبط عرضه.
+              </p>
+            )}
             <div className="flex gap-3 overflow-x-auto pb-2" dir="rtl">
               {orderedKeys.map((key) => {
                 const list = groups[key] || [];
                 const isNone = key === noneKey;
+                const isDragOver = kanbanDragOver === key;
+                const colW = widthFor(key);
                 return (
                   <div
                     key={key}
-                    className="shrink-0 w-[280px] bg-[#161616] border border-neutral-800 rounded-xl flex flex-col max-h-[calc(100vh-280px)]"
+                    className={`shrink-0 bg-[#161616] border rounded-xl flex flex-col max-h-[calc(100vh-280px)] relative transition-colors ${
+                      isDragOver
+                        ? "border-amber-400 ring-2 ring-amber-400/30"
+                        : "border-neutral-800"
+                    }`}
+                    style={{ width: colW }}
+                    onDragOver={(e) => onColumnDragOver(e, key)}
+                    onDragLeave={() => kanbanDragOver === key && setKanbanDragOver(null)}
+                    onDrop={(e) => onColumnDrop(e, key)}
                   >
-                    <div className="px-3 py-2.5 border-b border-neutral-800 flex items-center justify-between gap-2 sticky top-0 bg-[#161616] rounded-t-xl">
+                    <div className="px-3 py-2.5 border-b border-neutral-800 flex items-center justify-between gap-2 sticky top-0 bg-[#161616] rounded-t-xl z-10">
                       <div className="flex items-center gap-2 min-w-0">
                         <span
                           className="w-2.5 h-2.5 rounded-sm shrink-0"
@@ -1531,19 +1662,42 @@ export default function DashboardPage() {
                         {list.length}
                       </span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                    <div className={`flex-1 overflow-y-auto p-2 ${densityCardSpacing}`}>
                       {list.length === 0 && (
-                        <p className="text-[11px] text-neutral-600 text-center py-4">لا سجلات</p>
+                        <p
+                          className={`text-[11px] text-center py-4 ${
+                            isDragOver ? "text-amber-400 font-bold" : "text-neutral-600"
+                          }`}
+                        >
+                          {isDragOver ? "أفلت هنا" : "لا سجلات"}
+                        </p>
                       )}
                       {list.map((rec) => {
                         const titleVal = primary ? rec.fields[primary.name] : null;
                         const title = renderCellPreview(titleVal) || rec.id;
+                        const isDragging = kanbanDraggingId === rec.id;
+                        const isMoving = kanbanMoving === rec.id;
                         return (
                           <div
                             key={rec.id}
-                            className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-2.5 hover:border-neutral-700 transition-colors group"
+                            draggable={canEdit && !isMoving}
+                            onDragStart={(e) => onCardDragStart(e, rec.id)}
+                            onDragEnd={onCardDragEnd}
+                            className={`bg-[#1a1a1a] border rounded-lg ${densityCard} hover:border-neutral-700 transition-all group relative ${
+                              isDragging ? "opacity-40 scale-95" : ""
+                            } ${isMoving ? "opacity-60" : ""} ${
+                              canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                            }`}
+                            title={canEdit ? "اسحب لتغيير الحالة" : undefined}
                           >
-                            <p className="text-[12px] font-bold text-white leading-snug line-clamp-2 break-words">
+                            {canEdit && (
+                              <GripVertical className="w-3.5 h-3.5 text-neutral-600 absolute top-2 left-2 opacity-0 group-hover:opacity-100 pointer-events-none" />
+                            )}
+                            <p
+                              className={`font-bold text-white leading-snug line-clamp-2 break-words ${
+                                kanbanDensity === "compact" ? "text-[11px]" : kanbanDensity === "comfy" ? "text-[13px]" : "text-[12px]"
+                              }`}
+                            >
                               {title}
                             </p>
                             {cardFields.length > 0 && (
@@ -1558,7 +1712,15 @@ export default function DashboardPage() {
                                       <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
                                         {f.name}
                                       </span>
-                                      <span className="text-[11px] text-neutral-300 break-words line-clamp-2">
+                                      <span
+                                        className={`text-neutral-300 break-words ${
+                                          kanbanDensity === "compact"
+                                            ? "text-[10px] line-clamp-1"
+                                            : kanbanDensity === "comfy"
+                                              ? "text-[12px] line-clamp-3"
+                                              : "text-[11px] line-clamp-2"
+                                        }`}
+                                      >
                                         {preview}
                                       </span>
                                     </div>
@@ -1572,8 +1734,9 @@ export default function DashboardPage() {
                                   <select
                                     className="zto-input text-[10px] !py-1 !pr-2 !pl-7"
                                     value={isNone ? "" : key}
-                                    disabled={kanbanMoving === rec.id}
+                                    disabled={isMoving}
                                     onChange={(e) => updateRecordField(rec.id, groupField.name, e.target.value || null)}
+                                    onMouseDown={(e) => e.stopPropagation()}
                                   >
                                     <option value="">— بدون —</option>
                                     {choices.map((c) => (
@@ -1586,6 +1749,15 @@ export default function DashboardPage() {
                           </div>
                         );
                       })}
+                    </div>
+                    {/* Vertical resize handle on the left edge (RTL). */}
+                    <div
+                      onPointerDown={(e) => onResizeStart(e, key)}
+                      className="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize flex items-center justify-center group/resize"
+                      title="اسحب لضبط عرض العمود"
+                    >
+                      <div className="w-px h-full bg-neutral-800 group-hover/resize:bg-amber-400 transition-colors" />
+                      <GripHorizontal className="w-3 h-3 text-neutral-600 group-hover/resize:text-amber-400 transition-colors absolute" />
                     </div>
                   </div>
                 );
