@@ -52,7 +52,8 @@ interface Article {
   sourceName: string;
   sourceId: string;
   author: string;
-  category: string;
+  // Free-form tags from the feed (not the editorial category).
+  categories?: string[];
   publishedAt: string;
   savedToAirtable?: boolean;
 }
@@ -88,9 +89,9 @@ const CATEGORIES = [
 ];
 
 const TOPICS = [
-  { value: "news", label: "أخبار (News)", description: "يمر عبر فلترة AI لاكتشاف أخبار التمويل قبل الحفظ في Airtable" },
-  { value: "insights", label: "رؤى (Insights)", description: "محتوى رأي وتحليل — يحفظ كاملاً بدون فلترة" },
-  { value: "real_estate", label: "عقارات (Real Estate)", description: "محتوى عقاري — يحفظ كاملاً بدون فلترة" },
+  { value: "news", label: "أخبار (News)", description: "يمر عبر فلترة ذكية لاكتشاف أخبار التمويل قبل الإرسال إلى الوجهة" },
+  { value: "insights", label: "رؤى (Insights)", description: "محتوى رأي وتحليل — يُرسل كاملاً بدون فلترة" },
+  { value: "real_estate", label: "عقارات (Real Estate)", description: "محتوى عقاري — يُرسل كاملاً بدون فلترة" },
 ] as const;
 
 const TYPE_PLACEHOLDERS: Record<string, string> = {
@@ -123,6 +124,24 @@ export default function DataSourcesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Test-source flow inside the create modal.
+  interface TestPreviewItem {
+    title: string;
+    description: string;
+    url: string;
+    author?: string;
+    publishedAt?: string;
+    imageUrl?: string;
+  }
+  const [testing, setTesting] = useState(false);
+  const [testItems, setTestItems] = useState<TestPreviewItem[] | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testWarning, setTestWarning] = useState<string | null>(null);
+  // Tracks the {type,url} the test was run against. If the user changes
+  // either after testing, we reset the confirmation so they can't bypass.
+  const [testSig, setTestSig] = useState<string | null>(null);
+  const [testConfirmed, setTestConfirmed] = useState(false);
   const [activeTab, setActiveTab] = useState<"sources" | "articles" | "filters" | "guide">("sources");
 
   // Bulk-add modal
@@ -143,10 +162,10 @@ export default function DataSourcesPage() {
     | null
   >(null);
 
-  // Apify + OpenRouter status
-  const [apifyConfigured, setApifyConfigured] = useState(false);
-  const [openrouterConfigured, setOpenrouterConfigured] = useState(false);
-  const [savingToAirtable, setSavingToAirtable] = useState<string | null>(null);
+  // Capability flags (kept generic — names below don't expose vendors).
+  const [socialFetchEnabled, setSocialFetchEnabled] = useState(false);
+  const [aiFilterEnabled, setAiFilterEnabled] = useState(false);
+  const [savingToDestination, setSavingToDestination] = useState<string | null>(null);
 
   // Filter history
   const [filterHistoryItems, setFilterHistoryItems] = useState<FilterHistoryItem[]>([]);
@@ -171,8 +190,8 @@ export default function DataSourcesPage() {
     fetch("/api/data-sources?action=status")
       .then((r) => r.json())
       .then((d) => {
-        setApifyConfigured(d.apifyConfigured);
-        setOpenrouterConfigured(d.openrouterConfigured);
+        setSocialFetchEnabled(!!d.socialFetchEnabled);
+        setAiFilterEnabled(!!d.aiFilterEnabled);
       })
       .catch(() => {});
   }, []);
@@ -231,6 +250,7 @@ export default function DataSourcesPage() {
         addToast(`تم جلب ${count} خبر بنجاح`, "success");
         loadSources();
         loadArticles();
+        loadFilterHistory();
       } else {
         addToast(data.error || "فشل الجلب", "error");
       }
@@ -255,6 +275,7 @@ export default function DataSourcesPage() {
         addToast(`تم جلب ${total} خبر من ${data.sourcesProcessed || 0} مصدر`, "success");
         loadSources();
         loadArticles();
+        loadFilterHistory();
       } else {
         addToast(data.error || "فشل الجلب", "error");
       }
@@ -265,6 +286,63 @@ export default function DataSourcesPage() {
     }
   };
 
+  const currentTestSig = `${formData.type}::${formData.url.trim()}`;
+
+  // Reset test state whenever the user changes type or URL after a test —
+  // avoids them confirming one URL and saving a different one.
+  useEffect(() => {
+    if (testSig && testSig !== currentTestSig) {
+      setTestItems(null);
+      setTestConfirmed(false);
+      setTestError(null);
+      setTestWarning(null);
+      setTestSig(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTestSig]);
+
+  const handleTestSource = async () => {
+    if (!formData.url.trim()) {
+      addToast("أدخل الرابط أولاً", "warning");
+      return;
+    }
+    setTesting(true);
+    setTestItems(null);
+    setTestConfirmed(false);
+    setTestError(null);
+    setTestWarning(null);
+    try {
+      const res = await fetch("/api/data-sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test-source",
+          type: formData.type,
+          url: formData.url,
+          limit: 5,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestError(data.error || "فشل الاختبار");
+        addToast(data.error || "فشل الاختبار", "error");
+        return;
+      }
+      const items: TestPreviewItem[] = Array.isArray(data.articles) ? data.articles : [];
+      setTestItems(items);
+      setTestSig(currentTestSig);
+      if (items.length === 0) {
+        setTestWarning("لم تُرجع المصدر أي عناصر. تأكد من الرابط أو حاول لاحقاً.");
+      } else if (data.warning) {
+        setTestWarning(data.warning);
+      }
+    } catch {
+      setTestError("حدث خطأ أثناء الاختبار");
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.name) {
       addToast("أدخل اسم المصدر", "warning");
@@ -272,6 +350,12 @@ export default function DataSourcesPage() {
     }
     if (!formData.url) {
       addToast("أدخل رابط المصدر", "warning");
+      return;
+    }
+    // For new sources we require either an explicit "test + confirm" or an
+    // explicit "skip test" via testConfirmed. Edits keep the existing behaviour.
+    if (!editingSource && !testConfirmed) {
+      addToast("اختبر المصدر وأكّد النتيجة قبل الإضافة", "warning");
       return;
     }
     setSaving(true);
@@ -333,8 +417,8 @@ export default function DataSourcesPage() {
     }
   };
 
-  const handleSaveToAirtable = async (articleId: string, sourceName: string) => {
-    setSavingToAirtable(articleId);
+  const handleSaveToDestination = async (articleId: string, sourceName: string) => {
+    setSavingToDestination(articleId);
     try {
       const res = await fetch("/api/data-sources", {
         method: "POST",
@@ -342,7 +426,7 @@ export default function DataSourcesPage() {
         body: JSON.stringify({ action: "save-to-airtable", articleId, sourceName }),
       });
       if (res.ok) {
-        addToast("تم الحفظ في Airtable", "success");
+        addToast("تم الحفظ في الوجهة", "success");
         loadArticles();
       } else {
         const data = await res.json();
@@ -351,7 +435,7 @@ export default function DataSourcesPage() {
     } catch {
       addToast("حدث خطأ أثناء الحفظ", "error");
     } finally {
-      setSavingToAirtable(null);
+      setSavingToDestination(null);
     }
   };
 
@@ -375,6 +459,11 @@ export default function DataSourcesPage() {
     setShowModal(false);
     setEditingSource(null);
     setFormData({ ...defaultFormData });
+    setTestItems(null);
+    setTestConfirmed(false);
+    setTestError(null);
+    setTestWarning(null);
+    setTestSig(null);
   };
 
   const closeBulkModal = () => {
@@ -479,9 +568,16 @@ export default function DataSourcesPage() {
 
   /* ───────── Filtered articles ───────── */
 
+  // Articles inherit their editorial category from the parent source — a feed
+  // doesn't carry a single category of its own.
+  const sourceCategoryById = new Map<string, DataSource["category"]>();
+  for (const s of sources) sourceCategoryById.set(s.id, s.category);
+  const articleCategory = (a: Article): DataSource["category"] =>
+    sourceCategoryById.get(a.sourceId) ?? "general";
+
   const filteredArticles = articles.filter((a) => {
     if (filterSource && a.sourceId !== filterSource) return false;
-    if (filterCategory && a.category !== filterCategory) return false;
+    if (filterCategory && articleCategory(a) !== filterCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
@@ -599,13 +695,13 @@ export default function DataSourcesPage() {
         </div>
       </div>
 
-      {!apifyConfigured && (
+      {!socialFetchEnabled && (
         <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
           <Info className="w-5 h-5 text-amber-400 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-400">جلب X (تويتر) غير مفعّل حالياً</p>
+            <p className="text-sm font-bold text-amber-400">جلب مصادر التواصل الاجتماعي غير مفعّل حالياً</p>
             <p className="text-xs text-neutral-400">
-              تواصل مع المسؤول التقني لتفعيله. مصادر المواقع (RSS) تعمل بشكل طبيعي.
+              تواصل مع المسؤول للتفعيل. مصادر المواقع تعمل بشكل طبيعي.
             </p>
           </div>
         </div>
@@ -905,15 +1001,31 @@ export default function DataSourcesPage() {
           ) : filteredArticles.length === 0 ? (
             <div className="zto-card p-16 text-center">
               <BookOpen className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
-              <p className="text-neutral-500 text-sm font-bold mb-1">لا توجد أخبار</p>
-              <p className="text-neutral-600 text-xs">
-                جرب جلب البيانات من المصادر أولا
+              <p className="text-neutral-500 text-sm font-bold mb-1">
+                {articles.length === 0 ? "لا توجد أخبار" : "لا توجد نتائج للفلتر"}
               </p>
+              <p className="text-neutral-600 text-xs">
+                {articles.length === 0
+                  ? "جرب جلب البيانات من المصادر أولا"
+                  : `${articles.length} خبر مخفي بسبب الفلتر`}
+              </p>
+              {articles.length > 0 && (filterSource || filterCategory || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setFilterSource("");
+                    setFilterCategory("");
+                    setSearchQuery("");
+                  }}
+                  className="zto-btn zto-btn-outline zto-btn-sm mt-3"
+                >
+                  مسح الفلتر
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredArticles.map((article) => {
-                const cat = getCategoryInfo(article.category);
+                const cat = getCategoryInfo(articleCategory(article));
                 return (
                   <div
                     key={article.id}
@@ -959,12 +1071,12 @@ export default function DataSourcesPage() {
                         </span>
                       ) : (
                         <button
-                          onClick={() => handleSaveToAirtable(article.id, article.sourceName || "Unknown")}
-                          disabled={savingToAirtable === article.id}
+                          onClick={() => handleSaveToDestination(article.id, article.sourceName || "Unknown")}
+                          disabled={savingToDestination === article.id}
                           className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
-                          title="حفظ في Airtable"
+                          title="حفظ في الوجهة"
                         >
-                          {savingToAirtable === article.id ? (
+                          {savingToDestination === article.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
                           ) : (
                             <Database className="w-3 h-3" />
@@ -984,16 +1096,16 @@ export default function DataSourcesPage() {
       {/* ───── Filters Tab ───── */}
       {activeTab === "filters" && (
         <>
-          {/* AI filter info banner */}
+          {/* AI filter info banner — kept generic, no model/provider mention. */}
           <div className="flex items-center gap-3 bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
             <Brain className="w-5 h-5 text-purple-400 shrink-0" />
             <div>
               <p className="text-sm font-bold text-purple-400">فلترة ذكية</p>
               <p className="text-xs text-neutral-400">
-                يتم تحليل أخبار المواقع تلقائياً وتصفية ما يتعلق بالشركات الناشئة والاستثمارات فقط، ثم حفظ المؤهل منها في Airtable.
-                {!openrouterConfigured && (
+                يتم تحليل عناوين الأخبار آلياً والإبقاء على ما يتعلق بالشركات الناشئة والاستثمارات فقط، ثم تمرير المؤهل منها إلى الوجهة.
+                {!aiFilterEnabled && (
                   <span className="text-amber-400 mr-2">
-                    ⚠ الفلترة الذكية غير مفعّلة حالياً — جميع الأخبار تمر بدون تصفية. تواصل مع المسؤول التقني.
+                    ⚠ الفلترة الذكية غير مفعّلة حالياً — جميع الأخبار تمر بدون تصفية. تواصل مع المسؤول.
                   </span>
                 )}
               </p>
@@ -1460,6 +1572,121 @@ TechCrunch | https://techcrunch.com/feed
                 />
               </div>
 
+              {/* Test source — required step for create. */}
+              {!editingSource && (
+                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="text-sm font-bold text-white flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                        اختبار المصدر
+                      </p>
+                      <p className="text-[0.7rem] text-neutral-500 mt-0.5">
+                        نجلب 5 عناصر للمعاينة دون حفظها — أكّد أنها صحيحة لتفعيل الإضافة.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestSource}
+                      disabled={testing || !formData.url.trim()}
+                      className="zto-btn zto-btn-outline zto-btn-sm"
+                    >
+                      {testing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      {testItems ? "إعادة الاختبار" : "اختبار"}
+                    </button>
+                  </div>
+
+                  {testError && (
+                    <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+                      <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-400">{testError}</p>
+                    </div>
+                  )}
+
+                  {testWarning && !testError && (
+                    <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                      <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-400">{testWarning}</p>
+                    </div>
+                  )}
+
+                  {testItems && testItems.length > 0 && (
+                    <>
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {testItems.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3"
+                          >
+                            <p className="text-xs font-bold text-white line-clamp-2 leading-snug">
+                              {item.title || "بدون عنوان"}
+                            </p>
+                            {item.description && (
+                              <p className="text-[0.65rem] text-neutral-400 line-clamp-2 mt-1">
+                                {item.description}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                              {item.url && (
+                                <a
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[0.6rem] text-amber-400 truncate max-w-[260px] hover:underline"
+                                  dir="ltr"
+                                >
+                                  {item.url}
+                                </a>
+                              )}
+                              {item.publishedAt && (
+                                <span className="text-[0.6rem] text-neutral-600 flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {formatDate(item.publishedAt)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <p className="text-[0.7rem] text-neutral-400">
+                          هل النتائج تبدو صحيحة؟
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setTestConfirmed(false)}
+                            className={`zto-btn zto-btn-sm ${
+                              testConfirmed
+                                ? "zto-btn-ghost"
+                                : "zto-btn-outline border-red-500/30 !text-red-400"
+                            }`}
+                          >
+                            لا
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTestConfirmed(true)}
+                            className={`zto-btn zto-btn-sm ${
+                              testConfirmed
+                                ? "zto-btn-gold"
+                                : "zto-btn-outline"
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            نعم — متابعة الإضافة
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Topic (news / insights / real estate) */}
               <div>
                 <label className="zto-label">الموضوع *</label>
@@ -1556,7 +1783,12 @@ TechCrunch | https://techcrunch.com/feed
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || (!editingSource && !testConfirmed)}
+                title={
+                  !editingSource && !testConfirmed
+                    ? "اختبر المصدر وأكّد النتيجة قبل الإضافة"
+                    : undefined
+                }
                 className="zto-btn zto-btn-gold"
               >
                 {saving ? (

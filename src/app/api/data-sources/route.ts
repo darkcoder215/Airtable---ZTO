@@ -10,11 +10,14 @@ import {
   getArticleById,
   fetchSource,
   fetchAllSources,
+  previewSource,
   saveArticleToAirtable,
   saveArticlesToAirtable,
   getApifyToken,
   getFilterHistory,
   SourceValidationError,
+  VALID_SOURCE_TYPES,
+  type SourceType,
 } from "@/lib/data-sources";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
@@ -63,9 +66,11 @@ export async function GET(request: NextRequest) {
   }
 
   if (action === "status") {
+    // Generic capability flags. Vendor identifiers are intentionally kept off
+    // the wire so the public dashboard doesn't enumerate the provider stack.
     return NextResponse.json({
-      apifyConfigured: !!getApifyToken(),
-      openrouterConfigured: !!process.env.OPENROUTER_API_KEY,
+      socialFetchEnabled: !!getApifyToken(),
+      aiFilterEnabled: !!process.env.OPENROUTER_API_KEY,
     });
   }
 
@@ -89,6 +94,45 @@ export async function POST(request: NextRequest) {
     const { action, ...data } = body;
 
     switch (action) {
+      case "test-source": {
+        // Stateless preview — admin-only since fetching can hit paid APIs.
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        const type = data.type as SourceType;
+        const url = typeof data.url === "string" ? data.url : "";
+        if (!type || !VALID_SOURCE_TYPES.includes(type)) {
+          return NextResponse.json({ error: "نوع المصدر غير صالح" }, { status: 400 });
+        }
+        if (!url.trim()) {
+          return NextResponse.json({ error: "الرابط مطلوب" }, { status: 400 });
+        }
+        const limit = Number.isFinite(data.limit)
+          ? Math.max(1, Math.min(10, Math.round(Number(data.limit))))
+          : 5;
+        const result = await previewSource({ type, url, limit });
+        if (result.error && result.articles.length === 0) {
+          return NextResponse.json(
+            { error: result.error, articles: [] },
+            { status: 502 }
+          );
+        }
+        // Strip transient ids and trim payload sizes for the wire.
+        const items = result.articles.map((a) => ({
+          title: a.title,
+          description: (a.description ?? "").slice(0, 600),
+          url: a.url,
+          author: a.author,
+          publishedAt: a.publishedAt,
+          imageUrl: a.imageUrl,
+        }));
+        return NextResponse.json({
+          articles: items,
+          count: items.length,
+          warning: result.error ?? null,
+        });
+      }
+
       case "create": {
         if (user.role !== "admin") {
           return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });

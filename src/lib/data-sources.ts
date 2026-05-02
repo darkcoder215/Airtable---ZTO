@@ -1444,6 +1444,63 @@ async function bumpSourceStatus(
   }
 }
 
+// Stateless preview fetch: validate the URL for the type, hit the provider,
+// return up to `limit` articles without writing anything to scraper_articles,
+// scraper_fetch_runs, or the source row. Used by the "test source" UX so the
+// admin can confirm the feed parses before committing to a save.
+export async function previewSource(args: {
+  type: SourceType;
+  url: string;
+  limit?: number;
+}): Promise<RSSFetchResult> {
+  const limit = Math.max(1, Math.min(10, args.limit ?? 5));
+  let safeUrl: string;
+  try {
+    safeUrl = normalizeSourceUrl(args.type, args.url);
+  } catch (err) {
+    return {
+      articles: [],
+      error: err instanceof SourceValidationError ? err.message : "رابط غير صالح",
+    };
+  }
+
+  // Use a synthetic sourceId / sourceName so the existing fetchers can
+  // populate sourceName + transient ids consistently.
+  const TEST_ID = "preview";
+  const TEST_NAME = "اختبار";
+
+  let result: RSSFetchResult;
+  try {
+    if (args.type === "rss") {
+      result = await fetchRSSFeed(safeUrl, TEST_ID, limit);
+    } else if (args.type === "twitter") {
+      result = await fetchApifyTwitter(safeUrl, TEST_ID, TEST_NAME, limit);
+    } else if (args.type === "linkedin") {
+      result = await fetchApifyLinkedIn(safeUrl, TEST_ID, TEST_NAME, limit);
+    } else if (args.type === "apify") {
+      result = await fetchApifyGeneric(safeUrl, TEST_ID, TEST_NAME);
+    } else {
+      return {
+        articles: [],
+        error: `الاختبار غير مدعوم لهذا النوع: ${args.type}`,
+      };
+    }
+  } catch (err) {
+    return {
+      articles: [],
+      error: err instanceof Error ? err.message : "فشل الاختبار",
+    };
+  }
+
+  // Trim to the requested limit and strip any incidental DB-only fields.
+  const articles = result.articles.slice(0, limit).map((a) => ({
+    ...a,
+    sourceName: TEST_NAME,
+    savedToAirtable: false,
+  }));
+  return { articles, error: result.error };
+}
+
 export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   const source = await getDataSourceById(sourceId);
   if (!source) return { articles: [], error: "Source not found" };
