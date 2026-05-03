@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Sora:wght@200;300;400;500;600;700;800&display=swap');
 
 /* ============================================================
    Tailwind theme tokens — these stay in @theme so utilities
@@ -510,4 +511,233 @@ button.zto-card:hover {
 [data-theme="light"] .text-amber-500,
 [data-theme="light"] .text-yellow-400 {
   color: var(--c-gold) !important;
+}
+
+/* ============================================================
+   SIGNAL ENGINEERING theme — dark engineering aesthetic with a
+   single saturated blue accent, mono labels, sharp 4px corners,
+   and a faint circuit-board backdrop. Activated by setting
+   data-theme="signal" on <html>.
+
+   The strategy mirrors the existing dark/light themes: we map the
+   project's familiar token names (--c-brand, --c-gold, ...) onto
+   Signal's paper/ink/signal scale so every existing component
+   automatically picks up the new look. A handful of class-scoped
+   overrides (radius, borders, fonts) tighten the visual identity
+   without touching any component source. Arabic-first: we keep
+   Noto Kufi Arabic as a font fallback so RTL text still renders
+   correctly while Latin glyphs pick up Sora.
+   ============================================================ */
+[data-theme="signal"] {
+  /* Signal palette — see SIGNAL ENGINEERING / DESIGN SYSTEM v1.0 */
+  --signal: #2E6BFF;
+  --signal-bright: #4F8BFF;
+  --signal-deep: #1A4DCC;
+  --signal-glow: rgba(46, 107, 255, 0.35);
+  --signal-wash: rgba(46, 107, 255, 0.08);
+  --cyan-edge: #4FD4E3;
+  --success: #3DD68C;
+  --amber-warn: #E8A33D;
+
+  /* Map the project's brand/gold token names onto Signal so
+     every utility class (zto-btn-gold, zto-badge-gold, ...) and
+     every Tailwind override below recolors automatically. */
+  --c-brand: #0A0C12;          /* card background (ink-1) */
+  --c-brand-light: #10131B;    /* popover (ink-2) */
+  --c-brand-lighter: #171B26;  /* muted surface (ink-3) */
+  --c-brand-border: #2A2F3E;   /* card border (ink-border) */
+  --c-brand-hover: #1E2230;    /* subtle hover */
+  --c-gold: var(--signal);
+  --c-gold-dark: var(--signal-deep);
+  --c-gold-light: var(--signal-bright);
+  --c-gold-bg: var(--signal-wash);
+  --c-txt: #F2F3F5;            /* paper */
+  --c-txt-dim: #B7BCC9;        /* paper-mute */
+  --c-txt-faint: #70768A;      /* paper-dim */
+  --c-ok: var(--success);
+  --c-ok-bg: rgba(61, 214, 140, 0.10);
+  --c-warn: var(--amber-warn);
+  --c-warn-bg: rgba(232, 163, 61, 0.10);
+  --c-err: #E8A33D;            /* signal uses amber for warn/err */
+  --c-err-bg: rgba(232, 163, 61, 0.10);
+  --c-info: var(--signal-bright);
+  --c-info-bg: var(--signal-wash);
+
+  --surface-page: #06070A;     /* ink — true near-black */
+  --surface-card: #0A0C12;     /* ink-1 */
+  --surface-elevated: #10131B; /* ink-2 */
+  --surface-sunken: #06070A;
+  --surface-header: #0A0C12;
+  --border-strong: #2A2F3E;
+  --border-soft: #1E2230;
+  --text-strong: #FFFFFF;
+  --text-base: #F2F3F5;
+  --text-dim: #B7BCC9;
+  --text-faint: #70768A;
+  --modal-overlay: rgba(0, 0, 0, 0.78);
+
+  --font-display: 'Sora', 'Noto Kufi Arabic', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-display);
+}
+
+/* Body weight + circuit backdrop applied only under signal. The
+   circuit pattern is two stacked grids (48px + 96px) plus three
+   soft radial signal-blue / cyan-edge glows, baked into a single
+   ::before so it never blocks pointer events. */
+[data-theme="signal"] body {
+  font-family: var(--font-display);
+  font-weight: 300;
+  letter-spacing: -0.005em;
+}
+[data-theme="signal"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    radial-gradient(circle 1.5px at 48px 48px, rgba(46, 107, 255, 0.12), transparent 60%),
+    radial-gradient(circle 1px at 96px 96px, rgba(79, 212, 227, 0.10), transparent 60%);
+  background-size: 48px 48px, 48px 48px, 96px 96px, 96px 96px;
+  background-position: 0 0, 0 0, 0 0, 0 0;
+}
+[data-theme="signal"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(80vmin 60vmin at 80% 10%, rgba(46, 107, 255, 0.10), transparent 60%),
+    radial-gradient(60vmin 50vmin at 10% 90%, rgba(79, 212, 227, 0.06), transparent 60%);
+}
+[data-theme="signal"] #__next,
+[data-theme="signal"] body > * { position: relative; z-index: 1; }
+
+/* Sharp engineering corners — override the rounded shapes the
+   default dark theme uses for the signature 4px radius. */
+[data-theme="signal"] .zto-card { border-radius: 4px; border-width: 1px; }
+[data-theme="signal"] .zto-btn { border-radius: 4px; }
+[data-theme="signal"] .zto-btn-sm { border-radius: 4px; }
+[data-theme="signal"] .zto-input { border-radius: 4px; }
+[data-theme="signal"] .zto-section { padding: 20px; }
+[data-theme="signal"] .zto-badge { border-radius: 2px; letter-spacing: 0.08em; font-family: var(--font-mono); font-size: 11px; }
+[data-theme="signal"] .zto-roster-row { border-radius: 4px; }
+[data-theme="signal"] .zto-glow-edge::before { background: linear-gradient(180deg, var(--signal) 0%, transparent 60%); }
+
+/* The Tailwind dark-theme amber/emerald/red palette doesn't fit
+   Signal — remap the most-used utility classes so the existing
+   pages stay coherent without touching any component file. */
+[data-theme="signal"] .text-amber-400,
+[data-theme="signal"] .text-amber-300,
+[data-theme="signal"] .text-amber-500,
+[data-theme="signal"] .text-yellow-400 {
+  color: var(--signal-bright) !important;
+}
+[data-theme="signal"] .bg-amber-400\/10,
+[data-theme="signal"] .bg-amber-400\/15,
+[data-theme="signal"] .bg-amber-400\/20,
+[data-theme="signal"] .bg-amber-500\/10 {
+  background-color: var(--signal-wash) !important;
+}
+[data-theme="signal"] .border-amber-400\/30,
+[data-theme="signal"] .border-amber-400\/40,
+[data-theme="signal"] .border-amber-500\/30 {
+  border-color: rgba(46, 107, 255, 0.4) !important;
+}
+[data-theme="signal"] .text-emerald-400,
+[data-theme="signal"] .text-emerald-300 { color: var(--success) !important; }
+[data-theme="signal"] .bg-emerald-400\/10,
+[data-theme="signal"] .bg-emerald-500\/10 { background-color: rgba(61, 214, 140, 0.10) !important; }
+[data-theme="signal"] .border-emerald-400\/30,
+[data-theme="signal"] .border-emerald-500\/30 { border-color: rgba(61, 214, 140, 0.30) !important; }
+
+/* Selection picks up the signal accent. */
+[data-theme="signal"] ::selection { background: var(--signal); color: #FFFFFF; }
+
+/* ===== Signal-only utility classes (eyebrow / signal-tag /
+   corner-frame / severity badges). They're available globally so
+   you can use them inside React without theme branching, but
+   they only render their decorative bits under the signal theme
+   to avoid double-decoration on the gold/light themes. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--c-txt-dim);
+}
+.eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--c-gold);
+}
+
+.signal-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-txt);
+  padding: 6px 12px;
+  border: 1px solid var(--c-brand-border);
+  background: var(--c-brand-light);
+  border-radius: 2px;
+}
+.signal-tag.is-accent {
+  color: var(--c-gold-light);
+  border-color: rgba(46, 107, 255, 0.4);
+  background: var(--c-gold-bg);
+}
+
+.corner-frame { position: relative; }
+[data-theme="signal"] .corner-frame::before,
+[data-theme="signal"] .corner-frame::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--signal);
+  pointer-events: none;
+}
+[data-theme="signal"] .corner-frame::before {
+  top: 12px;
+  left: 12px;
+  border-right: none;
+  border-bottom: none;
+}
+[data-theme="signal"] .corner-frame::after {
+  bottom: 12px;
+  right: 12px;
+  border-left: none;
+  border-top: none;
+}
+
+.severity-critical { color: #E8A33D; background: rgba(232,163,61,.10); border: 1px solid rgba(232,163,61,.30); }
+.severity-major    { color: #4FD4E3; background: rgba(79,212,227,.10); border: 1px solid rgba(79,212,227,.30); }
+.severity-minor    { color: #B7BCC9; background: rgba(183,188,201,.08); border: 1px solid rgba(183,188,201,.20); }
+.severity-positive { color: #3DD68C; background: rgba(61,214,140,.10); border: 1px solid rgba(61,214,140,.30); }
+
+/* Subtle dash-flow animation used on signal traces. Gated so other
+   themes don't suddenly grow animated borders. */
+@keyframes ztoSignalDash {
+  to { stroke-dashoffset: -24; }
+}
+[data-theme="signal"] .signal-dash {
+  stroke-dasharray: 4 8;
+  animation: ztoSignalDash 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="signal"] .signal-dash { animation: none; }
 }
