@@ -323,7 +323,10 @@ export default function DataSourcesPage() {
   // Source filters
   const [sourceTypeFilter, setSourceTypeFilter] = useState<string>("all");
   const [sourceCategoryFilter, setSourceCategoryFilter] = useState<string>("all");
+  const [sourceBrandFilter, setSourceBrandFilter] = useState<string>("all");
   const [sourceSearch, setSourceSearch] = useState("");
+  // Group sources by their channel (default) or by the brand they belong to.
+  const [sourceGroupBy, setSourceGroupBy] = useState<"channel" | "brand">("channel");
 
   // Form state
   const [formData, setFormData] = useState({ ...defaultFormData });
@@ -969,24 +972,47 @@ export default function DataSourcesPage() {
   const filteredSources = sources.filter((s) => {
     if (sourceTypeFilter !== "all" && s.type !== sourceTypeFilter) return false;
     if (sourceCategoryFilter !== "all" && s.category !== sourceCategoryFilter) return false;
+    if (sourceBrandFilter !== "all") {
+      // "none" = unassigned bucket
+      const brandKey = s.brandId ?? "none";
+      if (sourceBrandFilter !== brandKey) return false;
+    }
     if (sourceSearch) {
       const q = sourceSearch.toLowerCase();
-      return s.name.toLowerCase().includes(q) || s.url.toLowerCase().includes(q);
+      const brand = s.brandId ? brandById.get(s.brandId)?.name?.toLowerCase() ?? "" : "";
+      return (
+        s.name.toLowerCase().includes(q) ||
+        s.url.toLowerCase().includes(q) ||
+        brand.includes(q)
+      );
     }
     return true;
   });
 
-  // Group filtered sources by type for display
-  const sourcesByType: Record<string, DataSource[]> = {};
+  // Group filtered sources by the active grouping mode.
+  // Brand keys are the brand id ("__none__" for unassigned) so the section
+  // header can resolve a name + colour even when the brand id changes.
+  const NO_BRAND = "__none__";
+  const sourcesGrouped: Record<string, DataSource[]> = {};
   for (const s of filteredSources) {
-    if (!sourcesByType[s.type]) sourcesByType[s.type] = [];
-    sourcesByType[s.type].push(s);
+    const key = sourceGroupBy === "brand" ? (s.brandId ?? NO_BRAND) : s.type;
+    if (!sourcesGrouped[key]) sourcesGrouped[key] = [];
+    sourcesGrouped[key].push(s);
   }
 
   // Type counts for filter badges (from unfiltered sources)
   const typeCounts: Record<string, number> = {};
   for (const s of sources) {
     typeCounts[s.type] = (typeCounts[s.type] || 0) + 1;
+  }
+
+  // Brand counts (from unfiltered sources) — drives the brand pill list.
+  // "none" tallies sources with no brand assigned so the user can still
+  // see and clean them up.
+  const brandCounts: Record<string, number> = {};
+  for (const s of sources) {
+    const k = s.brandId ?? "none";
+    brandCounts[k] = (brandCounts[k] || 0) + 1;
   }
 
   /* ───────── Filtered articles ───────── */
@@ -1371,6 +1397,25 @@ export default function DataSourcesPage() {
                 })}
               </div>
 
+              {/* Brand filter */}
+              <div className="zto-select-wrap min-w-[150px]">
+                <select
+                  className="zto-input text-xs"
+                  value={sourceBrandFilter}
+                  onChange={(e) => setSourceBrandFilter(e.target.value)}
+                >
+                  <option value="all">كل العلامات</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({brandCounts[b.id] ?? 0})
+                    </option>
+                  ))}
+                  {(brandCounts.none ?? 0) > 0 && (
+                    <option value="none">— بلا علامة — ({brandCounts.none})</option>
+                  )}
+                </select>
+              </div>
+
               {/* Category filter */}
               <div className="zto-select-wrap min-w-[130px]">
                 <select
@@ -1383,6 +1428,26 @@ export default function DataSourcesPage() {
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Group-by toggle — channel vs brand */}
+              <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden" title="طريقة التجميع">
+                <button
+                  onClick={() => setSourceGroupBy("channel")}
+                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                    sourceGroupBy === "channel" ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  حسب القناة
+                </button>
+                <button
+                  onClick={() => setSourceGroupBy("brand")}
+                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                    sourceGroupBy === "brand" ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  حسب العلامة
+                </button>
               </div>
 
               {/* Search */}
@@ -1426,6 +1491,23 @@ export default function DataSourcesPage() {
               <p className="text-neutral-600 text-xs mb-4">
                 {sources.length === 0 ? "أضف مصدرا جديدا للبدء في جمع الأخبار" : "جرب تغيير معايير الفلترة"}
               </p>
+              {sources.length > 0 &&
+                (sourceTypeFilter !== "all" ||
+                  sourceCategoryFilter !== "all" ||
+                  sourceBrandFilter !== "all" ||
+                  sourceSearch) && (
+                  <button
+                    onClick={() => {
+                      setSourceTypeFilter("all");
+                      setSourceCategoryFilter("all");
+                      setSourceBrandFilter("all");
+                      setSourceSearch("");
+                    }}
+                    className="zto-btn zto-btn-outline zto-btn-sm"
+                  >
+                    مسح الفلتر
+                  </button>
+                )}
               {sources.length === 0 && user?.role === "admin" && (
                 <button onClick={() => setShowModal(true)} className="zto-btn zto-btn-gold">
                   <Plus className="w-4 h-4" />
@@ -1435,18 +1517,47 @@ export default function DataSourcesPage() {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Render grouped by type */}
-              {Object.entries(sourcesByType).map(([type, typeSources]) => {
-                const st = getSourceType(type);
-                const TypeIcon = st.icon;
+              {/* Render grouped by the active mode (channel | brand). Brand
+                  groups sort by name; the unassigned bucket is pushed last. */}
+              {Object.entries(sourcesGrouped)
+                .sort(([a], [b]) => {
+                  if (sourceGroupBy !== "brand") return 0;
+                  if (a === NO_BRAND) return 1;
+                  if (b === NO_BRAND) return -1;
+                  const an = brandById.get(a)?.name ?? "";
+                  const bn = brandById.get(b)?.name ?? "";
+                  return an.localeCompare(bn);
+                })
+                .map(([key, typeSources]) => {
+                // Resolve a header label + icon depending on the grouping.
+                let headerLabel: string;
+                let HeaderIcon: typeof Building2;
+                let iconBg = "bg-neutral-700/20";
+                let iconColor = "text-neutral-400";
+                if (sourceGroupBy === "brand") {
+                  HeaderIcon = Building2;
+                  if (key === NO_BRAND) {
+                    headerLabel = "بدون علامة";
+                  } else {
+                    headerLabel = brandById.get(key)?.name ?? "علامة محذوفة";
+                    iconBg = "bg-amber-400/10";
+                    iconColor = "text-amber-400";
+                  }
+                } else {
+                  const st = getSourceType(key);
+                  HeaderIcon = st.icon;
+                  iconBg = st.bg;
+                  iconColor = st.color;
+                  headerLabel = st.label;
+                }
                 return (
-                  <div key={type}>
+                  <div key={key}>
                     {/* Group header */}
                     <div className="flex items-center gap-2 mb-3">
-                      <div className={`w-7 h-7 rounded-md flex items-center justify-center ${st.bg}`}>
-                        <TypeIcon className={`w-4 h-4 ${st.color}`} />
+                      <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconBg}`}>
+                        <HeaderIcon className={`w-4 h-4 ${iconColor}`} />
                       </div>
-                      <h3 className="text-sm font-black text-white">{st.label}</h3>
+                      <h3 className="text-sm font-black text-white">{headerLabel}</h3>
                       <span className="text-xs text-neutral-500">{typeSources.length} مصدر</span>
                     </div>
 
