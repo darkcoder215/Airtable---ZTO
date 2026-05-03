@@ -17,7 +17,7 @@ import {
   getFilterHistory,
   resolveFilterAgentForSource,
   runFilterAgent,
-  passSetsFromFilterResult,
+  resolvePassedFromFilterResult,
   SourceValidationError,
   VALID_SOURCE_TYPES,
   type SourceType,
@@ -335,19 +335,16 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          const { passedUrls, passedTitles } = passSetsFromFilterResult(result.parsed);
-          const decisions = sample.map((a) => {
-            const t = a.title.trim();
-            const passed =
-              (a.url && passedUrls.has(a.url)) ||
-              passedTitles.some(
-                (p) =>
-                  p.length > 10 &&
-                  (t.toLowerCase().includes(p.toLowerCase()) ||
-                    p.toLowerCase().includes(t.toLowerCase()))
-              );
-            return { title: a.title, url: a.url, passed: !!passed };
-          });
+          const { passedIndices, reasonByIndex } = resolvePassedFromFilterResult(
+            result.parsed,
+            sample.length
+          );
+          const decisions = sample.map((a, i) => ({
+            title: a.title,
+            url: a.url,
+            passed: passedIndices.has(i),
+            reason: reasonByIndex.get(i) ?? "",
+          }));
 
           logger.info(
             `Filter-agent test "${spec.agentName}" — ${decisions.filter((d) => d.passed).length}/${decisions.length} passed`,
@@ -357,7 +354,7 @@ export async function POST(request: NextRequest) {
               model: spec.model,
               total: decisions.length,
               passed: decisions.filter((d) => d.passed).length,
-              investmentRelated: result.parsed.Investment_related,
+              decisionCount: result.parsed.decisions.length,
             },
             user.id
           );

@@ -18,9 +18,10 @@ export const DESTINATION_BASE_ID = "appIpXIFs2yxyxaUm";
 // default preserves prior behaviour while still letting the admin override.
 export const DEFAULT_TABLE_NAME = "Apify - Websites";
 
-// Shared token list across types. Backed by FetchedArticle, which currently
-// has the same shape for every source type — keep this aligned with
-// readToken() below.
+// Base tokens (always available for every source type). Backed by
+// FetchedArticle. Per-channel engagement counters are exposed as
+// `engagement.<key>` tokens (see ENGAGEMENT_TOKENS_* below) — those resolve
+// against article.engagement at apply time and are validated by name.
 export const ARTICLE_TOKENS = [
   "title",
   "description",
@@ -32,7 +33,10 @@ export const ARTICLE_TOKENS = [
   "categories",
   "imageUrl",
 ] as const;
-export type ArticleToken = (typeof ARTICLE_TOKENS)[number];
+type BaseArticleToken = (typeof ARTICLE_TOKENS)[number];
+// Loose string so "engagement.likeCount" etc. also fit through the type
+// system. Validation happens against the per-type whitelist at sanitize time.
+export type ArticleToken = string;
 
 // Per-source-type field metadata. The underlying FetchedArticle shape is
 // shared, but each source populates a different subset and uses different
@@ -72,7 +76,19 @@ const META_TWITTER: TokenMeta[] = [
   { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب التغريدة من قِبَلنا",                    populated: true  },
   { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الحساب)",                populated: true  },
   { token: "categories",   label: "الفئات",        description: "ثابت = [\"twitter\"] — يدلّ على المنصّة فقط",   populated: false },
-  { token: "imageUrl",     label: "رابط الصورة",   description: "غير مُستخرَج للتغريدات حالياً",                 populated: false },
+  { token: "imageUrl",     label: "صورة التغريدة", description: "أول صورة في التغريدة أو صورة الحساب",          populated: true  },
+  // X-specific engagement metadata captured into article.engagement.
+  { token: "engagement.tweetId",       label: "معرّف التغريدة",     description: "ID فريد للتغريدة (يصلح مفتاحاً ثانوياً)",          populated: true  },
+  { token: "engagement.authorHandle",  label: "@الحساب",            description: "@username لصاحب التغريدة",                          populated: true  },
+  { token: "engagement.authorAvatar",  label: "صورة الحساب",        description: "رابط صورة الملف الشخصي",                          populated: true  },
+  { token: "engagement.likeCount",     label: "عدد الإعجابات",     description: "likeCount من Apify",                              populated: true  },
+  { token: "engagement.retweetCount",  label: "إعادات النشر",       description: "retweetCount",                                     populated: true  },
+  { token: "engagement.replyCount",    label: "عدد الردود",         description: "replyCount",                                       populated: true  },
+  { token: "engagement.quoteCount",    label: "اقتباسات",           description: "quoteCount",                                       populated: true  },
+  { token: "engagement.bookmarkCount", label: "حفظات",              description: "bookmarkCount",                                    populated: true  },
+  { token: "engagement.viewCount",     label: "مشاهدات",            description: "viewCount (قد تكون 0 إن لم تُرجَع)",              populated: false },
+  { token: "engagement.isRetweet",     label: "هل هي إعادة نشر؟",   description: "true / false — مفيد لعزل المحتوى الأصلي",        populated: true  },
+  { token: "engagement.isQuote",       label: "هل هي اقتباس؟",      description: "true / false",                                     populated: true  },
 ];
 
 const META_LINKEDIN: TokenMeta[] = [
@@ -85,6 +101,18 @@ const META_LINKEDIN: TokenMeta[] = [
   { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الصفحة/الحساب)",         populated: true  },
   { token: "categories",   label: "الفئات",        description: "[\"linkedin\", النوع] — مثلاً [\"linkedin\", \"image\"]", populated: true  },
   { token: "imageUrl",     label: "رابط الصورة",   description: "أول صورة من المنشور أو غلاف الفيديو",            populated: true  },
+  // LinkedIn-specific engagement / author metadata.
+  { token: "engagement.postUrn",                 label: "URN المنشور",          description: "urn:li:activity:... (مفتاح ثانوي ثابت)",  populated: true  },
+  { token: "engagement.postType",                label: "نوع المنشور",          description: "image / linkedinVideo / article / ...",  populated: true  },
+  { token: "engagement.authorType",              label: "نوع الحساب",           description: "Person / Company",                       populated: true  },
+  { token: "engagement.authorProfileId",         label: "معرّف الحساب",         description: "السلاج المختصر للحساب",                  populated: true  },
+  { token: "engagement.authorProfileUrl",        label: "رابط الحساب",          description: "رابط الصفحة الكاملة",                    populated: true  },
+  { token: "engagement.authorAvatar",            label: "صورة الحساب",          description: "صورة العرض/الشعار",                      populated: true  },
+  { token: "engagement.authorFollowersCount",    label: "متابعو الحساب",        description: "كنص (قد يحتوي فاصلة آلاف)",            populated: true  },
+  { token: "engagement.numLikes",                label: "إعجابات",              description: "numLikes",                                populated: true  },
+  { token: "engagement.numComments",             label: "تعليقات",              description: "numComments",                             populated: true  },
+  { token: "engagement.numShares",               label: "مشاركات",              description: "numShares",                               populated: true  },
+  { token: "engagement.numImpressions",          label: "ظهور",                 description: "numImpressions (قد تكون null)",           populated: false },
 ];
 
 export const ARTICLE_TOKEN_META_BY_TYPE: Record<SourceType, TokenMeta[]> = {
@@ -162,8 +190,23 @@ export const DEFAULT_PER_TYPE_MAPPING: PerTypeMapping = {
   linkedin: DEFAULT_LINKEDIN,
 };
 
+// Master list of every token name we accept across types. Used by the
+// sanitiser to validate `field` / `fallback` references on save.
+const ALL_KNOWN_TOKENS = new Set<string>([
+  ...ARTICLE_TOKENS,
+  ...META_TWITTER.map((m) => m.token),
+  ...META_LINKEDIN.map((m) => m.token),
+]);
+
 function readToken(article: FetchedArticle, token: ArticleToken): string {
-  switch (token) {
+  // Engagement-bag accessor: "engagement.<key>" → article.engagement[key].
+  if (token.startsWith("engagement.")) {
+    const key = token.slice("engagement.".length);
+    const v = article.engagement?.[key];
+    if (v == null) return "";
+    return String(v);
+  }
+  switch (token as BaseArticleToken) {
     case "title":
       return article.title ?? "";
     case "description":
@@ -208,10 +251,10 @@ function sanitizeTypeMapping(raw: unknown): TypeMapping {
         out[colName.trim()] = { type: "literal", value: v.slice(0, 4000) };
       } else if (entry.type === "field") {
         const f = entry.field;
-        if (typeof f !== "string" || !ARTICLE_TOKENS.includes(f as ArticleToken)) continue;
+        if (typeof f !== "string" || !ALL_KNOWN_TOKENS.has(f)) continue;
         const fb = entry.fallback;
         const fbSafe =
-          typeof fb === "string" && ARTICLE_TOKENS.includes(fb as ArticleToken)
+          typeof fb === "string" && ALL_KNOWN_TOKENS.has(fb)
             ? (fb as ArticleToken)
             : undefined;
         out[colName.trim()] = { type: "field", field: f as ArticleToken, fallback: fbSafe };

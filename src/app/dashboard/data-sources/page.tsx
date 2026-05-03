@@ -61,6 +61,12 @@ interface Article {
   // Free-form tags from the feed (not the editorial category).
   categories?: string[];
   publishedAt: string;
+  fetchedAt?: string;
+  imageUrl?: string;
+  // Per-channel engagement bag (X likes/retweets/..., LinkedIn shares/likes/...).
+  // Maps directly to the `engagement.<key>` mapping tokens so the side panel can
+  // show realistic preview values.
+  engagement?: Record<string, string | number | boolean | null>;
   savedToAirtable?: boolean;
 }
 
@@ -1944,7 +1950,20 @@ export default function DataSourcesPage() {
                     key={article.id}
                     className="zto-card p-5 hover:border-neutral-700 transition-colors"
                   >
-                    <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-start gap-3 mb-2">
+                      {article.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={article.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          className="w-12 h-12 rounded-md object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      ) : null}
                       <h3 className="font-bold text-sm text-white line-clamp-2 flex-1">
                         {article.title}
                       </h3>
@@ -2239,21 +2258,32 @@ export default function DataSourcesPage() {
           articles[0];
         const sampleValueFor = (token: string): string => {
           if (!sampleArticle) return "";
+          if (token.startsWith("engagement.")) {
+            const key = token.slice("engagement.".length);
+            const v = sampleArticle.engagement?.[key];
+            return v == null ? "" : String(v);
+          }
           switch (token) {
             case "title": return sampleArticle.title ?? "";
             case "description": return (sampleArticle.description ?? "").slice(0, 200);
             case "url": return sampleArticle.url ?? "";
             case "author": return sampleArticle.author ?? "";
             case "publishedAt": return sampleArticle.publishedAt ?? "";
-            case "fetchedAt": return ""; // not exposed on the article shape on the client
+            case "fetchedAt": return sampleArticle.fetchedAt ?? "";
             case "sourceName": return sampleArticle.sourceName ?? "";
             case "categories":
               return Array.isArray(sampleArticle.categories)
                 ? sampleArticle.categories.join(", ")
                 : "";
-            case "imageUrl": return ""; // also not on the trimmed client shape
+            case "imageUrl": return sampleArticle.imageUrl ?? "";
             default: return "";
           }
+        };
+        const looksLikeImageUrl = (s: string): boolean => {
+          if (!s) return false;
+          if (!/^https?:\/\//i.test(s)) return false;
+          return /\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(s) ||
+            /pbs\.twimg\.com|licdn\.com|gravatar\.com/i.test(s);
         };
 
         return (
@@ -2614,9 +2644,28 @@ export default function DataSourcesPage() {
                             </p>
                           )}
                           {sample && meta.populated && (
-                            <p className="text-[0.6rem] text-neutral-300 mt-0.5 break-words line-clamp-1 bg-[#0d0d0d] border border-neutral-800 rounded px-1.5 py-0.5" dir="auto">
-                              {sample}
-                            </p>
+                            looksLikeImageUrl(sample) ? (
+                              <div className="mt-1 flex items-center gap-2 bg-[#0d0d0d] border border-neutral-800 rounded px-1.5 py-1">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={sample}
+                                  alt=""
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  className="w-8 h-8 rounded object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                                <span className="text-[0.6rem] text-neutral-400 truncate" dir="ltr">
+                                  {sample}
+                                </span>
+                              </div>
+                            ) : (
+                              <p className="text-[0.6rem] text-neutral-300 mt-0.5 break-words line-clamp-1 bg-[#0d0d0d] border border-neutral-800 rounded px-1.5 py-0.5" dir="auto">
+                                {sample}
+                              </p>
+                            )
                           )}
                         </div>
                       );
@@ -3080,8 +3129,22 @@ TechCrunch | https://techcrunch.com/feed
                         {testItems.map((item, idx) => (
                           <div
                             key={idx}
-                            className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3"
+                            className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 flex items-start gap-3"
                           >
+                            {item.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.imageUrl}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="w-10 h-10 rounded object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : null}
+                            <div className="flex-1 min-w-0">
                             <p className="text-xs font-bold text-white line-clamp-2 leading-snug">
                               {item.title || "بدون عنوان"}
                             </p>
@@ -3108,6 +3171,7 @@ TechCrunch | https://techcrunch.com/feed
                                   {formatDate(item.publishedAt)}
                                 </span>
                               )}
+                            </div>
                             </div>
                           </div>
                         ))}

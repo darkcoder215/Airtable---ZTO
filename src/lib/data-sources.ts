@@ -274,6 +274,12 @@ export interface FetchedArticle {
   imageUrl?: string;
   isInvestmentRelated: boolean;
   savedToAirtable?: boolean;
+  // Per-channel engagement / metadata. X populates retweetCount / likeCount /
+  // replyCount / quoteCount / bookmarkCount / isRetweet / isQuote / authorHandle.
+  // LinkedIn populates numShares / numLikes / numComments / numImpressions /
+  // authorType / authorFollowersCount / authorProfileUrl / authorProfilePicture.
+  // Stored in scraper_articles.raw and surfaced as mapping tokens.
+  engagement?: Record<string, string | number | boolean | null>;
 }
 
 export interface FilterResult {
@@ -285,7 +291,9 @@ export interface FilterResult {
   passedArticles: number;
   rejectedArticles: number;
   model: string;
-  articles: { title: string; url: string; passed: boolean }[];
+  // `reason` is the per-item justification the filter agent returned (new
+  // generic schema). Kept optional so historical runs without it still parse.
+  articles: { title: string; url: string; passed: boolean; reason?: string }[];
   rawResponse?: string;
 }
 
@@ -293,6 +301,8 @@ interface ArticleRaw {
   categories?: unknown;
   imageUrl?: unknown;
   externalId?: unknown;
+  // Channel-specific metadata (X / LinkedIn engagement counters etc.).
+  engagement?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +328,17 @@ function mapSource(r: SourceRow): DataSource {
 
 function mapArticle(r: ArticleRow, sourceName?: string): FetchedArticle {
   const raw = (r.raw ?? {}) as ArticleRaw;
+  // engagement is a free-form { string: scalar } map. We accept whatever's
+  // there but coerce types so the consumer never gets a surprise object.
+  let engagement: FetchedArticle["engagement"];
+  if (raw.engagement && typeof raw.engagement === "object" && !Array.isArray(raw.engagement)) {
+    engagement = {};
+    for (const [k, v] of Object.entries(raw.engagement as Record<string, unknown>)) {
+      if (v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        engagement[k] = v as string | number | boolean | null;
+      }
+    }
+  }
   return {
     id: r.id,
     sourceId: r.source_id,
@@ -334,6 +355,7 @@ function mapArticle(r: ArticleRow, sourceName?: string): FetchedArticle {
     imageUrl: typeof raw.imageUrl === "string" ? raw.imageUrl : undefined,
     isInvestmentRelated: !!r.is_investment_related,
     savedToAirtable: r.saved_to_airtable,
+    engagement,
   };
 }
 
@@ -632,12 +654,13 @@ export async function getFilterHistory(): Promise<FilterResult[]> {
 // runs). Kept identical to the historical hard-coded behaviour.
 const AI_FILTER_FALLBACK_MODEL = "openai/gpt-4o-mini";
 
-const AI_FILTER_FALLBACK_PROMPT = `You're an agent that analyzes the titles of some news and ONLY OUTPUTS JSON ONLY. Just analyze the title of the news and output whether it's related to startups & rounds of investments of startups or not. If you have multiple titles, extract the ones that have to do with startups & funding and remove the rest. Don't tweak anything in them, keep them as is with the headline & the link. Output them within the json as news with the value being the news and then the link leading to each. Stack all the news in the 2nd key as a paragraph where an empty row in between each news and its corresponding link. Don't create a collection.
-
-Your output is the following key with values either "yes" or "no".
-
-Investment_related:
-News:`;
+// Criterion-only fallback prompt. Output formatting is appended automatically
+// by buildSystemPrompt(), so admin-authored agents can focus entirely on
+// "what to keep" in their own language.
+const AI_FILTER_FALLBACK_PROMPT = `CRITERION:
+Keep an item only if it is about a startup funding round, investment, fundraise, acquisition, IPO, or VC deal — anywhere in the world.
+Reject anything else (general industry news, opinion pieces, hires, product launches without a funding angle, lifestyle, sports, etc.).
+Be strict: when in doubt, mark "no". Reasons should be in the original language of the item.`;
 
 export interface FilterAgentSpec {
   agentId: string | null;
@@ -704,28 +727,45 @@ export async function resolveFilterAgentForSource(
   return FILTER_AGENT_FALLBACK;
 }
 
-// OpenRouter structured-outputs schema. strict=true so the model can't
-// return extra keys or wrong types — drastically simpler downstream parsing
-// than the old "match any JSON-ish blob" heuristics.
+// Generic per-item decision schema. The agent's prompt describes the
+// criterion in any language / any domain — the engine handles structured
+// output parsing. Each input item gets one decision so we can show the
+// admin exactly why an item passed or was dropped.
 const AI_FILTER_RESPONSE_SCHEMA = {
-  name: "investment_filter",
+  name: "filter_decisions",
   strict: true,
   schema: {
     type: "object",
     properties: {
-      Investment_related: {
-        type: "string",
-        enum: ["yes", "no"],
+      decisions: {
+        type: "array",
         description:
-          "Set to 'yes' if any of the supplied titles are about a startup funding round, investment, or fundraise. Otherwise 'no'.",
-      },
-      News: {
-        type: "string",
-        description:
-          "When Investment_related is 'yes', list ONLY the qualifying titles followed by their link. Each entry separated by a blank line. Keep titles verbatim, never invent links. When Investment_related is 'no', return an empty string.",
+          "One entry per input item, in the SAME order the items were given.",
+        items: {
+          type: "object",
+          properties: {
+            index: {
+              type: "integer",
+              description: "0-based index of the input item this decision is about.",
+            },
+            keep: {
+              type: "string",
+              enum: ["yes", "no"],
+              description:
+                "'yes' if the item matches the criterion in the system prompt, otherwise 'no'.",
+            },
+            reason: {
+              type: "string",
+              description:
+                "Short justification (≤140 chars) for the decision, in the original language of the item.",
+            },
+          },
+          required: ["index", "keep", "reason"],
+          additionalProperties: false,
+        },
       },
     },
-    required: ["Investment_related", "News"],
+    required: ["decisions"],
     additionalProperties: false,
   },
 } as const;
@@ -736,34 +776,59 @@ interface OpenRouterChoice {
 interface OpenRouterError {
   error?: { message?: string };
 }
-interface AIFilterParsed {
-  Investment_related: "yes" | "no";
-  News: string;
+
+export interface FilterDecision {
+  index: number;
+  keep: "yes" | "no";
+  reason: string;
+}
+export interface AIFilterParsed {
+  decisions: FilterDecision[];
+}
+
+// Wrapper appended to every agent's prompt. The agent author writes the
+// criterion in whatever language / format they like; this section instructs
+// the model how to format its output regardless. Strict-mode JSON schema
+// makes this a belt + suspenders.
+function buildSystemPrompt(criterion: string): string {
+  const tail = `
+
+— OUTPUT FORMAT (DO NOT IGNORE) —
+You will receive a numbered list of items (titles + links). For EACH item,
+output one decision object: { index, keep ("yes"|"no"), reason }.
+"keep" = "yes" only when the item matches the CRITERION above.
+"reason" is a short justification in the item's original language.
+Return strict JSON: { "decisions": [...] }. Do not add any other text.`;
+  return `${criterion.trim()}\n${tail}`;
 }
 
 function parseStrictFilterResponse(raw: string): AIFilterParsed | null {
   if (!raw) return null;
-  // strict mode usually returns clean JSON, but some providers prefix/suffix
-  // whitespace or markdown fences. Strip a single fence if present.
   const trimmed = raw
     .trim()
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/, "")
     .trim();
   try {
-    const parsed = JSON.parse(trimmed);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      (parsed.Investment_related === "yes" || parsed.Investment_related === "no") &&
-      typeof parsed.News === "string"
-    ) {
-      return parsed as AIFilterParsed;
+    const parsed = JSON.parse(trimmed) as { decisions?: unknown };
+    if (!parsed || typeof parsed !== "object") return null;
+    const arr = parsed.decisions;
+    if (!Array.isArray(arr)) return null;
+    const decisions: FilterDecision[] = [];
+    for (const d of arr) {
+      if (!d || typeof d !== "object") continue;
+      const o = d as Record<string, unknown>;
+      const index = typeof o.index === "number" ? o.index : Number(o.index);
+      const keep = o.keep === "yes" ? "yes" : o.keep === "no" ? "no" : null;
+      const reason = typeof o.reason === "string" ? o.reason.slice(0, 280) : "";
+      if (!Number.isFinite(index) || !keep) continue;
+      decisions.push({ index, keep, reason });
     }
+    if (decisions.length === 0) return null;
+    return { decisions };
   } catch {
-    // fall through
+    return null;
   }
-  return null;
 }
 
 async function persistFilterRun(args: {
@@ -771,7 +836,7 @@ async function persistFilterRun(args: {
   sourceName: string;
   total: number;
   passed: number;
-  articles: { title: string; url: string; passed: boolean }[];
+  articles: { title: string; url: string; passed: boolean; reason?: string }[];
   rawResponse?: string;
   model?: string;
 }): Promise<FilterResult> {
@@ -816,8 +881,9 @@ export async function runFilterAgent(
       error: "OPENROUTER_API_KEY not configured",
     };
   }
+  // 0-based index because the response schema's `index` is 0-based.
   const userMessage = articles
-    .map((a, i) => `${i + 1}. ${a.title}\nLink: ${a.url}`)
+    .map((a, i) => `[${i}] ${a.title}\nURL: ${a.url}`)
     .join("\n\n");
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -831,7 +897,9 @@ export async function runFilterAgent(
       body: JSON.stringify({
         model: spec.model,
         messages: [
-          { role: "system", content: spec.systemPrompt },
+          // Auto-wrap the agent's prompt with output-format instructions so
+          // the agent author only writes the criterion (in any language).
+          { role: "system", content: buildSystemPrompt(spec.systemPrompt) },
           { role: "user", content: userMessage },
         ],
         temperature: spec.temperature,
@@ -873,26 +941,24 @@ export async function runFilterAgent(
   }
 }
 
-// Build the (titles, urls) sets that pass an investment-filter response.
-// Public so the test endpoint can reuse the matching logic on a sample.
-export function passSetsFromFilterResult(parsed: AIFilterParsed | null): {
-  passedUrls: Set<string>;
-  passedTitles: string[];
-} {
-  const passedUrls = new Set<string>();
-  const passedTitles: string[] = [];
-  if (!parsed || parsed.Investment_related !== "yes" || !parsed.News) {
-    return { passedUrls, passedTitles };
+// Resolve a parsed filter result against the original input batch.
+// Returns:
+//   passedIndices  — indices the agent said keep="yes"
+//   reasonByIndex  — short justification per index for logging / UI
+// The caller maps indices back to the actual articles.
+export function resolvePassedFromFilterResult(
+  parsed: AIFilterParsed | null,
+  totalItems: number
+): { passedIndices: Set<number>; reasonByIndex: Map<number, string> } {
+  const passedIndices = new Set<number>();
+  const reasonByIndex = new Map<number, string>();
+  if (!parsed) return { passedIndices, reasonByIndex };
+  for (const d of parsed.decisions) {
+    if (!Number.isInteger(d.index) || d.index < 0 || d.index >= totalItems) continue;
+    if (d.keep === "yes") passedIndices.add(d.index);
+    if (d.reason) reasonByIndex.set(d.index, d.reason);
   }
-  const urlMatches = parsed.News.match(/https?:\/\/[^\s"<>)]+/g) ?? [];
-  for (const u of urlMatches) {
-    passedUrls.add(u.replace(/[.,;:)]+$/, ""));
-  }
-  for (const line of parsed.News.split(/\r?\n/)) {
-    const t = line.trim();
-    if (t && !/^https?:\/\//i.test(t)) passedTitles.push(t);
-  }
-  return { passedUrls, passedTitles };
+  return { passedIndices, reasonByIndex };
 }
 
 // Run the article batch through the OpenRouter investment-relevance filter.
@@ -985,26 +1051,28 @@ export async function filterArticlesWithAI(
     return { passed: articles, filterResult };
   }
 
-  // Match every fetched article against what the model returned. URL match
-  // wins; otherwise fall back to substring on the title.
-  const { passedUrls, passedTitles } = passSetsFromFilterResult(result.parsed);
+  // The new schema gives us a per-item decision indexed against the input
+  // batch, so the matching loop is just an index lookup.
+  const { passedIndices, reasonByIndex } = resolvePassedFromFilterResult(
+    result.parsed,
+    articles.length
+  );
   const passed: FetchedArticle[] = [];
   const articleResults: FilterResult["articles"] = [];
-  for (const article of articles) {
-    const titleNorm = article.title.trim();
-    const isRelevant =
-      passedUrls.has(article.url) ||
-      passedTitles.some(
-        (t) =>
-          t.length > 10 &&
-          (titleNorm.toLowerCase().includes(t.toLowerCase()) ||
-            t.toLowerCase().includes(titleNorm.toLowerCase()))
-      );
+  for (let i = 0; i < articles.length; i++) {
+    const article = articles[i];
+    const isRelevant = passedIndices.has(i);
+    const reason = reasonByIndex.get(i);
     if (isRelevant) {
       article.isInvestmentRelated = true;
       passed.push(article);
     }
-    articleResults.push({ title: article.title, url: article.url, passed: isRelevant });
+    articleResults.push({
+      title: article.title,
+      url: article.url,
+      passed: isRelevant,
+      reason,
+    } as FilterResult["articles"][number]);
   }
 
   logger.info(
@@ -1018,7 +1086,7 @@ export async function filterArticlesWithAI(
       model: resolvedSpec.model,
       total: articles.length,
       passed: passed.length,
-      investmentRelated: result.parsed.Investment_related,
+      decisionCount: result.parsed.decisions.length,
     }
   );
 
@@ -1193,12 +1261,25 @@ export function getApifyToken(): string | null {
 }
 
 interface ApifyTweet {
-  author?: { name?: string; userName?: string };
+  id?: string;
+  author?: { name?: string; userName?: string; profilePicture?: string };
   fullText?: string;
   text?: string;
   createdAt?: string;
   twitterUrl?: string;
   url?: string;
+  // Engagement counters and flags.
+  retweetCount?: number;
+  replyCount?: number;
+  likeCount?: number;
+  quoteCount?: number;
+  bookmarkCount?: number;
+  viewCount?: number;
+  isRetweet?: boolean;
+  isQuote?: boolean;
+  // Inline media — first image's URL is what we want for thumbnails.
+  media?: Array<{ media_url_https?: string; type?: string }>;
+  extendedEntities?: { media?: Array<{ media_url_https?: string; type?: string }> };
 }
 
 export async function fetchApifyTwitter(
@@ -1236,6 +1317,11 @@ export async function fetchApifyTwitter(
     const articles: FetchedArticle[] = tweets.map((tweet) => {
       const text = tweet.fullText || tweet.text || "";
       const authorName = tweet.author?.name || tweet.author?.userName || sourceName;
+      const handle = tweet.author?.userName ? `@${tweet.author.userName}` : "";
+      // First inline image (if any) becomes the thumbnail.
+      const firstMedia =
+        tweet.extendedEntities?.media?.find((m) => m?.media_url_https)?.media_url_https ??
+        tweet.media?.find((m) => m?.media_url_https)?.media_url_https;
       return {
         id: `transient-${Math.random().toString(36).slice(2, 10)}`,
         sourceId,
@@ -1247,8 +1333,22 @@ export async function fetchApifyTwitter(
         publishedAt: tweet.createdAt ? new Date(tweet.createdAt).toISOString() : now,
         fetchedAt: now,
         categories: ["twitter"],
+        imageUrl: firstMedia ?? tweet.author?.profilePicture,
         isInvestmentRelated: false,
         savedToAirtable: false,
+        engagement: {
+          tweetId: tweet.id ?? null,
+          authorHandle: handle,
+          authorAvatar: tweet.author?.profilePicture ?? null,
+          retweetCount: tweet.retweetCount ?? 0,
+          replyCount: tweet.replyCount ?? 0,
+          likeCount: tweet.likeCount ?? 0,
+          quoteCount: tweet.quoteCount ?? 0,
+          bookmarkCount: tweet.bookmarkCount ?? 0,
+          viewCount: tweet.viewCount ?? 0,
+          isRetweet: !!tweet.isRetweet,
+          isQuote: !!tweet.isQuote,
+        },
       };
     });
     return { articles };
@@ -1292,8 +1392,21 @@ interface LinkedInPost {
   postedAtTimestamp?: number;
   authorName?: string;
   authorProfileUrl?: string;
+  authorProfilePicture?: string;
+  authorType?: string;
+  authorProfileId?: string;
+  authorUrn?: string;
+  authorFollowersCount?: string | number;
   author?: LinkedInAuthor;
   linkedinVideo?: { videoPlayMetadata?: LinkedInVideoMetadata };
+  // Engagement counters Apify returns.
+  numShares?: number;
+  numLikes?: number;
+  numComments?: number;
+  numImpressions?: number | null;
+  canReact?: boolean;
+  canPostComments?: boolean;
+  canShare?: boolean;
 }
 
 function pickLinkedInImage(post: LinkedInPost): string | undefined {
@@ -1405,9 +1518,25 @@ export async function fetchApifyLinkedIn(
           publishedAt,
           fetchedAt: now,
           categories: ["linkedin", post.type ?? "post"].filter(Boolean) as string[],
-          imageUrl: pickLinkedInImage(post),
+          imageUrl: pickLinkedInImage(post) ?? post.authorProfilePicture,
           isInvestmentRelated: false,
           savedToAirtable: false,
+          engagement: {
+            postUrn: post.urn ?? null,
+            postType: post.type ?? "post",
+            authorType: post.authorType ?? null,
+            authorProfileId: post.authorProfileId ?? null,
+            authorProfileUrl: post.authorProfileUrl ?? null,
+            authorAvatar: post.authorProfilePicture ?? null,
+            authorFollowersCount: post.authorFollowersCount ?? null,
+            numShares: post.numShares ?? 0,
+            numLikes: post.numLikes ?? 0,
+            numComments: post.numComments ?? 0,
+            numImpressions: post.numImpressions ?? null,
+            canReact: post.canReact ?? null,
+            canShare: post.canShare ?? null,
+            canComment: post.canPostComments ?? null,
+          },
         };
       });
     return { articles };
@@ -1508,6 +1637,7 @@ async function persistArticles(
     raw: {
       categories: a.categories,
       imageUrl: a.imageUrl ?? null,
+      engagement: a.engagement ?? null,
     } as unknown as Database["public"]["Tables"]["scraper_articles"]["Insert"]["raw"],
   }));
   const { data, error } = await sb
