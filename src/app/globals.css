@@ -21,6 +21,33 @@
   src: url('/fonts/TintaArabic-Bold.otf') format('opentype');
 }
 
+/* Naveid Arabic DEMO — three discrete weights (Thin / Regular /
+   ExtraBold). We split the weight ranges so 100-300 picks Thin, 400-600
+   picks Regular, 700-900 picks ExtraBold. Used by the gold ZTO themes
+   (dark + light) for a more contemporary Arabic display face than the
+   default Noto Kufi. */
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 100 300;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-Thin.otf') format('opentype');
+}
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-Regular.otf') format('opentype');
+}
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-ExtraBold.otf') format('opentype');
+}
+
 /* ============================================================
    Tailwind theme tokens — these stay in @theme so utilities
    like bg-brand and text-gold work. Default values match the
@@ -48,7 +75,10 @@
   --color-err-bg: var(--c-err-bg);
   --color-info: var(--c-info);
   --color-info-bg: var(--c-info-bg);
-  --font-sans: 'Noto Kufi Arabic', system-ui, sans-serif;
+  /* Default font stack — used by both ZTO gold themes. Naveid Arabic
+     leads for the contemporary display feel; Noto Kufi is the safe
+     fallback while Naveid loads (and for any glyph it doesn't cover). */
+  --font-sans: 'Naveid Arabic', 'Noto Kufi Arabic', system-ui, sans-serif;
 }
 
 /* ============================================================

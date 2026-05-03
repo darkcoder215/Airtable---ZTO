@@ -37,6 +37,24 @@ export default function RootLayout({
           type="font/otf"
           crossOrigin="anonymous"
         />
+        {/* Naveid Arabic — paired with the ZTO gold themes (dark + light).
+            Two weights preloaded (Regular + ExtraBold) — enough to cover
+            body and bold display without blocking on Thin, which is only
+            used in a few hero headers. */}
+        <link
+          rel="preload"
+          href="/fonts/NaveidArabicDEMO-Regular.otf"
+          as="font"
+          type="font/otf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/NaveidArabicDEMO-ExtraBold.otf"
+          as="font"
+          type="font/otf"
+          crossOrigin="anonymous"
+        />
         {/* Bootstrap the saved theme synchronously to avoid a flash on
             first paint. We allow all four valid theme keys; anything else
             falls back to the dark default. */}
