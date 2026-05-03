@@ -19,6 +19,13 @@ import {
   ChevronRight,
   Layers,
   ListTodo,
+  Settings,
+  Download,
+  X,
+  RotateCcw,
+  Eye,
+  EyeOff,
+  ArrowUpDown,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import PageGuide from "@/components/PageGuide";
@@ -105,6 +112,76 @@ function pct(n: number, d: number): number {
   return Math.round((n / d) * 100);
 }
 
+/* ───────── User preferences ─────────
+   Everything here is persisted to localStorage under a single key, so admins'
+   customisations survive reloads and don't need a server round-trip. The API
+   returns enough per-task detail (dueAt, table, status) that the heavy work
+   — sorting, filtering, bucketing — can all happen client-side. */
+
+type RosterSort = "name" | "total" | "overdue" | "completion" | "dueSoon";
+type SortDir = "asc" | "desc";
+type GroupBy = "department" | "role" | "manager" | "none";
+type Density = "compact" | "comfortable";
+type SoonWindow = 3 | 7 | 14 | 30;
+
+interface ViewPrefs {
+  rosterSort: RosterSort;
+  sortDir: SortDir;
+  groupBy: GroupBy;
+  density: Density;
+  hideEmpty: boolean;
+  soonWindow: SoonWindow;
+  showStatTiles: boolean;
+  showPerTable: boolean;
+  showUpcoming: boolean;
+  showOverdue: boolean;
+  showProfileMeta: boolean;
+  showCompletionRing: boolean;
+  // Empty array == include every detected table.
+  tableAllowList: string[];
+}
+
+const DEFAULT_PREFS: ViewPrefs = {
+  rosterSort: "overdue",
+  sortDir: "desc",
+  groupBy: "department",
+  density: "comfortable",
+  hideEmpty: false,
+  soonWindow: 7,
+  showStatTiles: true,
+  showPerTable: true,
+  showUpcoming: true,
+  showOverdue: true,
+  showProfileMeta: true,
+  showCompletionRing: true,
+  tableAllowList: [],
+};
+
+const PREFS_KEY = "zto-views-prefs:v1";
+
+function loadPrefs(): ViewPrefs {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY);
+    if (!raw) return DEFAULT_PREFS;
+    const parsed = JSON.parse(raw) as Partial<ViewPrefs>;
+    // Whitelist merge — drop anything we don't recognise so prefs from a
+    // future build never crash an older one.
+    return { ...DEFAULT_PREFS, ...parsed };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+function savePrefs(p: ViewPrefs): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  } catch {
+    // Storage quota / private mode — ignore.
+  }
+}
+
 /* ───────── Component ───────── */
 
 export default function DashboardsAndViewsPage() {
@@ -116,6 +193,24 @@ export default function DashboardsAndViewsPage() {
   const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [prefs, setPrefs] = useState<ViewPrefs>(DEFAULT_PREFS);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Hydrate prefs once on mount so SSR doesn't render mismatched markup.
+  useEffect(() => {
+    setPrefs(loadPrefs());
+  }, []);
+  const updatePrefs = (patch: Partial<ViewPrefs>) => {
+    setPrefs((cur) => {
+      const next = { ...cur, ...patch };
+      savePrefs(next);
+      return next;
+    });
+  };
+  const resetPrefs = () => {
+    setPrefs(DEFAULT_PREFS);
+    savePrefs(DEFAULT_PREFS);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -142,9 +237,6 @@ export default function DashboardsAndViewsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Group roster by department when at least one member has one set;
-  // otherwise keep a single "all" group so the layout doesn't shift for
-  // bases that don't track departments.
   const allDepartments = useMemo(() => {
     const set = new Set<string>();
     for (const s of summaries) if (s.member.department) set.add(s.member.department);
@@ -152,10 +244,66 @@ export default function DashboardsAndViewsPage() {
   }, [summaries]);
   const [departmentFilter, setDepartmentFilter] = useState<string>("");
 
+  // Tables we've actually seen across all members — drives the table-filter
+  // chooser inside the settings drawer.
+  const allTables = useMemo(() => {
+    const map = new Map<string, string>(); // tableId -> tableName
+    for (const s of summaries) for (const t of s.perTable) map.set(t.tableId, t.tableName);
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [summaries]);
+
+  // Effective allow-list: empty array means "include everything", which is
+  // simpler for the toggles inside the drawer.
+  const tableAllowSet = useMemo(() => {
+    if (prefs.tableAllowList.length === 0) return null;
+    return new Set(prefs.tableAllowList);
+  }, [prefs.tableAllowList]);
+
+  // Recompute totals against the active table allowlist + soonWindow so the
+  // user sees their settings reflected immediately. We work off the existing
+  // perTable + upcoming/overdue arrays the API already returns — the API's
+  // 7-day "soon" window stays as the maximum, and we trim down on the client
+  // when the admin picks 3 days.
+  const adjustedSummaries = useMemo(() => {
+    const soonMs = prefs.soonWindow * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    return summaries.map((s) => {
+      const perTable = tableAllowSet
+        ? s.perTable.filter((t) => tableAllowSet.has(t.tableId))
+        : s.perTable;
+      const totals: BucketCounts = perTable.reduce(
+        (acc, t) => ({
+          total: acc.total + t.counts.total,
+          done: acc.done + t.counts.done,
+          inProgress: acc.inProgress + t.counts.inProgress,
+          overdue: acc.overdue + t.counts.overdue,
+          dueSoon: acc.dueSoon + t.counts.dueSoon,
+        }),
+        { total: 0, done: 0, inProgress: 0, overdue: 0, dueSoon: 0 }
+      );
+      // Re-bucket upcoming items against the configured window. Items past
+      // the window become "later", which we drop from the upcoming card.
+      const upcoming = s.upcoming.filter((it) => {
+        if (tableAllowSet && !allTables.find((t) => t.name === it.table && tableAllowSet.has(t.id))) return false;
+        if (!it.dueAt) return true;
+        const t = Date.parse(it.dueAt);
+        if (!Number.isFinite(t)) return true;
+        return t - now <= soonMs;
+      });
+      const overdue = s.overdue.filter((it) => {
+        if (tableAllowSet && !allTables.find((t) => t.name === it.table && tableAllowSet.has(t.id))) return false;
+        return true;
+      });
+      return { ...s, totals, perTable, upcoming, overdue };
+    });
+  }, [summaries, prefs.soonWindow, tableAllowSet, allTables]);
+
   const filteredSummaries = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return summaries.filter((s) => {
+    let out = adjustedSummaries.filter((s) => {
       if (departmentFilter && s.member.department !== departmentFilter) return false;
+      if (prefs.hideEmpty && s.totals.total === 0) return false;
       if (!q) return true;
       return (
         s.member.name.toLowerCase().includes(q) ||
@@ -164,29 +312,56 @@ export default function DashboardsAndViewsPage() {
         (s.member.department?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [summaries, search, departmentFilter]);
 
-  // Group filtered summaries by department for the roster sidebar.
-  const summariesByDepartment = useMemo(() => {
-    const groups = new Map<string, typeof filteredSummaries>();
+    // Sort. The "completion" sort treats members with no work as 0 % so they
+    // bunch at the bottom in desc mode (felt right when testing).
+    const dir = prefs.sortDir === "asc" ? 1 : -1;
+    out = [...out].sort((a, b) => {
+      let av: number | string;
+      let bv: number | string;
+      switch (prefs.rosterSort) {
+        case "name": av = a.member.name; bv = b.member.name; break;
+        case "total": av = a.totals.total; bv = b.totals.total; break;
+        case "overdue": av = a.totals.overdue; bv = b.totals.overdue; break;
+        case "dueSoon": av = a.totals.dueSoon; bv = b.totals.dueSoon; break;
+        case "completion": av = pct(a.totals.done, a.totals.total); bv = pct(b.totals.done, b.totals.total); break;
+      }
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+      return ((av as number) - (bv as number)) * dir;
+    });
+    return out;
+  }, [adjustedSummaries, search, departmentFilter, prefs.hideEmpty, prefs.rosterSort, prefs.sortDir]);
+
+  // Roster grouping — the prefs let admins group by department / role /
+  // manager, or flatten everything into a single list.
+  const groupedRoster = useMemo(() => {
+    if (prefs.groupBy === "none") return [["__none__", filteredSummaries] as const];
     const unassignedKey = "__none__";
+    const groups = new Map<string, typeof filteredSummaries>();
     for (const s of filteredSummaries) {
-      const k = s.member.department ?? unassignedKey;
+      let k: string;
+      if (prefs.groupBy === "department") k = s.member.department ?? unassignedKey;
+      else if (prefs.groupBy === "role") k = s.member.role ?? unassignedKey;
+      else {
+        const mgr = s.member.managerId
+          ? summaries.find((x) => x.member.id === s.member.managerId)?.member.name
+          : null;
+        k = mgr ?? unassignedKey;
+      }
       const arr = groups.get(k) ?? [];
       arr.push(s);
       groups.set(k, arr);
     }
-    // Stable order: alphabetical departments first, "بدون قسم" last.
     return Array.from(groups.entries()).sort(([a], [b]) => {
       if (a === unassignedKey) return 1;
       if (b === unassignedKey) return -1;
       return a.localeCompare(b);
     });
-  }, [filteredSummaries]);
+  }, [filteredSummaries, prefs.groupBy, summaries]);
 
   const overall = useMemo(() => {
     const t: BucketCounts = { total: 0, done: 0, inProgress: 0, overdue: 0, dueSoon: 0 };
-    for (const s of summaries) {
+    for (const s of adjustedSummaries) {
       t.total += s.totals.total;
       t.done += s.totals.done;
       t.inProgress += s.totals.inProgress;
@@ -194,9 +369,46 @@ export default function DashboardsAndViewsPage() {
       t.dueSoon += s.totals.dueSoon;
     }
     return t;
-  }, [summaries]);
+  }, [adjustedSummaries]);
 
-  const active = summaries.find((s) => s.member.id === activeId) ?? filteredSummaries[0];
+  // CSV export of the currently-visible roster — picks up whatever the
+  // sort/filter/groupBy currently show. Safe against commas/quotes in
+  // member fields by quoting every cell unconditionally.
+  const exportCSV = () => {
+    if (filteredSummaries.length === 0) {
+      addToast("لا توجد بيانات لتصديرها", "warning");
+      return;
+    }
+    const headers = ["Name", "Role", "Department", "Email", "Total", "In Progress", "Done", "Overdue", "Due Soon", "Completion %"];
+    const rows = filteredSummaries.map((s) => [
+      s.member.name,
+      s.member.role ?? "",
+      s.member.department ?? "",
+      s.member.email ?? "",
+      String(s.totals.total),
+      String(s.totals.inProgress),
+      String(s.totals.done),
+      String(s.totals.overdue),
+      String(s.totals.dueSoon),
+      `${pct(s.totals.done, s.totals.total)}%`,
+    ]);
+    const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows].map((r) => r.map(escape).join(",")).join("\n");
+    // Prepend BOM so Excel opens it as UTF-8 instead of mangling Arabic.
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `team-dashboard-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    addToast(`تم تصدير ${filteredSummaries.length} سجلّاً`, "success");
+  };
+
+  const active =
+    adjustedSummaries.find((s) => s.member.id === activeId) ?? filteredSummaries[0];
 
   return (
     <div className="space-y-6 zto-fade-in" dir="rtl">
@@ -212,6 +424,23 @@ export default function DashboardsAndViewsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={exportCSV}
+            disabled={loading || filteredSummaries.length === 0}
+            className="zto-btn zto-btn-ghost zto-btn-sm"
+            title="تصدير CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            تصدير
+          </button>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="zto-btn zto-btn-ghost zto-btn-sm"
+            title="إعدادات العرض"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            تخصيص
+          </button>
           <button
             onClick={load}
             disabled={loading}
@@ -288,7 +517,7 @@ export default function DashboardsAndViewsPage() {
       )}
 
       {/* Top stats — overall */}
-      {summaries.length > 0 && (
+      {summaries.length > 0 && prefs.showStatTiles && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatTile
             icon={<Users className="w-4 h-4" />}
@@ -372,30 +601,40 @@ export default function DashboardsAndViewsPage() {
               {filteredSummaries.length === 0 && (
                 <p className="text-xs text-neutral-500 text-center py-6">لا نتائج</p>
               )}
-              {summariesByDepartment.map(([deptKey, list]) => {
-                const isUnassigned = deptKey === "__none__";
+              {groupedRoster.map(([groupKey, list]) => {
+                const isUnassigned = groupKey === "__none__";
+                const showHeader = prefs.groupBy !== "none" && (
+                  prefs.groupBy === "department" ? allDepartments.length > 0 : true
+                );
+                const groupLabel = isUnassigned
+                  ? prefs.groupBy === "manager"
+                    ? "بلا مدير"
+                    : prefs.groupBy === "role"
+                      ? "بلا مسمى وظيفي"
+                      : "بدون قسم"
+                  : groupKey;
                 return (
-                  <div key={deptKey}>
-                    {/* Show the dept header only when we actually detected dept info. */}
-                    {allDepartments.length > 0 && (
+                  <div key={groupKey}>
+                    {showHeader && (
                       <p className="text-[0.55rem] font-black text-neutral-500 uppercase tracking-wider mb-1.5 px-1">
-                        {isUnassigned ? "بدون قسم" : deptKey}
+                        {groupLabel}
                         <span className="text-neutral-700 mr-1">· {list.length}</span>
                       </p>
                     )}
-                    <div className="space-y-1.5">
+                    <div className={prefs.density === "compact" ? "space-y-0.5" : "space-y-1.5"}>
                       {list.map((s) => {
                         const isActive = (active?.member.id ?? "") === s.member.id;
                         const overdue = s.totals.overdue;
+                        const completion = pct(s.totals.done, s.totals.total);
                         return (
                           <button
                             key={s.member.id}
                             onClick={() => setActiveId(s.member.id)}
                             className={`zto-roster-row w-full text-right ${
                               isActive ? "zto-roster-row-active" : ""
-                            }`}
+                            } ${prefs.density === "compact" ? "!py-1" : ""}`}
                           >
-                            <Avatar member={s.member} />
+                            {prefs.density === "comfortable" && <Avatar member={s.member} />}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <p className="text-xs font-bold text-white truncate">{s.member.name}</p>
@@ -405,11 +644,17 @@ export default function DashboardsAndViewsPage() {
                                   </span>
                                 )}
                               </div>
-                              {s.member.role && (
+                              {prefs.density === "comfortable" && s.member.role && (
                                 <p className="text-[0.6rem] text-neutral-500 truncate">{s.member.role}</p>
                               )}
                             </div>
-                            <div className="text-[0.6rem] text-neutral-500 tabular-nums shrink-0">
+                            <div className="text-[0.6rem] text-neutral-500 tabular-nums shrink-0 flex items-center gap-2">
+                              {prefs.rosterSort === "completion" && s.totals.total > 0 && (
+                                <span className="text-emerald-400">{completion}%</span>
+                              )}
+                              {prefs.rosterSort === "dueSoon" && s.totals.dueSoon > 0 && (
+                                <span className="text-purple-400">{s.totals.dueSoon}</span>
+                              )}
                               {s.totals.total}
                             </div>
                             {isActive && <ChevronRight className="w-3 h-3 text-amber-400" />}
@@ -424,7 +669,7 @@ export default function DashboardsAndViewsPage() {
           </div>
 
           {/* Active member dashboard */}
-          {active && <MemberDashboard summary={active} key={active.member.id} />}
+          {active && <MemberDashboard summary={active} prefs={prefs} key={active.member.id} />}
         </div>
       )}
 
@@ -486,6 +731,19 @@ export default function DashboardsAndViewsPage() {
           </div>
         </details>
       )}
+
+      {/* Customisation drawer — fixed-position panel that slides in from the
+          left (RTL ⇒ visually from the leading edge). Backed by localStorage
+          via updatePrefs / resetPrefs so changes persist across reloads. */}
+      {showSettings && (
+        <SettingsDrawer
+          prefs={prefs}
+          allTables={allTables}
+          onChange={updatePrefs}
+          onReset={resetPrefs}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }
@@ -544,57 +802,70 @@ function StatTile({
   );
 }
 
-function MemberDashboard({ summary }: { summary: PerMemberSummary }) {
+function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs: ViewPrefs }) {
   const m = summary.member;
   const completionPct = pct(summary.totals.done, summary.totals.total);
   return (
-    <div className="space-y-4 zto-slide-up">
+    <div className={`zto-slide-up ${prefs.density === "compact" ? "space-y-3" : "space-y-4"}`}>
       {/* Profile header */}
-      <div className="zto-card p-5 zto-glow-edge">
+      <div className={`zto-card zto-glow-edge ${prefs.density === "compact" ? "p-4" : "p-5"}`}>
         <div className="flex items-start gap-4 flex-wrap">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400/40 to-purple-500/40 border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">
+          <div className={`rounded-2xl bg-gradient-to-br from-amber-400/40 to-purple-500/40 border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0 ${
+            prefs.density === "compact" ? "w-10 h-10" : "w-14 h-14"
+          }`}>
             {m.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={m.avatarUrl} alt={m.name} className="w-full h-full object-cover" />
             ) : (
-              <span className="text-base font-black text-white">{initials(m.name)}</span>
+              <span className={`font-black text-white ${prefs.density === "compact" ? "text-xs" : "text-base"}`}>{initials(m.name)}</span>
             )}
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-black text-white">{m.name}</h3>
-            <div className="flex items-center gap-3 flex-wrap text-[0.7rem] text-neutral-400 mt-1">
-              {m.role && (
-                <span className="flex items-center gap-1">
-                  <Briefcase className="w-3 h-3" />
-                  {m.role}
-                </span>
-              )}
-              {m.email && (
-                <span className="flex items-center gap-1" dir="ltr">
-                  <Mail className="w-3 h-3" />
-                  {m.email}
-                </span>
-              )}
-              {!m.role && !m.email && (
-                <span className="text-neutral-600 flex items-center gap-1">
-                  <User className="w-3 h-3" />
-                  بلا تفاصيل إضافية
-                </span>
-              )}
-            </div>
+            {prefs.showProfileMeta && (
+              <div className="flex items-center gap-3 flex-wrap text-[0.7rem] text-neutral-400 mt-1">
+                {m.role && (
+                  <span className="flex items-center gap-1">
+                    <Briefcase className="w-3 h-3" />
+                    {m.role}
+                  </span>
+                )}
+                {m.email && (
+                  <span className="flex items-center gap-1" dir="ltr">
+                    <Mail className="w-3 h-3" />
+                    {m.email}
+                  </span>
+                )}
+                {m.department && (
+                  <span className="flex items-center gap-1">
+                    <Layers className="w-3 h-3" />
+                    {m.department}
+                  </span>
+                )}
+                {!m.role && !m.email && !m.department && (
+                  <span className="text-neutral-600 flex items-center gap-1">
+                    <User className="w-3 h-3" />
+                    بلا تفاصيل إضافية
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           {/* Completion progress ring */}
-          <div className="flex items-center gap-3">
-            <ProgressRing pct={completionPct} />
-            <div className="text-[0.65rem] text-neutral-400">
-              <p className="font-bold text-white text-sm">{completionPct}%</p>
-              <p>مُنجَز من إجمالي العمل</p>
+          {prefs.showCompletionRing && (
+            <div className="flex items-center gap-3">
+              <ProgressRing pct={completionPct} />
+              <div className="text-[0.65rem] text-neutral-400">
+                <p className="font-bold text-white text-sm">{completionPct}%</p>
+                <p>مُنجَز من إجمالي العمل</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* Per-table breakdown */}
+      {prefs.showPerTable && (
       <div>
         <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
           <Layers className="w-3.5 h-3.5" />
@@ -646,23 +917,35 @@ function MemberDashboard({ summary }: { summary: PerMemberSummary }) {
         )}
       </div>
 
+      )}
+
       {/* Overdue + upcoming */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <ListCard
-          title="مهام متأخرة"
-          icon={<AlertTriangle className="w-3.5 h-3.5 text-red-400" />}
-          items={summary.overdue}
-          empty="لا تأخّر — أحسنت!"
-          tone="red"
-        />
-        <ListCard
-          title="قادمة خلال أسبوع"
-          icon={<Clock className="w-3.5 h-3.5 text-purple-400" />}
-          items={summary.upcoming}
-          empty="لا قادم في الأسبوع المقبل"
-          tone="purple"
-        />
-      </div>
+      {(prefs.showOverdue || prefs.showUpcoming) && (
+        <div className={`grid gap-3 ${
+          prefs.showOverdue && prefs.showUpcoming
+            ? "grid-cols-1 md:grid-cols-2"
+            : "grid-cols-1"
+        }`}>
+          {prefs.showOverdue && (
+            <ListCard
+              title="مهام متأخرة"
+              icon={<AlertTriangle className="w-3.5 h-3.5 text-red-400" />}
+              items={summary.overdue}
+              empty="لا تأخّر — أحسنت!"
+              tone="red"
+            />
+          )}
+          {prefs.showUpcoming && (
+            <ListCard
+              title={`قادمة خلال ${prefs.soonWindow === 7 ? "أسبوع" : `${prefs.soonWindow} يوم`}`}
+              icon={<Clock className="w-3.5 h-3.5 text-purple-400" />}
+              items={summary.upcoming}
+              empty="لا قادم في الأفق"
+              tone="purple"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -785,5 +1068,268 @@ function ListCard({
         </div>
       )}
     </div>
+  );
+}
+
+/* ───────── Settings drawer ───────── */
+
+interface DrawerProps {
+  prefs: ViewPrefs;
+  allTables: Array<{ id: string; name: string }>;
+  onChange: (patch: Partial<ViewPrefs>) => void;
+  onReset: () => void;
+  onClose: () => void;
+}
+
+function SettingsDrawer({ prefs, allTables, onChange, onReset, onClose }: DrawerProps) {
+  // Toggle a single table in/out of the allowlist. Empty list == include
+  // all (keeps the drawer's "everything visible" state simple).
+  const toggleTable = (id: string) => {
+    const cur = new Set(prefs.tableAllowList);
+    // First click on an "include all" state → switch to single-include mode
+    // populated with everything except the toggled id.
+    if (cur.size === 0) {
+      const allIds = new Set(allTables.map((t) => t.id));
+      allIds.delete(id);
+      onChange({ tableAllowList: Array.from(allIds) });
+      return;
+    }
+    if (cur.has(id)) cur.delete(id);
+    else cur.add(id);
+    // If the user hides every table, fall back to "show everything" — the
+    // empty state is more useful than an empty dashboard.
+    if (cur.size === 0) onChange({ tableAllowList: [] });
+    else onChange({ tableAllowList: Array.from(cur) });
+  };
+  const includesTable = (id: string) =>
+    prefs.tableAllowList.length === 0 || prefs.tableAllowList.includes(id);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+        onClick={onClose}
+      />
+      {/* Panel — pinned to the leading edge (right side in RTL). */}
+      <aside
+        className="fixed inset-y-0 left-0 w-full sm:w-[420px] bg-[#0d0d0d] border-l border-neutral-800 z-50 overflow-y-auto"
+        dir="rtl"
+      >
+        <div className="sticky top-0 bg-[#0d0d0d] border-b border-neutral-800 p-4 flex items-center justify-between gap-2 z-10">
+          <div className="flex items-center gap-2">
+            <Settings className="w-4 h-4 text-amber-400" />
+            <h3 className="text-sm font-bold text-white">تخصيص العرض</h3>
+          </div>
+          <button onClick={onClose} className="text-neutral-500 hover:text-white" title="إغلاق">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          <DrawerSection title="ترتيب القائمة" icon={<ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />}>
+            <div className="grid grid-cols-2 gap-2">
+              <SegmentedSelect
+                value={prefs.rosterSort}
+                onChange={(v) => onChange({ rosterSort: v as RosterSort })}
+                options={[
+                  { value: "overdue", label: "متأخّرات" },
+                  { value: "total", label: "إجمالي المهام" },
+                  { value: "dueSoon", label: "قريبة الاستحقاق" },
+                  { value: "completion", label: "نسبة الإنجاز" },
+                  { value: "name", label: "الاسم" },
+                ]}
+              />
+              <SegmentedSelect
+                value={prefs.sortDir}
+                onChange={(v) => onChange({ sortDir: v as SortDir })}
+                options={[
+                  { value: "desc", label: "تنازلي" },
+                  { value: "asc", label: "تصاعدي" },
+                ]}
+              />
+            </div>
+          </DrawerSection>
+
+          <DrawerSection title="تجميع الأعضاء" icon={<Layers className="w-3.5 h-3.5 text-purple-400" />}>
+            <SegmentedSelect
+              value={prefs.groupBy}
+              onChange={(v) => onChange({ groupBy: v as GroupBy })}
+              options={[
+                { value: "department", label: "بالقسم" },
+                { value: "role", label: "بالمسمى" },
+                { value: "manager", label: "بالمدير" },
+                { value: "none", label: "بدون تجميع" },
+              ]}
+            />
+          </DrawerSection>
+
+          <DrawerSection title="نافذة «قريبة الاستحقاق»" icon={<Clock className="w-3.5 h-3.5 text-purple-400" />}>
+            <SegmentedSelect
+              value={String(prefs.soonWindow)}
+              onChange={(v) => onChange({ soonWindow: Number(v) as SoonWindow })}
+              options={[
+                { value: "3", label: "3 أيام" },
+                { value: "7", label: "أسبوع" },
+                { value: "14", label: "أسبوعان" },
+                { value: "30", label: "30 يوم" },
+              ]}
+            />
+            <p className="text-[0.6rem] text-neutral-500 mt-2 leading-relaxed">
+              يحدّد ما يظهر في بطاقة «قادمة» وفي بطاقة «قريبة الاستحقاق» الإجمالية.
+              المتأخّرات تبقى متأخّرات بصرف النظر عن هذا الإعداد.
+            </p>
+          </DrawerSection>
+
+          <DrawerSection title="كثافة العرض" icon={<Eye className="w-3.5 h-3.5 text-blue-400" />}>
+            <SegmentedSelect
+              value={prefs.density}
+              onChange={(v) => onChange({ density: v as Density })}
+              options={[
+                { value: "comfortable", label: "مريح" },
+                { value: "compact", label: "مضغوط" },
+              ]}
+            />
+            <p className="text-[0.6rem] text-neutral-500 mt-2 leading-relaxed">
+              في الوضع المضغوط نُخفي الصور الرمزية والمسمى الوظيفي ونقلّص المسافات — مفيد لفِرَق كبيرة (+30 شخصاً).
+            </p>
+          </DrawerSection>
+
+          <DrawerSection title="إظهار/إخفاء" icon={<EyeOff className="w-3.5 h-3.5 text-emerald-400" />}>
+            <Toggle label="إخفاء الأعضاء بلا مهام"  value={prefs.hideEmpty}          onChange={(v) => onChange({ hideEmpty: v })} />
+            <Toggle label="بطاقات الإحصائيات العلوية" value={prefs.showStatTiles}      onChange={(v) => onChange({ showStatTiles: v })} />
+            <Toggle label="معلومات العضو الجانبية"   value={prefs.showProfileMeta}    onChange={(v) => onChange({ showProfileMeta: v })} />
+            <Toggle label="حلقة نسبة الإنجاز"        value={prefs.showCompletionRing} onChange={(v) => onChange({ showCompletionRing: v })} />
+            <Toggle label="توزيع العمل على الجداول"   value={prefs.showPerTable}       onChange={(v) => onChange({ showPerTable: v })} />
+            <Toggle label="بطاقة المهام المتأخّرة"     value={prefs.showOverdue}        onChange={(v) => onChange({ showOverdue: v })} />
+            <Toggle label="بطاقة المهام القادمة"      value={prefs.showUpcoming}       onChange={(v) => onChange({ showUpcoming: v })} />
+          </DrawerSection>
+
+          {allTables.length > 0 && (
+            <DrawerSection title={`الجداول المعروضة (${allTables.length})`} icon={<ListTodo className="w-3.5 h-3.5 text-amber-400" />}>
+              <p className="text-[0.6rem] text-neutral-500 mb-2 leading-relaxed">
+                اختر أيّ الجداول تظهر في إحصائيات الفريق وفي توزيع العمل. إذا أخفيت الكل سيعود العرض تلقائياً للحالة الافتراضية «إظهار الجميع».
+              </p>
+              <div className="space-y-1">
+                {allTables.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => toggleTable(t.id)}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-right transition-colors ${
+                      includesTable(t.id)
+                        ? "bg-amber-400/10 border-amber-400/30 text-amber-200"
+                        : "bg-[#0d0d0d] border-neutral-800 text-neutral-500 hover:border-neutral-700"
+                    }`}
+                  >
+                    {includesTable(t.id) ? (
+                      <Eye className="w-3 h-3 shrink-0" />
+                    ) : (
+                      <EyeOff className="w-3 h-3 shrink-0" />
+                    )}
+                    <span className="text-xs truncate flex-1">{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </DrawerSection>
+          )}
+        </div>
+
+        <div className="sticky bottom-0 bg-[#0d0d0d] border-t border-neutral-800 p-4 flex items-center justify-between gap-2">
+          <button
+            onClick={onReset}
+            className="zto-btn zto-btn-ghost zto-btn-sm"
+            title="استعادة الإعدادات الافتراضية"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            استعادة الافتراضي
+          </button>
+          <button onClick={onClose} className="zto-btn zto-btn-gold zto-btn-sm">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            تم
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function DrawerSection({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[0.65rem] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
+        {icon}
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function SegmentedSelect<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string }>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1 p-0.5 bg-[#1a1a1a] border border-neutral-800 rounded-lg">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value)}
+            className={`text-[0.65rem] py-1.5 px-2 rounded-md transition-colors font-bold ${
+              active
+                ? "bg-amber-400/15 text-amber-200 border border-amber-400/40"
+                : "text-neutral-400 hover:text-neutral-200 border border-transparent"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Toggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md hover:bg-neutral-800/40 transition-colors text-right"
+    >
+      <span className="text-xs text-neutral-300">{label}</span>
+      <span
+        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${
+          value ? "bg-amber-400" : "bg-neutral-800"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+            value ? "right-0.5" : "right-[18px]"
+          }`}
+        />
+      </span>
+    </button>
   );
 }
