@@ -40,6 +40,7 @@ import {
   Columns,
   GripVertical,
   GripHorizontal,
+  RotateCcw,
 } from "lucide-react";
 
 /* ────────── Types ────────── */
@@ -307,6 +308,55 @@ export default function DashboardPage() {
   /* row height */
   const [rowSize, setRowSize] = useState<"compact" | "normal" | "tall">("normal");
   const rowPadding = rowSize === "compact" ? "py-1.5" : rowSize === "tall" ? "py-5" : "py-3";
+
+  /* per-column width (grid view) — px, persisted in localStorage keyed by
+     {baseId}:{tableId}:{fieldId}. Each column gets a default width and a
+     pair of widen/narrow arrows in the header so users can shape the grid
+     to fit the content they care about most. */
+  const COL_DEFAULT = 220;
+  const COL_MIN = 80;
+  const COL_MAX = 720;
+  const COL_STEP = 60;
+  const [gridColWidth, setGridColWidth] = useState<Record<string, number>>({});
+
+  // Hydrate once on mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("zto-grid-col-width");
+      if (raw) setGridColWidth(JSON.parse(raw));
+    } catch {
+      // localStorage may be unavailable — non-fatal
+    }
+  }, []);
+  // Persist on every change.
+  useEffect(() => {
+    try {
+      localStorage.setItem("zto-grid-col-width", JSON.stringify(gridColWidth));
+    } catch {}
+  }, [gridColWidth]);
+
+  const colKey = (fieldId: string) =>
+    `${selectedBase?.id ?? "_"}:${selectedTable?.id ?? "_"}:${fieldId}`;
+  const colWidthOf = (fieldId: string) =>
+    gridColWidth[colKey(fieldId)] ?? COL_DEFAULT;
+  const setColWidth = (fieldId: string, w: number) => {
+    const clamped = Math.max(COL_MIN, Math.min(COL_MAX, w));
+    setGridColWidth((cur) => ({ ...cur, [colKey(fieldId)]: clamped }));
+  };
+  const widenColumn = (fieldId: string) => setColWidth(fieldId, colWidthOf(fieldId) + COL_STEP);
+  const narrowColumn = (fieldId: string) => setColWidth(fieldId, colWidthOf(fieldId) - COL_STEP);
+  const resetAllColumnWidths = () => {
+    if (!selectedBase || !selectedTable) return;
+    const prefix = `${selectedBase.id}:${selectedTable.id}:`;
+    setGridColWidth((cur) => {
+      const next: Record<string, number> = {};
+      for (const [k, v] of Object.entries(cur)) {
+        if (!k.startsWith(prefix)) next[k] = v;
+      }
+      return next;
+    });
+  };
+
 
   /* view mode */
   const [view, setView] = useState<"grid" | "kanban">("grid");
@@ -903,6 +953,15 @@ export default function DashboardPage() {
       )
     : records;
 
+  // Bulk expand/collapse all rows — quick toggle for "show me everything"
+  // vs "show me a clean overview" without manually clicking each chevron.
+  const allRowsExpanded =
+    filteredRecords.length > 0 && filteredRecords.every((r) => expandedRows.has(r.id));
+  const toggleExpandAll = () => {
+    if (allRowsExpanded) setExpandedRows(new Set());
+    else setExpandedRows(new Set(filteredRecords.map((r) => r.id)));
+  };
+
   /* ──────────────────── JSX ──────────────────── */
 
   return (
@@ -1149,6 +1208,28 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {/* Bulk row expand + reset column widths (grid view only) */}
+            {view === "grid" && filteredRecords.length > 0 && (
+              <>
+                <button
+                  onClick={toggleExpandAll}
+                  className="zto-btn zto-btn-ghost zto-btn-sm text-[10px]"
+                  title={allRowsExpanded ? "طي كل الصفوف" : "توسيع كل الصفوف"}
+                >
+                  <Maximize2 className="w-3 h-3" />
+                  {allRowsExpanded ? "طي الكل" : "توسيع الكل"}
+                </button>
+                <button
+                  onClick={resetAllColumnWidths}
+                  className="zto-btn zto-btn-ghost zto-btn-sm text-[10px]"
+                  title="إعادة ضبط عرض الأعمدة"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  ضبط الأعمدة
+                </button>
+              </>
+            )}
+
             <span className="text-[11px] text-neutral-500 font-bold">
               {filteredRecords.length} سجل
             </span>
@@ -1300,14 +1381,35 @@ export default function DashboardPage() {
                   {visibleFields.map((field) => {
                     const Icon = getFieldIcon(field.type);
                     const typeColor = getFieldTypeColor(field.type);
+                    const w = colWidthOf(field.id);
                     return (
                       <th
                         key={field.id}
-                        className="px-4 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r border-neutral-800 whitespace-nowrap"
+                        className="px-4 py-3 text-[11px] font-bold text-neutral-400 text-right border-b-2 border-neutral-700 border-r border-neutral-800"
+                        style={{ width: w, minWidth: w, maxWidth: w }}
                       >
                         <div className="flex items-center gap-1.5">
                           <Icon className={`w-3.5 h-3.5 ${typeColor} shrink-0`} />
-                          <span>{field.name}</span>
+                          <span className="truncate flex-1">{field.name}</span>
+                          {/* Resize controls — small, subtle, click to step */}
+                          <div className="flex items-center opacity-50 hover:opacity-100 transition-opacity shrink-0">
+                            <button
+                              onClick={() => narrowColumn(field.id)}
+                              disabled={w <= COL_MIN}
+                              className="p-0.5 text-neutral-500 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-neutral-500"
+                              title="تصغير العمود"
+                            >
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => widenColumn(field.id)}
+                              disabled={w >= COL_MAX}
+                              className="p-0.5 text-neutral-500 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-neutral-500"
+                              title="توسيع العمود"
+                            >
+                              <ChevronLeft className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       </th>
                     );
@@ -1351,12 +1453,18 @@ export default function DashboardPage() {
                         const isCellExpanded = expandedCell === cellKey;
                         const isReadOnly = READ_ONLY_TYPES.includes(field.type);
                         const cellEditable = canEdit && !isReadOnly;
+                        const cellWidth = colWidthOf(field.id);
                         return (
                           <td
                             key={field.id}
                             className={`px-4 ${rowPadding} text-[13px] border-r border-neutral-700/50 align-top ${
-                              isExpanded || isCellExpanded ? "" : "max-w-[200px]"
-                            } ${cellEditable && !isCellEditing ? "cursor-pointer hover:bg-amber-400/5" : ""}`}
+                              cellEditable && !isCellEditing ? "cursor-pointer hover:bg-amber-400/5" : ""
+                            }`}
+                            style={
+                              isCellExpanded
+                                ? undefined
+                                : { width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth }
+                            }
                             onDoubleClick={() => {
                               if (cellEditable && !isCellEditing) {
                                 startCellEdit(record.id, field.name, record.fields[field.name]);

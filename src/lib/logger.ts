@@ -81,15 +81,25 @@ export const logger = {
     consoleEcho("debug", message, context, details);
     persist("debug", message, context, details, userId);
   },
-  async getLogs(level?: LogLevel, limit = 100): Promise<LogEntry[]> {
+  async getLogs(opts?: {
+    level?: LogLevel;
+    limit?: number;
+    // When true, restrict to logs with a user_id set — i.e. the audit
+    // trail of admin/editor actions taken in the system.
+    actionsOnly?: boolean;
+    // Narrow the audit trail to a specific user.
+    userId?: string;
+  }): Promise<LogEntry[]> {
     if (!isSupabaseConfigured()) return [];
     const sb = getSupabaseAdmin();
     let q = sb
       .from("scraper_logs")
       .select("level, message, context, details, user_id, created_at")
       .order("created_at", { ascending: false })
-      .limit(limit);
-    if (level) q = q.eq("level", level);
+      .limit(opts?.limit ?? 100);
+    if (opts?.level) q = q.eq("level", opts.level);
+    if (opts?.actionsOnly) q = q.not("user_id", "is", null);
+    if (opts?.userId) q = q.eq("user_id", opts.userId);
     const { data, error } = await q;
     if (error) {
       console.error("[logger] getLogs error:", error.message);

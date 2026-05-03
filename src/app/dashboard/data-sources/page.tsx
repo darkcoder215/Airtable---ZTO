@@ -132,6 +132,10 @@ export default function DataSourcesPage() {
 
   const [sources, setSources] = useState<DataSource[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
+  // Currently-expanded article — clicking a card flips this to its id and
+  // reveals the full description + larger image; clicking the open card
+  // again (or another card) closes/swaps it.
+  const [expandedArticleId, setExpandedArticleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingArticles, setLoadingArticles] = useState(false);
   const [fetchingId, setFetchingId] = useState<string | null>(null);
@@ -1819,79 +1823,215 @@ export default function DataSourcesPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredArticles.map((article) => {
                 const cat = getCategoryInfo(articleCategory(article));
+                const isOpen = expandedArticleId === article.id;
                 return (
-                  <div
+                  <article
                     key={article.id}
-                    className="zto-card p-5 hover:border-neutral-700 transition-colors"
+                    className={`zto-card transition-colors overflow-hidden ${
+                      isOpen
+                        ? "md:col-span-2 xl:col-span-3 border-amber-400/40 bg-amber-400/[0.02]"
+                        : "hover:border-neutral-700"
+                    }`}
                   >
-                    <div className="flex items-start gap-3 mb-2">
-                      {article.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={article.imageUrl}
-                          alt=""
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          className="w-12 h-12 rounded-md object-cover bg-neutral-900 border border-neutral-800 shrink-0"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = "none";
-                          }}
+                    {/* Compact header — always rendered, click anywhere to toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedArticleId(isOpen ? null : article.id)}
+                      className="w-full text-right p-5 cursor-pointer"
+                      aria-expanded={isOpen}
+                    >
+                      <div className="flex items-start gap-3 mb-2">
+                        {article.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={article.imageUrl}
+                            alt=""
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            className="w-12 h-12 rounded-md object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                        ) : null}
+                        <h3 className={`font-bold text-sm text-white flex-1 ${isOpen ? "" : "line-clamp-2"}`}>
+                          {article.title}
+                        </h3>
+                        <ChevronDown
+                          className={`w-4 h-4 text-neutral-500 shrink-0 transition-transform ${
+                            isOpen ? "rotate-180 text-amber-400" : ""
+                          }`}
                         />
-                      ) : null}
-                      <h3 className="font-bold text-sm text-white line-clamp-2 flex-1">
-                        {article.title}
-                      </h3>
-                      <a
-                        href={article.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-neutral-500 hover:text-amber-400 transition-colors shrink-0 mr-2"
-                        title="فتح المقال الأصلي"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    </div>
+                      </div>
 
-                    <p className="text-xs text-neutral-400 mb-3 line-clamp-3">
-                      {article.description || "بدون وصف"}
-                    </p>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="zto-badge zto-badge-gold">
-                        {article.sourceName}
-                      </span>
-                      <span className={`zto-badge ${cat.badge}`}>
-                        {cat.label}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-neutral-800">
-                      <p className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDate(article.publishedAt)}
-                      </p>
-                      {article.savedToAirtable ? (
-                        <span className="text-[0.65rem] text-emerald-400 flex items-center gap-1">
-                          <Database className="w-3 h-3" />
-                          محفوظ
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleSaveToDestination(article.id, article.sourceName || "Unknown")}
-                          disabled={savingToDestination === article.id}
-                          className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400"
-                          title="حفظ في الوجهة"
-                        >
-                          {savingToDestination === article.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Database className="w-3 h-3" />
-                          )}
-                          حفظ
-                        </button>
+                      {!isOpen && (
+                        <p className="text-xs text-neutral-400 mb-3 line-clamp-3">
+                          {article.description || "بدون وصف"}
+                        </p>
                       )}
-                    </div>
-                  </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="zto-badge zto-badge-gold">{article.sourceName}</span>
+                        <span className={`zto-badge ${cat.badge}`}>{cat.label}</span>
+                        {article.categories?.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="zto-badge text-[0.55rem] border border-neutral-700 text-neutral-400"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between mt-3 pt-2 border-t border-neutral-800">
+                        <p className="text-[0.65rem] text-neutral-600 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {formatDate(article.publishedAt)}
+                        </p>
+                        {article.savedToAirtable ? (
+                          <span className="text-[0.65rem] text-emerald-400 flex items-center gap-1">
+                            <Database className="w-3 h-3" />
+                            محفوظ
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+
+                    {/* Expanded body — full description, hero image, actions */}
+                    {isOpen && (
+                      <div className="border-t border-neutral-800 bg-[#0a0a0a]">
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-0">
+                          <div className="p-5 space-y-4">
+                            {article.description ? (
+                              <div>
+                                <p className="text-[0.6rem] uppercase tracking-wider text-neutral-500 font-bold mb-1.5">
+                                  المحتوى
+                                </p>
+                                <p
+                                  className="text-sm text-neutral-200 leading-relaxed whitespace-pre-line"
+                                  dir="auto"
+                                >
+                                  {article.description}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-neutral-500 italic">— لا يوجد وصف —</p>
+                            )}
+
+                            {/* Metadata strip */}
+                            <div className="grid grid-cols-2 gap-3 text-[0.65rem]">
+                              {article.author && (
+                                <div>
+                                  <p className="text-neutral-500 font-bold mb-0.5">الكاتب</p>
+                                  <p className="text-neutral-300">{article.author}</p>
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-neutral-500 font-bold mb-0.5">المصدر</p>
+                                <p className="text-neutral-300">{article.sourceName ?? "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-neutral-500 font-bold mb-0.5">تاريخ النشر</p>
+                                <p className="text-neutral-300">{formatDate(article.publishedAt)}</p>
+                              </div>
+                              {article.fetchedAt && (
+                                <div>
+                                  <p className="text-neutral-500 font-bold mb-0.5">وقت الجلب</p>
+                                  <p className="text-neutral-300">{formatDate(article.fetchedAt)}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Engagement stats (X / LinkedIn) */}
+                            {article.engagement && Object.keys(article.engagement).length > 0 && (
+                              <div>
+                                <p className="text-[0.6rem] uppercase tracking-wider text-neutral-500 font-bold mb-1.5">
+                                  مقاييس التفاعل
+                                </p>
+                                <div className="flex items-center flex-wrap gap-1.5">
+                                  {Object.entries(article.engagement)
+                                    .filter(([, v]) => v != null && v !== "" && v !== 0 && v !== false)
+                                    .slice(0, 12)
+                                    .map(([k, v]) => (
+                                      <span
+                                        key={k}
+                                        className="text-[0.6rem] bg-[#1a1a1a] border border-neutral-800 rounded-full px-2 py-0.5"
+                                      >
+                                        <span className="text-neutral-500">{k}:</span>{" "}
+                                        <span className="text-neutral-200">{String(v)}</span>
+                                      </span>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-neutral-800">
+                              {article.url && (
+                                <a
+                                  href={article.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="zto-btn zto-btn-outline zto-btn-sm"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  فتح المقال الأصلي
+                                </a>
+                              )}
+                              {article.savedToAirtable ? (
+                                <span className="zto-btn zto-btn-sm border border-emerald-500/30 !text-emerald-400 cursor-default">
+                                  <Database className="w-3.5 h-3.5" />
+                                  محفوظ في الوجهة
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSaveToDestination(article.id, article.sourceName || "Unknown");
+                                  }}
+                                  disabled={savingToDestination === article.id}
+                                  className="zto-btn zto-btn-gold zto-btn-sm"
+                                >
+                                  {savingToDestination === article.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Database className="w-3.5 h-3.5" />
+                                  )}
+                                  حفظ في الوجهة
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedArticleId(null);
+                                }}
+                                className="zto-btn zto-btn-ghost zto-btn-sm mr-auto"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                طي
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Hero image — fixed-side on md+, full-width on mobile */}
+                          {article.imageUrl && (
+                            <div className="bg-black flex items-center justify-center md:border-r md:border-neutral-800 max-h-[420px] overflow-hidden">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={article.imageUrl}
+                                alt=""
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-contain"
+                                onError={(e) => {
+                                  (e.currentTarget.parentElement as HTMLElement | null)?.style.setProperty("display", "none");
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </article>
                 );
               })}
             </div>
