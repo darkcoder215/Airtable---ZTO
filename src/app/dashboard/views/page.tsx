@@ -55,6 +55,18 @@ interface UpcomingItem {
   status?: string;
   dueAt?: string;
 }
+interface MentionItem {
+  recordId: string;
+  recordUrl: string;
+  title: string;
+  tableId: string;
+  tableName: string;
+  viaField: string;
+  viaKind: "recordLink" | "collaborator" | "textName";
+  status?: string;
+  dueAt?: string;
+  done?: boolean;
+}
 interface PerMemberSummary {
   member: TeamMember;
   totals: BucketCounts;
@@ -66,6 +78,7 @@ interface PerMemberSummary {
   }>;
   upcoming: UpcomingItem[];
   overdue: UpcomingItem[];
+  mentions: MentionItem[];
 }
 interface Diagnostics {
   teamTable: { id: string; name: string } | null;
@@ -135,6 +148,11 @@ interface ViewPrefs {
   showPerTable: boolean;
   showUpcoming: boolean;
   showOverdue: boolean;
+  showMentions: boolean;
+  // Mentions card: hide done records by default so the list focuses on
+  // things still in flight. The toggle in the card itself flips this for
+  // the active session.
+  mentionsHideDone: boolean;
   showProfileMeta: boolean;
   showCompletionRing: boolean;
   // Empty array == include every detected table.
@@ -152,6 +170,8 @@ const DEFAULT_PREFS: ViewPrefs = {
   showPerTable: true,
   showUpcoming: true,
   showOverdue: true,
+  showMentions: true,
+  mentionsHideDone: true,
   showProfileMeta: true,
   showCompletionRing: true,
   tableAllowList: [],
@@ -295,7 +315,10 @@ export default function DashboardsAndViewsPage() {
         if (tableAllowSet && !allTables.find((t) => t.name === it.table && tableAllowSet.has(t.id))) return false;
         return true;
       });
-      return { ...s, totals, perTable, upcoming, overdue };
+      const mentions = tableAllowSet
+        ? s.mentions.filter((it) => tableAllowSet.has(it.tableId))
+        : s.mentions;
+      return { ...s, totals, perTable, upcoming, overdue, mentions };
     });
   }, [summaries, prefs.soonWindow, tableAllowSet, allTables]);
 
@@ -465,9 +488,11 @@ export default function DashboardsAndViewsPage() {
         }
         tips={[
           { title: "اختيار عضو الفريق", body: <>القائمة الجانبية فيها كل أسماء أعضاء الفريق — اختر اسماً لرؤية كل مهامه على اليمين. كرّر يومياً مع كل عضو لمعرفة من يحتاج دعماً.</> },
-          { title: "تحديث البيانات", body: <>اضغط زرّ <span className="text-amber-300 font-bold">«تحديث»</span> لإعادة سحب أحدث المهام من Airtable. التحديث الذاتي يحدث عند فتح الصفحة فقط.</> },
+          { title: "ظهور الشخص في الجداول", body: <>أسفل كل لوحة شخص ستجد بطاقة «ظهور هذا الشخص في الجداول» — تعرض كل سجلّ في القاعدة يذكره (عبر record link، collaborator، أو حقل اسم) مع الحقل الذي يربطه به والحالة وتاريخ الاستحقاق. اضغط أيّ سجلّ لفتحه مباشرةً في Airtable.</> },
+          { title: "تخصيص العرض", body: <>الزرّ <span className="text-amber-300 font-bold">«تخصيص»</span> أعلى يفتح لوحة كاملة لإعدادات الترتيب، التجميع، الكثافة، الجداول المعروضة، ونافذة الاستحقاق. كل التفضيلات تُحفظ في متصفّحك.</> },
+          { title: "تحديث البيانات", body: <>اضغط زرّ <span className="text-amber-300 font-bold">«تحديث»</span> لإعادة سحب أحدث المهام من Airtable. زرّ <span className="text-amber-300 font-bold">«تصدير»</span> يصدّر القائمة الحاليّة إلى CSV.</> },
           { title: "إن لم يظهر الفريق", body: <>تأكّد من وجود جدول <code className="text-amber-400 font-mono">Team</code> في قاعدتك يحوي على الأقل الأعمدة (Name, Email, Role). البطاقة التشخيصية أعلى ستخبرك بالضبط ما الناقص.</> },
-          { title: "ربط المهام بالأعضاء", body: <>كل سجلّ مهمّة في Airtable يجب أن يحوي حقلاً نوعه «Linked record» يشير إلى الجدول Team — هذا الرابط هو ما يجمعها بالشخص المسؤول هنا.</> },
+          { title: "ربط المهام بالأعضاء", body: <>أيّ حقل يربط بالجدول Team (record link / single + multiple collaborator / حتى حقل نصّي اسمه «Owner» أو «Assignee») سيتمّ التقاطه تلقائياً وعرض السجلّات المرتبطة.</> },
         ]}
       />
 
@@ -946,6 +971,13 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
           )}
         </div>
       )}
+
+      {/* Cross-table mentions — every record (across the base) that links to
+          this person, regardless of status/due. Helps an admin answer
+          questions like "where in the base is this person referenced?" */}
+      {prefs.showMentions && (
+        <MentionsCard mentions={summary.mentions} hideDoneDefault={prefs.mentionsHideDone} />
+      )}
     </div>
   );
 }
@@ -1066,6 +1098,185 @@ function ListCard({
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ───────── Mentions card ─────────
+   Shows every record across the base where the member is referenced. The
+   API returns at most 200 entries per member sorted by status (open first)
+   and recency; this component layers an in-card search, a hide-done toggle,
+   and a per-table grouping so a busy person's footprint stays scannable. */
+
+function MentionsCard({
+  mentions,
+  hideDoneDefault,
+}: {
+  mentions: MentionItem[];
+  hideDoneDefault: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [hideDone, setHideDone] = useState(hideDoneDefault);
+  // Reset when prefs flip — the parent re-renders with a new
+  // hideDoneDefault when the admin toggles the pref in the drawer.
+  useEffect(() => setHideDone(hideDoneDefault), [hideDoneDefault]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return mentions.filter((m) => {
+      if (hideDone && m.done) return false;
+      if (!q) return true;
+      return (
+        m.title.toLowerCase().includes(q) ||
+        m.tableName.toLowerCase().includes(q) ||
+        m.viaField.toLowerCase().includes(q) ||
+        (m.status?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [mentions, query, hideDone]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, MentionItem[]>();
+    for (const m of filtered) {
+      const arr = map.get(m.tableId) ?? [];
+      arr.push(m);
+      map.set(m.tableId, arr);
+    }
+    return Array.from(map.entries()).map(([tableId, items]) => ({
+      tableId,
+      tableName: items[0]?.tableName ?? "—",
+      items,
+    })).sort((a, b) => b.items.length - a.items.length);
+  }, [filtered]);
+
+  const doneCount = mentions.filter((m) => m.done).length;
+  const openCount = mentions.length - doneCount;
+
+  return (
+    <div className="zto-card p-4">
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <h4 className="text-xs font-bold text-white flex items-center gap-2">
+          <Search className="w-3.5 h-3.5 text-amber-400" />
+          ظهور هذا الشخص في الجداول
+          <span className="zto-badge text-[0.6rem] border border-amber-500/30 text-amber-300">
+            {filtered.length}/{mentions.length}
+          </span>
+        </h4>
+        {doneCount > 0 && (
+          <button
+            onClick={() => setHideDone(!hideDone)}
+            className={`text-[0.6rem] flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${
+              hideDone
+                ? "bg-amber-400/10 border-amber-400/30 text-amber-300"
+                : "border-neutral-800 text-neutral-400 hover:border-neutral-700"
+            }`}
+            title={hideDone ? "إظهار المنجَز" : "إخفاء المنجَز"}
+          >
+            {hideDone ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            {hideDone ? `إخفاء المنجَز (${doneCount})` : `إظهار الكل (${openCount} مفتوح، ${doneCount} منجَز)`}
+          </button>
+        )}
+      </div>
+
+      {mentions.length === 0 ? (
+        <div className="text-center py-6">
+          <Inbox className="w-6 h-6 text-neutral-700 mx-auto mb-1.5" />
+          <p className="text-xs text-neutral-500">لم يُذكر هذا الشخص في أيّ سجل آخر</p>
+        </div>
+      ) : (
+        <>
+          <div className="relative mb-3">
+            <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="بحث في العناوين/الجداول/الحالات/الحقول..."
+              className="zto-input text-xs"
+              style={{ paddingInlineStart: "2.5rem" }}
+            />
+          </div>
+
+          {grouped.length === 0 ? (
+            <p className="text-xs text-neutral-500 text-center py-4">
+              لا نتائج للبحث
+            </p>
+          ) : (
+            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+              {grouped.map((g) => (
+                <div key={g.tableId}>
+                  <p className="text-[0.6rem] font-black text-neutral-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Layers className="w-3 h-3" />
+                    {g.tableName}
+                    <span className="text-neutral-700 mr-1">· {g.items.length}</span>
+                  </p>
+                  <div className="space-y-1">
+                    {g.items.map((it) => (
+                      <a
+                        key={`${it.tableId}-${it.recordId}-${it.viaField}`}
+                        href={it.recordUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-800/40 transition-colors group"
+                        title={`فتح في Airtable — ${it.recordUrl}`}
+                      >
+                        <span
+                          className={`w-1 self-stretch rounded-full ${
+                            it.done
+                              ? "bg-emerald-500/40"
+                              : it.status
+                                ? "bg-blue-500/60"
+                                : "bg-neutral-600"
+                          }`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-white font-medium line-clamp-1 group-hover:text-amber-300 transition-colors">
+                            {it.title}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-[0.6rem] text-neutral-500 mt-0.5 flex-wrap">
+                            <span className="flex items-center gap-1">
+                              <span className="text-neutral-600">عبر</span>
+                              <code className="text-purple-400 font-mono">{it.viaField}</code>
+                            </span>
+                            {it.viaKind !== "recordLink" && (
+                              <span className="text-[0.55rem] text-neutral-600 font-mono">
+                                [{it.viaKind === "collaborator" ? "متعاون" : "اسم"}]
+                              </span>
+                            )}
+                            {it.status && (
+                              <>
+                                <span className="text-neutral-700">·</span>
+                                <span className={it.done ? "text-emerald-400" : "text-blue-400"}>
+                                  {it.status}
+                                </span>
+                              </>
+                            )}
+                            {it.dueAt && (
+                              <>
+                                <span className="text-neutral-700">·</span>
+                                <span>{relativeDate(it.dueAt)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-neutral-600 group-hover:text-amber-300 transition-colors text-[0.55rem] shrink-0 mt-0.5">
+                          ↗
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {mentions.length >= 200 && (
+            <p className="text-[0.55rem] text-neutral-600 mt-2 text-center">
+              تمّ عرض أوّل 200 سجلّ — افتح في Airtable للاطّلاع على البقيّة.
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -1203,6 +1414,8 @@ function SettingsDrawer({ prefs, allTables, onChange, onReset, onClose }: Drawer
             <Toggle label="توزيع العمل على الجداول"   value={prefs.showPerTable}       onChange={(v) => onChange({ showPerTable: v })} />
             <Toggle label="بطاقة المهام المتأخّرة"     value={prefs.showOverdue}        onChange={(v) => onChange({ showOverdue: v })} />
             <Toggle label="بطاقة المهام القادمة"      value={prefs.showUpcoming}       onChange={(v) => onChange({ showUpcoming: v })} />
+            <Toggle label="ظهور الشخص في كل الجداول"  value={prefs.showMentions}       onChange={(v) => onChange({ showMentions: v })} />
+            <Toggle label="إخفاء المنجَز افتراضياً"     value={prefs.mentionsHideDone}   onChange={(v) => onChange({ mentionsHideDone: v })} />
           </DrawerSection>
 
           {allTables.length > 0 && (

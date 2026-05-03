@@ -40,6 +40,9 @@ const MANAGER_FIELD_CANDIDATES = ["Manager", "Reports To", "Reports to", "Superv
 // listRecords already; we just cap the page count we'll walk.
 const MAX_PAGES_PER_TABLE = 5;
 const PAGE_SIZE = 100;
+// Cap on the per-member "mentions" list so a heavy contributor doesn't
+// produce a 5MB payload. The UI surfaces a "+N more" hint when truncated.
+const MAX_MENTIONS_PER_MEMBER = 200;
 // Status terms (case-insensitive) we treat as "done" so they don't count
 // toward overdue / open backlog.
 const DONE_TERMS = new Set([
@@ -78,6 +81,24 @@ interface UpcomingItem {
   dueAt?: string; // ISO
 }
 
+// "Mention" = any record (in any non-Team table) that references this team
+// member, via record-link, collaborator, or assignee-name text field. Unlike
+// upcoming/overdue, mentions are NOT filtered by status or due date — they
+// are the full footprint of the person across the base, capped server-side
+// to keep payload size bounded.
+interface MentionItem {
+  recordId: string;
+  recordUrl: string; // deep link to the Airtable record
+  title: string;
+  tableId: string;
+  tableName: string;
+  viaField: string; // e.g. "Owner", "Reviewer", "Assignee"
+  viaKind: "recordLink" | "collaborator" | "textName";
+  status?: string;
+  dueAt?: string;
+  done?: boolean;
+}
+
 interface PerMemberSummary {
   member: TeamMember;
   totals: BucketCounts;
@@ -89,6 +110,9 @@ interface PerMemberSummary {
   }>;
   upcoming: UpcomingItem[];
   overdue: UpcomingItem[];
+  // All records (across all linked tables) that reference this member.
+  // Capped server-side; the UI groups + searches client-side.
+  mentions: MentionItem[];
 }
 
 interface TeamLink {
@@ -322,6 +346,7 @@ export async function GET(request: NextRequest) {
       perTable: [],
       upcoming: [],
       overdue: [],
+      mentions: [],
     }));
     const summaryById = new Map(summaries.map((s) => [s.member.id, s]));
 
@@ -413,15 +438,34 @@ export async function GET(request: NextRequest) {
           // Roll up upcoming / overdue items at the per-member level.
           const summary = summaryById.get(memberId);
           if (summary) {
+            const title = pickPrimaryName(rec, primary?.name);
             const item: UpcomingItem = {
               recordId: rec.id,
-              title: pickPrimaryName(rec, primary?.name),
+              title,
               table: link.table.name,
               status,
               dueAt: due,
             };
             if (overdue && summary.overdue.length < 30) summary.overdue.push(item);
             else if (dueSoon && summary.upcoming.length < 30) summary.upcoming.push(item);
+
+            // Capture every mention regardless of status/due. Capped at
+            // MAX_MENTIONS_PER_MEMBER so a single high-volume member
+            // doesn't blow the response size.
+            if (summary.mentions.length < MAX_MENTIONS_PER_MEMBER) {
+              summary.mentions.push({
+                recordId: rec.id,
+                recordUrl: `https://airtable.com/${DESTINATION_BASE_ID}/${link.table.id}/${rec.id}`,
+                title,
+                tableId: link.table.id,
+                tableName: link.table.name,
+                viaField: link.linkField.name,
+                viaKind: link.kind,
+                status,
+                dueAt: due,
+                done,
+              });
+            }
           }
         }
       }
@@ -459,6 +503,14 @@ export async function GET(request: NextRequest) {
       );
       // Sort tables by total work, descending.
       s.perTable.sort((a, b) => b.counts.total - a.counts.total);
+      // Mentions: open items first (newest-due first), then done at the
+      // bottom. Items with no due date sort to the end of their group.
+      s.mentions.sort((a, b) => {
+        if ((a.done ? 1 : 0) !== (b.done ? 1 : 0)) {
+          return (a.done ? 1 : 0) - (b.done ? 1 : 0);
+        }
+        return (b.dueAt ?? "0000").localeCompare(a.dueAt ?? "0000");
+      });
     }
 
     logger.info(
