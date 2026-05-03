@@ -15,9 +15,12 @@ export const dynamic = "force-dynamic";
 const IMAGE_MODEL = "google/gemini-3-pro-image-preview";
 // Hard ceilings to keep one bad request from torching memory.
 const MAX_DATA_URL_BYTES = 8 * 1024 * 1024; // ~8MB per image
-const MAX_TOTAL_INPUT_BYTES = 24 * 1024 * 1024; // total budget across attachments
+const MAX_TOTAL_INPUT_BYTES = 32 * 1024 * 1024; // total budget across attachments
 const MAX_POST_TEXT = 8000;
 const MAX_EDIT_TEXT = 4000;
+const MAX_LOGO_NOTE = 1000;
+const MAX_EXTRA_IMAGES = 2;
+const MAX_EXTRA_NOTE = 800;
 const MAX_HISTORY_TURNS = 8;
 const REQUEST_TIMEOUT_MS = 120_000;
 
@@ -29,11 +32,24 @@ interface HistoryTurn {
   imageUrl?: string;
 }
 
+interface ExtraImage {
+  dataUrl: string;
+  note: string;
+}
+
 interface RequestBody {
   postText?: unknown;
   edits?: unknown;
   logoDataUrl?: unknown;
+  // Optional per-generation note tied to the logo (e.g. "ضع الشعار صغيراً
+  // في الزاوية اليمنى العليا"). Stacked on top of the saved logo's
+  // permanent instructions.
+  logoNote?: unknown;
   referenceDataUrl?: unknown;
+  // Up to 2 accompanying images each with their own intent note. Sent to
+  // the image model so admins can drop in a product photo / portrait /
+  // additional asset and describe how it should be incorporated.
+  extras?: unknown;
   // New: pick a saved logo / template instead of (or in addition to)
   // uploading. The endpoint resolves them to data URLs + instructions
   // server-side so the client doesn't need to fetch first.
@@ -62,6 +78,32 @@ function validateDataUrl(value: unknown, label: string): string | undefined {
     throw new Error(`${label} كبير جداً (الحد الأقصى ~6MB)`);
   }
   return value;
+}
+
+function validateExtras(value: unknown): ExtraImage[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("الصور المرافقة غير صالحة");
+  }
+  if (value.length > MAX_EXTRA_IMAGES) {
+    throw new Error(`الحد الأقصى ${MAX_EXTRA_IMAGES} صور مرافقة`);
+  }
+  const out: ExtraImage[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const v = value[i];
+    if (!v || typeof v !== "object") {
+      throw new Error(`الصورة المرافقة ${i + 1} غير صالحة`);
+    }
+    const obj = v as Record<string, unknown>;
+    const dataUrl = validateDataUrl(obj.dataUrl, `الصورة المرافقة ${i + 1}`);
+    if (!dataUrl) continue; // empty entry — silently drop
+    let note = "";
+    if (typeof obj.note === "string") {
+      note = obj.note.trim().slice(0, MAX_EXTRA_NOTE);
+    }
+    out.push({ dataUrl, note });
+  }
+  return out;
 }
 
 function validateHistory(value: unknown): HistoryTurn[] {
@@ -98,13 +140,18 @@ function buildInitialUser(args: {
   logoDataUrl?: string;
   referenceDataUrl?: string;
   logoInstructions?: string;
+  logoNote?: string;
   templateInstructions?: string;
   templateName?: string;
+  extras: ExtraImage[];
 }): ContentPart[] {
+  const hasLogo = !!args.logoDataUrl;
   const intro = [
-    "Generate a polished social-media post graphic that prominently features the supplied brand logo (kept legible and unaltered).",
-    "The image should visually express the post copy below — readable, professional, on-brand.",
-    "If a reference image is provided, mirror its overall composition, color palette, and visual style — do NOT copy literally.",
+    hasLogo
+      ? "Generate a polished social-media post graphic that prominently features the supplied brand logo (kept legible and unaltered)."
+      : "Generate a polished social-media post graphic that visually expresses the post copy below.",
+    "The image should be readable, professional, on-brand.",
+    "If a reference / template image is provided, mirror its overall composition, color palette, and visual style — do NOT copy literally.",
     "Avoid extra text on the graphic unless the post copy explicitly calls for a headline.",
     "",
     "POST COPY:",
@@ -116,8 +163,23 @@ function buildInitialUser(args: {
   if (args.templateInstructions?.trim()) {
     intro.push("TEMPLATE GUIDANCE:", args.templateInstructions.trim());
   }
-  if (args.logoInstructions?.trim()) {
-    intro.push("", "BRAND LOGO USAGE NOTES:", args.logoInstructions.trim());
+  if (hasLogo) {
+    if (args.logoInstructions?.trim()) {
+      intro.push("", "BRAND LOGO USAGE NOTES:", args.logoInstructions.trim());
+    }
+    if (args.logoNote?.trim()) {
+      intro.push(
+        args.logoInstructions?.trim() ? "" : "",
+        "LOGO PLACEMENT NOTE FOR THIS GENERATION:",
+        args.logoNote.trim()
+      );
+    }
+  }
+  if (args.extras.length > 0) {
+    intro.push(
+      "",
+      `${args.extras.length} accompanying image(s) are attached below with admin notes — they MUST be incorporated into the final composition exactly as the notes describe (placement, scale, treatment, masking). Do not omit them.`
+    );
   }
   if (args.edits.trim()) {
     intro.push("", "ADDITIONAL CUSTOMIZATIONS:", args.edits.trim());
@@ -131,6 +193,15 @@ function buildInitialUser(args: {
     parts.push({ type: "text", text: "Style reference (match the look & feel, not the literal subject):" });
     parts.push({ type: "image_url", image_url: { url: args.referenceDataUrl } });
   }
+  args.extras.forEach((ex, i) => {
+    parts.push({
+      type: "text",
+      text: `Accompanying image ${i + 1}${
+        ex.note ? ` — placement/treatment: ${ex.note}` : ""
+      }:`,
+    });
+    parts.push({ type: "image_url", image_url: { url: ex.dataUrl } });
+  });
   return parts;
 }
 
@@ -179,7 +250,9 @@ export async function POST(request: NextRequest) {
   let postText: string;
   let edits = "";
   let logoDataUrl: string | undefined;
+  let logoNote = "";
   let referenceDataUrl: string | undefined;
+  let extras: ExtraImage[] = [];
   let history: HistoryTurn[] = [];
   let aspectRatio = "1:1";
   let imageSize = "2K";
@@ -218,9 +291,15 @@ export async function POST(request: NextRequest) {
       const uploaded = validateDataUrl(body.logoDataUrl, "الشعار");
       if (uploaded) logoDataUrl = uploaded;
     }
-    if (!logoDataUrl) {
-      throw new Error("الشعار مطلوب — اختر شعاراً محفوظاً أو ارفع واحداً جديداً");
+
+    if (typeof body.logoNote === "string") {
+      if (body.logoNote.length > MAX_LOGO_NOTE) {
+        throw new Error(`ملاحظة الشعار طويلة جداً (الحد ${MAX_LOGO_NOTE} حرف)`);
+      }
+      logoNote = body.logoNote.trim();
     }
+
+    extras = validateExtras(body.extras);
 
     if (typeof body.templateId === "string" && body.templateId) {
       const tpl = await getTemplate(body.templateId);
@@ -238,6 +317,12 @@ export async function POST(request: NextRequest) {
       if (uploaded) referenceDataUrl = uploaded;
     }
 
+    // Either a logo or a template/reference is required — both being
+    // missing leaves the model with nothing to anchor the design.
+    if (!logoDataUrl && !referenceDataUrl) {
+      throw new Error("اختر شعاراً أو قالباً (أو كليهما) قبل التوليد");
+    }
+
     history = validateHistory(body.history);
 
     if (typeof body.aspectRatio === "string" && ALLOWED_ASPECT.has(body.aspectRatio)) {
@@ -250,6 +335,7 @@ export async function POST(request: NextRequest) {
     const totalInputBytes =
       (logoDataUrl?.length ?? 0) +
       (referenceDataUrl?.length ?? 0) +
+      extras.reduce((acc, e) => acc + e.dataUrl.length, 0) +
       history.reduce((acc, t) => acc + (t.imageUrl?.length ?? 0), 0);
     if (totalInputBytes > MAX_TOTAL_INPUT_BYTES) {
       throw new Error("حجم المدخلات يتجاوز الحد المسموح");
@@ -266,10 +352,12 @@ export async function POST(request: NextRequest) {
         postText,
         edits,
         logoDataUrl,
+        logoNote,
         referenceDataUrl,
         logoInstructions,
         templateInstructions,
         templateName,
+        extras,
       }),
     },
     ...turnsToMessages(history),
@@ -391,6 +479,9 @@ export async function POST(request: NextRequest) {
       historyTurns: history.length,
       logoId: resolvedLogoId,
       templateId: resolvedTemplateId,
+      hasLogo: !!logoDataUrl,
+      hasLogoNote: !!logoNote,
+      extras: extras.length,
       assistantTextPreview: assistantText.slice(0, 120),
     },
     user.id

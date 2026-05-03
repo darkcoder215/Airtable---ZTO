@@ -115,6 +115,9 @@ export default function ImageGeneratorPage() {
   /* Generator state */
   const [selectedLogoId, setSelectedLogoId] = useState<string>("");
   const [logoUploadDataUrl, setLogoUploadDataUrl] = useState<string | null>(null); // ad-hoc
+  // Optional placement note tied to whatever logo is in play for this run.
+  // Stacked on top of the saved logo's permanent instructions server-side.
+  const [logoNote, setLogoNote] = useState<string>("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [referenceUploadDataUrl, setReferenceUploadDataUrl] = useState<string | null>(null);
   const [postText, setPostText] = useState("");
@@ -122,6 +125,12 @@ export default function ImageGeneratorPage() {
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
   const [imageSize, setImageSize] = useState<string>("2K");
   const [tagFilter, setTagFilter] = useState<string>("");
+  // Up to 2 extra images merged into the generation alongside the logo +
+  // template. Each carries a free-form intent note (e.g. "place this
+  // product in the foreground", "use as background mask").
+  interface ExtraImg { dataUrl: string; note: string }
+  const [extras, setExtras] = useState<ExtraImg[]>([]);
+  const extrasInputRef = useRef<HTMLInputElement | null>(null);
 
   const [generating, setGenerating] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
@@ -183,17 +192,19 @@ export default function ImageGeneratorPage() {
   /* ─────────────── Generation ─────────────── */
 
   const buildBody = (
-    extras?: { history?: HistoryTurn[]; edits?: string }
+    overrides?: { history?: HistoryTurn[]; edits?: string }
   ): Record<string, unknown> => ({
     postText,
-    edits: extras?.edits ?? edits,
+    edits: overrides?.edits ?? edits,
     logoId: selectedLogoId || undefined,
     logoDataUrl: logoUploadDataUrl ?? undefined,
+    logoNote: logoNote.trim() || undefined,
     templateId: selectedTemplateId || undefined,
     referenceDataUrl: referenceUploadDataUrl ?? undefined,
+    extras: extras.length > 0 ? extras : undefined,
     aspectRatio,
     imageSize,
-    history: extras?.history,
+    history: overrides?.history,
   });
 
   const callApi = async (body: Record<string, unknown>) => {
@@ -207,8 +218,11 @@ export default function ImageGeneratorPage() {
   };
 
   const onGenerate = async () => {
-    if (!effectiveLogoUrl) {
-      addToast("اختر شعاراً محفوظاً أو ارفع واحداً", "warning");
+    // Either a logo OR a template/reference is enough — the API enforces
+    // the same rule, but we surface a clearer message client-side.
+    const hasTemplate = !!selectedTemplateId || !!referenceUploadDataUrl;
+    if (!effectiveLogoUrl && !hasTemplate) {
+      addToast("اختر شعاراً أو قالباً قبل التوليد", "warning");
       return;
     }
     if (!postText.trim()) {
@@ -276,8 +290,10 @@ export default function ImageGeneratorPage() {
   const reset = () => {
     setSelectedLogoId("");
     setLogoUploadDataUrl(null);
+    setLogoNote("");
     setSelectedTemplateId("");
     setReferenceUploadDataUrl(null);
+    setExtras([]);
     setPostText("");
     setEdits("");
     setRefineText("");
@@ -330,6 +346,38 @@ export default function ImageGeneratorPage() {
       addToast("فشل قراءة الملف", "error");
     }
     e.target.value = "";
+  };
+
+  const onAddExtra = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    const room = 2 - extras.length;
+    if (room <= 0) {
+      addToast("الحد الأقصى صورتان مرافقتان", "warning");
+      return;
+    }
+    const toAdd: ExtraImg[] = [];
+    for (const f of files.slice(0, room)) {
+      if (f.size > MAX_FILE_BYTES) {
+        addToast(`"${f.name}" أكبر من 6MB`, "error");
+        continue;
+      }
+      try {
+        toAdd.push({ dataUrl: await readAsDataUrl(f), note: "" });
+      } catch {
+        addToast(`فشل قراءة "${f.name}"`, "error");
+      }
+    }
+    if (toAdd.length) setExtras((cur) => [...cur, ...toAdd]);
+  };
+  const updateExtraNote = (i: number, note: string) => {
+    setExtras((cur) =>
+      cur.map((e, idx) => (idx === i ? { ...e, note: note.slice(0, 800) } : e))
+    );
+  };
+  const removeExtra = (i: number) => {
+    setExtras((cur) => cur.filter((_, idx) => idx !== i));
   };
 
   /* ─────────────── Render ─────────────── */
@@ -390,29 +438,78 @@ export default function ImageGeneratorPage() {
 
       {/* === GENERATE TAB === */}
       {tab === "generate" && (
-        <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-[440px_1fr] gap-5">
           {/* Inputs column */}
           <div className="space-y-4 xl:max-h-[calc(100vh-260px)] xl:overflow-y-auto pr-1">
-            {/* Step 1 — brand & template */}
-            <section className="zto-card zto-section">
-              <SectionHead step={1} icon={<Bookmark className="w-4 h-4 text-amber-400" />} title="العلامة والقالب" />
+            {/* Step 1 — logo (optional when a template is in play) */}
+            {(() => {
+              const hasTemplate = !!selectedTemplateId || !!referenceUploadDataUrl;
+              const logoRequired = !hasTemplate;
+              const logoActive = !!effectiveLogoUrl;
+              return (
+                <section className={`zto-card zto-section transition-colors ${
+                  logoActive ? "border-amber-400/30" : ""
+                }`}>
+                  <SectionHead
+                    step={1}
+                    icon={<Bookmark className="w-4 h-4 text-amber-400" />}
+                    title="الشعار"
+                    hint={
+                      logoRequired
+                        ? "مطلوب — لا يوجد قالب يحدّد العلامة"
+                        : "اختياري — القالب الذي اخترته يحدّد العلامة"
+                    }
+                    statusOk={logoActive}
+                  />
+                  <LogoPicker
+                    logos={logos}
+                    selectedId={selectedLogoId}
+                    uploadedDataUrl={logoUploadDataUrl}
+                    onSelect={(id) => {
+                      setSelectedLogoId(id);
+                      setLogoUploadDataUrl(null);
+                    }}
+                    onClearUpload={() => setLogoUploadDataUrl(null)}
+                    onUploadClick={() => logoInputRef.current?.click()}
+                    emptyAction={() => setTab("logos")}
+                  />
+                  <input ref={logoInputRef} type="file" hidden accept={ACCEPT_MIME} onChange={onUploadLogo} />
 
-              <SubLabel>الشعار *</SubLabel>
-              <LogoPicker
-                logos={logos}
-                selectedId={selectedLogoId}
-                uploadedDataUrl={logoUploadDataUrl}
-                onSelect={(id) => {
-                  setSelectedLogoId(id);
-                  setLogoUploadDataUrl(null);
-                }}
-                onClearUpload={() => setLogoUploadDataUrl(null)}
-                onUploadClick={() => logoInputRef.current?.click()}
-                emptyAction={() => setTab("logos")}
+                  {logoActive && (
+                    <div className="mt-3">
+                      <SubLabel className="flex items-center justify-between">
+                        <span>ملاحظة عن الشعار (اختيارية)</span>
+                        <span className="text-[0.55rem] text-neutral-600 font-normal font-mono">{logoNote.length}/1000</span>
+                      </SubLabel>
+                      <textarea
+                        value={logoNote}
+                        onChange={(e) => setLogoNote(e.target.value.slice(0, 1000))}
+                        placeholder="مثال: ضع الشعار صغيراً في الزاوية اليمنى السفلى، خلفية شفّافة، بدون ظلّ..."
+                        className="zto-input text-xs min-h-[60px]"
+                      />
+                    </div>
+                  )}
+                </section>
+              );
+            })()}
+
+            {/* Step 2 — template */}
+            <section className={`zto-card zto-section transition-colors ${
+              (selectedTemplateId || referenceUploadDataUrl) ? "border-amber-400/30" : ""
+            }`}>
+              <SectionHead
+                step={2}
+                icon={<Layers className="w-4 h-4 text-purple-400" />}
+                title="القالب"
+                hint={
+                  selectedTemplate
+                    ? `مُفعَّل — ${selectedTemplate.name}`
+                    : referenceUploadDataUrl
+                      ? "مُفعَّل — صورة مرجعية مرفوعة"
+                      : "اختياري — استخدم تصميماً محفوظاً كهويّة بصريّة"
+                }
+                statusOk={!!selectedTemplateId || !!referenceUploadDataUrl}
               />
-              <input ref={logoInputRef} type="file" hidden accept={ACCEPT_MIME} onChange={onUploadLogo} />
-
-              <SubLabel className="mt-4">القالب (اختياري)</SubLabel>
               {allTags.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap mb-2">
                   <button
@@ -457,10 +554,89 @@ export default function ImageGeneratorPage() {
               <input ref={refInputRef} type="file" hidden accept={ACCEPT_MIME} onChange={onUploadReference} />
             </section>
 
-            {/* Step 2 — copy */}
-            <section className="zto-card zto-section">
-              <SectionHead step={2} icon={<MessageCircle className="w-4 h-4 text-blue-400" />} title="نص المنشور والتعديلات" />
-              <SubLabel>نص المنشور *</SubLabel>
+            {/* Step 3 — extra images merged into the design */}
+            <section className={`zto-card zto-section transition-colors ${
+              extras.length > 0 ? "border-amber-400/30" : ""
+            }`}>
+              <SectionHead
+                step={3}
+                icon={<ImageIcon className="w-4 h-4 text-emerald-400" />}
+                title="صور مرافقة"
+                hint={
+                  extras.length === 0
+                    ? "اختياري — حتى صورتين مع وصف لمكان كلٍّ منهما"
+                    : `${extras.length}/2 صورة مرافقة`
+                }
+                statusOk={extras.length > 0}
+              />
+              <p className="text-[0.65rem] text-neutral-500 leading-relaxed mb-2">
+                ارفق صورة منتج، شخصية، أو خلفيّة تريد دمجها داخل التصميم. اشرح لكلّ صورة كيف تُستعمل (مكان، حجم، قصاصة).
+              </p>
+              <div className="space-y-2">
+                {extras.map((ex, i) => (
+                  <div
+                    key={i}
+                    className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-2 flex items-start gap-2"
+                  >
+                    <div className="relative w-16 h-16 rounded overflow-hidden border border-neutral-800 bg-[#1a1a1a] shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={ex.dataUrl} alt={`extra ${i + 1}`} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <textarea
+                        className="zto-input text-xs min-h-[60px]"
+                        placeholder="ماذا نفعل بهذه الصورة في التصميم؟"
+                        value={ex.note}
+                        onChange={(e) => updateExtraNote(i, e.target.value)}
+                        maxLength={800}
+                      />
+                      <p className="text-[0.55rem] text-neutral-600 font-mono mt-0.5 text-left" dir="ltr">
+                        {ex.note.length}/800
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => removeExtra(i)}
+                      className="text-neutral-500 hover:text-red-400 p-1 shrink-0"
+                      title="حذف"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                {extras.length < 2 && (
+                  <button
+                    onClick={() => extrasInputRef.current?.click()}
+                    className="w-full py-3 rounded-lg border-2 border-dashed border-neutral-700 hover:border-emerald-400 hover:text-emerald-300 text-neutral-500 text-[0.7rem] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    {extras.length === 0 ? "إضافة صورة مرافقة" : "إضافة صورة ثانية"}
+                  </button>
+                )}
+              </div>
+              <input
+                ref={extrasInputRef}
+                type="file"
+                accept={ACCEPT_MIME}
+                hidden
+                onChange={onAddExtra}
+              />
+            </section>
+
+            {/* Step 4 — copy */}
+            <section className={`zto-card zto-section transition-colors ${
+              postText.trim() ? "border-amber-400/30" : ""
+            }`}>
+              <SectionHead
+                step={4}
+                icon={<MessageCircle className="w-4 h-4 text-blue-400" />}
+                title="نص المنشور والتعديلات"
+                hint="نص المنشور مطلوب — التعديلات اختيارية"
+                statusOk={!!postText.trim()}
+              />
+              <SubLabel className="flex items-center justify-between">
+                <span>نص المنشور *</span>
+                <span className="text-[0.55rem] text-neutral-600 font-normal font-mono">{postText.length}/8000</span>
+              </SubLabel>
               <textarea
                 value={postText}
                 onChange={(e) => setPostText(e.target.value)}
@@ -468,9 +644,11 @@ export default function ImageGeneratorPage() {
                 className="zto-input min-h-[110px]"
                 maxLength={8000}
               />
-              <p className="text-[0.6rem] text-neutral-500 mt-1">{postText.length} / 8000</p>
 
-              <SubLabel className="mt-3">تخصيصات (اختياري)</SubLabel>
+              <SubLabel className="mt-3 flex items-center justify-between">
+                <span>تخصيصات (اختياري)</span>
+                <span className="text-[0.55rem] text-neutral-600 font-normal font-mono">{edits.length}/4000</span>
+              </SubLabel>
               <textarea
                 value={edits}
                 onChange={(e) => setEdits(e.target.value)}
@@ -480,9 +658,14 @@ export default function ImageGeneratorPage() {
               />
             </section>
 
-            {/* Step 3 — format */}
+            {/* Step 5 — format */}
             <section className="zto-card zto-section">
-              <SectionHead step={3} icon={<Layers className="w-4 h-4 text-purple-400" />} title="التنسيق والجودة" />
+              <SectionHead
+                step={5}
+                icon={<Layers className="w-4 h-4 text-purple-400" />}
+                title="التنسيق والجودة"
+                hint={`${aspectRatio} · ${imageSize}`}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <SubLabel>نسبة الأبعاد</SubLabel>
@@ -519,7 +702,11 @@ export default function ImageGeneratorPage() {
 
             <button
               onClick={onGenerate}
-              disabled={generating || !effectiveLogoUrl || !postText.trim()}
+              disabled={
+                generating ||
+                (!effectiveLogoUrl && !selectedTemplateId && !referenceUploadDataUrl) ||
+                !postText.trim()
+              }
               className="zto-btn zto-btn-gold w-full !h-12 text-sm"
             >
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -721,14 +908,41 @@ function TabBtn({ active, onClick, icon, label }: { active: boolean; onClick: ()
   );
 }
 
-function SectionHead({ step, icon, title }: { step: number; icon: React.ReactNode; title: string }) {
+function SectionHead({
+  step,
+  icon,
+  title,
+  hint,
+  statusOk,
+}: {
+  step: number;
+  icon: React.ReactNode;
+  title: string;
+  // Subtle right-aligned subtitle in the header — used to surface the
+  // selection state ("Optional", "Active — <name>", etc.) without bloating
+  // the section body.
+  hint?: string;
+  // When provided, swap the step badge for a checkmark.
+  statusOk?: boolean;
+}) {
   return (
     <div className="flex items-center gap-2 mb-3 pb-3 border-b border-neutral-800">
-      <span className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-400/30 to-amber-400/10 border border-amber-400/30 flex items-center justify-center text-[0.65rem] font-black text-amber-400">
-        {step}
+      <span
+        className={`w-6 h-6 rounded-full border flex items-center justify-center text-[0.65rem] font-black transition-colors ${
+          statusOk
+            ? "bg-emerald-400/15 border-emerald-400/40 text-emerald-300"
+            : "bg-gradient-to-br from-amber-400/30 to-amber-400/10 border-amber-400/30 text-amber-400"
+        }`}
+      >
+        {statusOk ? <CheckCircle2 className="w-3.5 h-3.5" /> : step}
       </span>
       {icon}
       <h3 className="text-sm font-bold text-white">{title}</h3>
+      {hint && (
+        <span className="text-[0.6rem] text-neutral-500 mr-auto truncate max-w-[55%]" title={hint}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
