@@ -23,6 +23,7 @@ import {
   Bookmark,
   Layers,
   Library,
+  Database,
   CheckCircle2,
   Globe,
   MoreHorizontal,
@@ -134,6 +135,32 @@ export default function ImageGeneratorPage() {
   const [extras, setExtras] = useState<ExtraImg[]>([]);
   const extrasInputRef = useRef<HTMLInputElement | null>(null);
 
+  // News-article picker — pulls from /api/data-sources?action=articles so
+  // an admin can pick a scraped news item, drop its title+description into
+  // the post-text field, and (optionally) use the article's image as an
+  // accompanying image. Loaded lazily when the picker opens to avoid
+  // blocking the initial render.
+  interface ScrapedArticle {
+    id: string;
+    title: string;
+    description: string;
+    url: string;
+    sourceName?: string;
+    sourceId?: string;
+    publishedAt?: string;
+    fetchedAt?: string;
+    imageUrl?: string;
+    savedToAirtable?: boolean;
+  }
+  const [showArticles, setShowArticles] = useState(false);
+  const [articles, setArticles] = useState<ScrapedArticle[]>([]);
+  const [articlesLoading, setArticlesLoading] = useState(false);
+  const [articlesError, setArticlesError] = useState<string | null>(null);
+  const [articleSearch, setArticleSearch] = useState("");
+  const [articleSourceFilter, setArticleSourceFilter] = useState("");
+  const [linkedArticleId, setLinkedArticleId] = useState<string | null>(null);
+  const [linkedArticleImage, setLinkedArticleImage] = useState<string | null>(null);
+
   const [generating, setGenerating] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [generatedHistory, setGeneratedHistory] = useState<HistoryTurn[]>([]);
@@ -178,6 +205,84 @@ export default function ImageGeneratorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Lazy-load scraped news articles the first time the picker opens.
+  // Subsequent opens reuse the cached list — there's a "تحديث" button
+  // inside the picker for explicit refresh.
+  const loadArticles = async () => {
+    setArticlesLoading(true);
+    setArticlesError(null);
+    try {
+      const res = await fetch("/api/data-sources?action=articles", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل تحميل الأخبار");
+      setArticles(Array.isArray(data.articles) ? data.articles : []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "فشل تحميل الأخبار";
+      setArticlesError(msg);
+      setArticles([]);
+    } finally {
+      setArticlesLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (showArticles && articles.length === 0 && !articlesLoading) {
+      void loadArticles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArticles]);
+
+  // Pick an article: drop its title + description into the post text and
+  // remember its id (so the API can attribute the generation to the
+  // article in logs). The image isn't auto-attached — the user gets a
+  // one-click button to add it as an extra inside step 3.
+  const useArticle = (a: ScrapedArticle) => {
+    const composed = [a.title, a.description].filter((s) => s && s.trim()).join("\n\n").slice(0, 8000);
+    setPostText(composed);
+    setLinkedArticleId(a.id);
+    setLinkedArticleImage(a.imageUrl ?? null);
+    setShowArticles(false);
+    addToast(`تم اختيار: ${a.title.slice(0, 60)}`, "success");
+  };
+  const clearArticleLink = () => {
+    setLinkedArticleId(null);
+    setLinkedArticleImage(null);
+  };
+  // Add the linked article's image into the extras slot as a new entry.
+  // Skips when the slot is already full or the URL is missing.
+  const useArticleImageAsExtra = async () => {
+    if (!linkedArticleImage) {
+      addToast("لا توجد صورة مرفقة بالخبر", "warning");
+      return;
+    }
+    if (extras.length >= 2) {
+      addToast("الحد الأقصى صورتان مرافقتان", "warning");
+      return;
+    }
+    try {
+      // Fetch the image as a blob so we can serialize it as a data URL.
+      // Some publishers block hotlinking; the API runs server-side via
+      // the user's browser, so we surface a clear error if it fails.
+      const res = await fetch(linkedArticleImage, { mode: "cors" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      if (blob.size > MAX_FILE_BYTES) {
+        addToast("الصورة المرفقة بالخبر أكبر من 6MB", "error");
+        return;
+      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => typeof r.result === "string" ? resolve(r.result) : reject(new Error("read failed"));
+        r.onerror = () => reject(r.error ?? new Error("read failed"));
+        r.readAsDataURL(blob);
+      });
+      setExtras((cur) => [...cur, { dataUrl, note: "صورة مرفقة بالخبر — استخدمها في التصميم" }]);
+      addToast("تم إضافة صورة الخبر", "success");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "فشل تحميل صورة الخبر";
+      addToast(`فشل تحميل صورة الخبر — ${msg}`, "error");
+    }
+  };
+
   /* ─────────────── Derived ─────────────── */
 
   const selectedLogo = logos.find((l) => l.id === selectedLogoId) ?? null;
@@ -211,6 +316,7 @@ export default function ImageGeneratorPage() {
     templateId: selectedTemplateId || undefined,
     referenceDataUrl: referenceUploadDataUrl ?? undefined,
     extras: extras.length > 0 ? extras : undefined,
+    sourceArticleId: linkedArticleId ?? undefined,
     aspectRatio,
     imageSize,
     history: overrides?.history,
@@ -447,9 +553,90 @@ export default function ImageGeneratorPage() {
 
       {/* === GENERATE TAB === */}
       {tab === "generate" && (
-        <div className="grid grid-cols-1 xl:grid-cols-[440px_1fr] gap-5">
-          {/* Inputs column */}
-          <div className="space-y-4 xl:max-h-[calc(100vh-260px)] xl:overflow-y-auto pr-1">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_440px] gap-5">
+          {/* Inputs column — gets the bigger slot now (was capped at 440px
+              previously, which squeezed the textareas + section headers).
+              On wide screens it stretches; outputs are constrained to 440px
+              on the right. */}
+          <div className="space-y-4 min-w-0">
+            {/* Article picker entry — sits at the very top so admins can
+                kick off a generation from a scraped news item in one click. */}
+            <section className="zto-card zto-section">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Library className="w-4 h-4 text-blue-400 shrink-0" />
+                  <h3 className="text-sm font-bold text-white">الأخبار المُلتقَطة</h3>
+                  <p className="text-[0.65rem] text-neutral-500 font-bold truncate">
+                    اختر خبراً لاستخدام نصّه وصورته في التوليد
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {linkedArticleId && (
+                    <button
+                      onClick={clearArticleLink}
+                      className="zto-btn zto-btn-ghost zto-btn-sm"
+                      title="فكّ الربط بالخبر"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      فكّ الربط
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowArticles(true)}
+                    className="zto-btn zto-btn-outline zto-btn-sm"
+                  >
+                    <Library className="w-3.5 h-3.5" />
+                    {linkedArticleId ? "تغيير الخبر" : "اختيار من الأخبار"}
+                  </button>
+                </div>
+              </div>
+              {linkedArticleId && (() => {
+                const a = articles.find((x) => x.id === linkedArticleId);
+                if (!a) {
+                  return (
+                    <p className="mt-3 text-[0.65rem] text-neutral-500 font-bold">
+                      مرتبط بالخبر <code className="text-amber-400 font-mono">{linkedArticleId.slice(0, 8)}</code>
+                    </p>
+                  );
+                }
+                return (
+                  <div className="mt-3 flex items-start gap-3 bg-[#0d0d0d] border border-amber-400/20 rounded-lg p-3">
+                    {linkedArticleImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={linkedArticleImage}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="w-14 h-14 rounded object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : null}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-white line-clamp-2">{a.title}</p>
+                      <p className="text-[0.6rem] text-neutral-500 font-bold mt-0.5">
+                        {a.sourceName ?? "—"}
+                      </p>
+                      {linkedArticleImage && extras.length < 2 && !extras.some((e) => e.dataUrl === linkedArticleImage) && (
+                        <button
+                          onClick={useArticleImageAsExtra}
+                          className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400 mt-2"
+                        >
+                          <Plus className="w-3 h-3" />
+                          استخدم صورة الخبر كصورة مرافقة
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </section>
+
+            {/* Steps row — inputs continue here (logo / template / extras /
+                copy / format). */}
+            <div className="space-y-4">
             {/* Step 1 — logo (optional when a template is in play) */}
             {(() => {
               const hasTemplate = !!selectedTemplateId || !!referenceUploadDataUrl;
@@ -728,10 +915,13 @@ export default function ImageGeneratorPage() {
                 <p className="text-xs text-red-400">{error}</p>
               </div>
             )}
+            </div>
           </div>
 
-          {/* Output column */}
-          <div className="space-y-4">
+          {/* Output column — narrower, sticky on wide screens so it stays
+              visible while the admin scrolls through the (now wider)
+              inputs column. */}
+          <div className="space-y-4 min-w-0 xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-100px)] xl:overflow-y-auto pr-1">
             {/* Result — compact frame by default. The user can expand
                 to a tall preview, and the platform preview below is
                 collapsed until they want to inspect a feed mockup. */}
@@ -869,6 +1059,157 @@ export default function ImageGeneratorPage() {
           </div>
         </div>
       )}
+
+      {/* Article picker modal — opens from the new section at the top of
+          the Generate tab. Shows every scraped article with a thumbnail
+          and lets the admin filter by source + free-text. */}
+      {showArticles && (() => {
+        const sourceNames = Array.from(
+          new Set(articles.map((a) => a.sourceName).filter((s): s is string => !!s))
+        ).sort();
+        const q = articleSearch.trim().toLowerCase();
+        const visible = articles.filter((a) => {
+          if (articleSourceFilter && a.sourceName !== articleSourceFilter) return false;
+          if (!q) return true;
+          return (
+            a.title.toLowerCase().includes(q) ||
+            a.description?.toLowerCase().includes(q) ||
+            (a.sourceName?.toLowerCase().includes(q) ?? false)
+          );
+        });
+        return (
+          <div
+            className="fixed inset-0 z-50 zto-fade-in"
+            dir="rtl"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setShowArticles(false)}
+            />
+            <div
+              className="absolute inset-x-4 top-8 bottom-8 mx-auto max-w-4xl bg-[#0a0a0a] border border-neutral-800 rounded-2xl shadow-2xl flex flex-col zto-slide-up overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <header className="px-5 py-4 border-b border-neutral-800 flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Library className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-sm font-bold text-white">اختر خبراً</h3>
+                  <span className="text-[0.6rem] text-neutral-500 font-mono">
+                    {visible.length}/{articles.length}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-[160px] relative">
+                  {/* eslint-disable-next-line jsx-a11y/no-redundant-roles */}
+                  <input
+                    type="text"
+                    value={articleSearch}
+                    onChange={(e) => setArticleSearch(e.target.value)}
+                    placeholder="بحث في العناوين والوصف والمصادر..."
+                    className="zto-input text-xs"
+                  />
+                </div>
+                {sourceNames.length > 1 && (
+                  <select
+                    className="zto-input text-xs !w-[180px]"
+                    value={articleSourceFilter}
+                    onChange={(e) => setArticleSourceFilter(e.target.value)}
+                  >
+                    <option value="">كل المصادر</option>
+                    {sourceNames.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  onClick={() => void loadArticles()}
+                  className="zto-btn zto-btn-ghost zto-btn-sm"
+                  title="تحديث القائمة"
+                  disabled={articlesLoading}
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${articlesLoading ? "animate-spin" : ""}`} />
+                </button>
+                <button
+                  onClick={() => setShowArticles(false)}
+                  className="text-neutral-500 hover:text-white p-1.5 rounded-md hover:bg-neutral-800 transition-colors"
+                  title="إغلاق"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </header>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                {articlesLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
+                  </div>
+                ) : articlesError ? (
+                  <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 text-sm text-red-300 font-bold">
+                    ⚠ {articlesError}
+                  </div>
+                ) : visible.length === 0 ? (
+                  <div className="text-center py-16">
+                    <Library className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
+                    <p className="text-sm font-bold text-neutral-400">
+                      {articles.length === 0 ? "لا توجد أخبار مُلتقَطة بعد" : "لا نتائج للبحث"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {visible.map((a) => (
+                      <button
+                        key={a.id}
+                        onClick={() => useArticle(a)}
+                        className="bg-[#0d0d0d] border border-neutral-800 hover:border-amber-400/40 hover:-translate-y-0.5 transition-all rounded-lg p-3 text-right"
+                      >
+                        <div className="flex items-start gap-3">
+                          {a.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={a.imageUrl}
+                              alt=""
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="w-14 h-14 rounded object-cover bg-neutral-900 border border-neutral-800 shrink-0"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="w-14 h-14 rounded bg-[#1a1a1a] border border-neutral-800 flex items-center justify-center shrink-0">
+                              <ImageIcon className="w-5 h-5 text-neutral-700" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-white line-clamp-2">{a.title}</p>
+                            <p className="text-[0.6rem] text-neutral-500 line-clamp-2 mt-0.5">
+                              {a.description}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                              {a.sourceName && (
+                                <span className="zto-badge zto-badge-gold text-[0.55rem] !py-0">
+                                  {a.sourceName}
+                                </span>
+                              )}
+                              {a.savedToAirtable && (
+                                <span className="text-[0.55rem] text-emerald-400 font-bold flex items-center gap-1">
+                                  <Database className="w-2.5 h-2.5" />
+                                  محفوظ
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* === LOGOS LIBRARY === */}
       {tab === "logos" && (

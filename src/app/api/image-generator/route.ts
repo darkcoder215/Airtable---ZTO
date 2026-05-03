@@ -55,6 +55,11 @@ interface RequestBody {
   // server-side so the client doesn't need to fetch first.
   logoId?: unknown;
   templateId?: unknown;
+  // Optional: the scraped-news article id this generation was kicked off
+  // from. Stored in logs for attribution; we never re-fetch the article
+  // server-side (the client already pasted its title+description into
+  // postText and optionally added its image to extras).
+  sourceArticleId?: unknown;
   aspectRatio?: unknown;
   imageSize?: unknown;
   history?: unknown;
@@ -261,8 +266,17 @@ export async function POST(request: NextRequest) {
   let templateName: string | undefined;
   let resolvedLogoId: string | null = null;
   let resolvedTemplateId: string | null = null;
+  let sourceArticleId: string | null = null;
 
   try {
+    if (typeof body.sourceArticleId === "string" && body.sourceArticleId) {
+      // Just an attribution string — we don't dereference it, but we do
+      // sanity-check that it looks like a UUID so logs aren't polluted
+      // with arbitrary user input.
+      if (/^[0-9a-f-]{36}$/i.test(body.sourceArticleId)) {
+        sourceArticleId = body.sourceArticleId;
+      }
+    }
     if (typeof body.postText !== "string" || !body.postText.trim()) {
       throw new Error("نص المنشور مطلوب");
     }
@@ -342,6 +356,12 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "مدخلات غير صالحة";
+    logger.warn(
+      `[GENERATE:input] ${msg}`,
+      "ImageGenerator",
+      { stage: "generate:input", error: msg, sourceArticleId },
+      user.id
+    );
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
@@ -378,6 +398,34 @@ export async function POST(request: NextRequest) {
 
   const startedAt = Date.now();
 
+  // Stage 1 — log the kick-off so we can correlate every downstream
+  // event by user + article (when set). Useful when chasing "why didn't
+  // my generation produce X?" reports.
+  logger.info(
+    `[GENERATE:start] user=${user.id} article=${sourceArticleId ?? "—"} aspect=${aspectRatio} size=${imageSize}`,
+    "ImageGenerator",
+    {
+      stage: "generate:start",
+      model: IMAGE_MODEL,
+      sourceArticleId,
+      logoId: resolvedLogoId,
+      templateId: resolvedTemplateId,
+      hasLogo: !!logoDataUrl,
+      hasLogoNote: !!logoNote,
+      hasReference: !!referenceDataUrl,
+      extras: extras.length,
+      historyTurns: history.length,
+      postTextLen: postText.length,
+      editsLen: edits.length,
+      payloadBytes:
+        (logoDataUrl?.length ?? 0) +
+        (referenceDataUrl?.length ?? 0) +
+        extras.reduce((acc, e) => acc + e.dataUrl.length, 0) +
+        history.reduce((acc, t) => acc + (t.imageUrl?.length ?? 0), 0),
+    },
+    user.id
+  );
+
   let response: Response;
   try {
     response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -399,16 +447,23 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown network error";
+    const friendly =
+      err instanceof DOMException && err.name === "TimeoutError"
+        ? `انتهت مهلة الاتصال بنموذج التوليد (${REQUEST_TIMEOUT_MS / 1000}s). جرّب نسبة أبعاد أصغر أو نصاً أقصر.`
+        : `فشل الاتصال بنموذج التوليد: ${msg}`;
     logger.error(
-      `Image generator request failed (network): ${msg}`,
+      `[GENERATE:network] ${msg}`,
       "ImageGenerator",
-      { error: msg, model: IMAGE_MODEL },
+      {
+        stage: "generate:network",
+        error: msg,
+        model: IMAGE_MODEL,
+        sourceArticleId,
+        elapsedMs: Date.now() - startedAt,
+      },
       user.id
     );
-    return NextResponse.json(
-      { error: `فشل الاتصال بـ OpenRouter: ${msg}` },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: friendly }, { status: 502 });
   }
 
   if (!response.ok) {
@@ -420,14 +475,32 @@ export async function POST(request: NextRequest) {
     } catch {
       // not JSON, keep raw
     }
+    // Map the most common upstream failures to clearer Arabic messages.
+    let friendly = `خطأ من نموذج التوليد (${response.status}): ${detail}`;
+    if (response.status === 429) {
+      friendly = "تجاوزت حد الطلبات على النموذج. انتظر دقيقة وأعد المحاولة.";
+    } else if (response.status === 401 || response.status === 403) {
+      friendly = "صلاحية المفتاح ناقصة — تواصل مع المسؤول لتحديث OPENROUTER_API_KEY.";
+    } else if (response.status >= 500) {
+      friendly = "خدمة التوليد غير متاحة مؤقتاً. حاول مرّة أخرى بعد دقائق.";
+    } else if (/safety|content_policy|moderation/i.test(detail)) {
+      friendly = "رفض النموذج توليد هذا المحتوى لأسباب تتعلق بسياسة الأمان. عدّل النص.";
+    }
     logger.error(
-      `Image generator HTTP ${response.status}`,
+      `[GENERATE:http ${response.status}] ${detail.slice(0, 120)}`,
       "ImageGenerator",
-      { status: response.status, detail, model: IMAGE_MODEL },
+      {
+        stage: "generate:http",
+        status: response.status,
+        detail,
+        model: IMAGE_MODEL,
+        sourceArticleId,
+        elapsedMs: Date.now() - startedAt,
+      },
       user.id
     );
     return NextResponse.json(
-      { error: `OpenRouter ${response.status}: ${detail}` },
+      { error: friendly },
       { status: response.status === 429 ? 429 : 502 }
     );
   }
@@ -436,9 +509,14 @@ export async function POST(request: NextRequest) {
   try {
     data = (await response.json()) as ORResponse;
   } catch {
-    logger.error("Image generator: response wasn't JSON", "ImageGenerator", null, user.id);
+    logger.error(
+      "[GENERATE:bad-json] upstream response wasn't JSON",
+      "ImageGenerator",
+      { stage: "generate:bad-json", model: IMAGE_MODEL, sourceArticleId },
+      user.id
+    );
     return NextResponse.json(
-      { error: "استجابة غير صالحة من OpenRouter" },
+      { error: "استجابة غير صالحة من خدمة التوليد. أعد المحاولة." },
       { status: 502 }
     );
   }
@@ -449,12 +527,15 @@ export async function POST(request: NextRequest) {
 
   if (!generated || !DATA_URL_RE.test(generated)) {
     logger.error(
-      "Image generator: no image returned",
+      "[GENERATE:no-image] model returned text instead of an image",
       "ImageGenerator",
       {
+        stage: "generate:no-image",
         model: IMAGE_MODEL,
+        sourceArticleId,
         contentPreview: assistantText.slice(0, 200),
         upstreamError: data.error?.message,
+        elapsedMs: Date.now() - startedAt,
       },
       user.id
     );
@@ -462,7 +543,7 @@ export async function POST(request: NextRequest) {
       {
         error:
           data.error?.message ||
-          "لم يُرجع النموذج صورة. جرب وصفاً أوضح أو نموذجاً آخر.",
+          "لم يُرجع النموذج صورة — قد يكون المحتوى محظوراً، أو الوصف يحتاج إلى مزيد من الوضوح. جرّب صياغة مختلفة.",
       },
       { status: 502 }
     );
@@ -470,19 +551,24 @@ export async function POST(request: NextRequest) {
 
   const elapsedMs = Date.now() - startedAt;
   logger.info(
-    `Image generated (${elapsedMs}ms)`,
+    `[GENERATE:ok] image generated in ${elapsedMs}ms`,
     "ImageGenerator",
     {
+      stage: "generate:ok",
       model: IMAGE_MODEL,
       aspectRatio,
       imageSize,
       historyTurns: history.length,
       logoId: resolvedLogoId,
       templateId: resolvedTemplateId,
+      sourceArticleId,
       hasLogo: !!logoDataUrl,
       hasLogoNote: !!logoNote,
       extras: extras.length,
+      postTextLen: postText.length,
+      editsLen: edits.length,
       assistantTextPreview: assistantText.slice(0, 120),
+      elapsedMs,
     },
     user.id
   );
