@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss, Building2, BarChart3, Wand2 } from "lucide-react";
+import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss, Building2, BarChart3, Wand2, Users } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const NAV = [
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/dashboard/data-sources", label: "مصادر البيانات", icon: Rss },
   { href: "/dashboard/analytics", label: "التحليلات", icon: BarChart3 },
   { href: "/dashboard/access-control", label: "الصلاحيات", icon: Shield, admin: true },
+  { href: "/dashboard/views", label: "لوحات الفريق", icon: Users },
   { href: "/dashboard/agents", label: "وكلاء الكتابة", icon: Bot },
   { href: "/dashboard/image-generator", label: "مولّد الصور", icon: Wand2 },
   { href: "/dashboard/logs", label: "السجلات", icon: ScrollText, admin: true },
@@ -43,6 +44,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen flex">
+      {/* Subtle geometric backdrop — sits behind everything via z-index:-1 */}
+      <div className="zto-grid-backdrop" aria-hidden />
       {/* Sidebar */}
       <aside className={`fixed lg:static inset-y-0 right-0 z-40 w-[240px] bg-[#151515] border-l border-neutral-800 flex flex-col transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden lg:border-0"}`}>
         {/* Logo */}

@@ -202,7 +202,92 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
 .zto-card {
   background: var(--c-brand); border-radius: 14px;
   border: 1.5px solid var(--c-brand-border);
+  position: relative;
+  /* Subtle inner highlight + outer drop. Opt-out by setting box-shadow:none. */
+  box-shadow:
+    0 1px 0 0 rgba(255,255,255,0.025) inset,
+    0 8px 24px -16px rgba(0,0,0,0.6);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
+
+/* Subtle gold glow on the leading edge — used to highlight the active
+   member dashboard panel. */
+.zto-glow-edge::before {
+  content: "";
+  position: absolute;
+  inset: -1px auto -1px -1px;
+  width: 3px;
+  border-radius: 14px 0 0 14px;
+  background: linear-gradient(180deg, var(--c-gold) 0%, transparent 60%);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* ========== Roster row (Dashboards & Views) ========== */
+.zto-roster-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 10px;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.zto-roster-row:hover {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--c-brand-border);
+}
+.zto-roster-row-active {
+  background: rgba(201,168,76,0.08);
+  border-color: rgba(201,168,76,0.35);
+}
+
+/* ========== Stat tile (Dashboards & Views) ========== */
+.zto-stat-tile {
+  border-radius: 14px; border-width: 1.5px; border-style: solid;
+  padding: 12px 14px;
+  position: relative; overflow: hidden;
+  transition: transform 0.15s ease;
+}
+.zto-stat-tile::after {
+  /* Soft geometric corner motif — a thin diagonal slice for branding. */
+  content: "";
+  position: absolute; top: -20px; left: -20px;
+  width: 60px; height: 60px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 70%);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.zto-stat-tile:hover { transform: translateY(-1px); }
+
+/* ========== Geometric backdrop (subtle, dashboard-wide) ========== */
+.zto-grid-backdrop {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(201,168,76,0.06) 0%, transparent 35%),
+    radial-gradient(circle at 80% 100%, rgba(99,102,241,0.05) 0%, transparent 40%),
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
+}
+[data-theme="light"] .zto-grid-backdrop {
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(201,168,76,0.10) 0%, transparent 35%),
+    radial-gradient(circle at 80% 100%, rgba(99,102,241,0.08) 0%, transparent 40%),
+    linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
+}
+
+/* ========== Animations ========== */
+@keyframes ztoFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ztoSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.zto-fade-in { animation: ztoFadeIn 0.32s ease-out both; }
+.zto-slide-up { animation: ztoSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 /* ========== Labels / Badges ========== */
 .zto-label { display: block; font-size: 13px; font-weight: 700; color: var(--c-txt-dim); margin-bottom: 6px; }
