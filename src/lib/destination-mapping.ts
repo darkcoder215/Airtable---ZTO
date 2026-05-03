@@ -30,6 +30,11 @@ export const ARTICLE_TOKENS = [
   "publishedAt",
   "fetchedAt",
   "sourceName",
+  // brandName resolves at fetch time from scraper_brands.name (the brand
+  // the source is linked to). This is what the new Airtable "Brand"
+  // column wants — wire it once and every Twitter/LinkedIn/RSS source
+  // tagged to that brand fills it automatically.
+  "brandName",
   "categories",
   "imageUrl",
 ] as const;
@@ -63,6 +68,7 @@ const META_RSS: TokenMeta[] = [
   { token: "publishedAt",  label: "تاريخ النشر",   description: "تاريخ نشر المقال كما ورد من الموقع",             populated: true  },
   { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب المقال من قِبَلنا",                      populated: true  },
   { token: "sourceName",   label: "اسم المصدر",    description: "اسم المصدر كما عرّفته في صفحة المصادر",        populated: true  },
+  { token: "brandName",    label: "اسم العلامة",    description: "اسم العلامة المربوطة بالمصدر — يُملأ تلقائياً (للعمود Brand)", populated: true  },
   { token: "categories",   label: "الفئات",        description: "وسوم/تصنيفات من الـRSS (مثل political/business)", populated: true  },
   { token: "imageUrl",     label: "رابط الصورة",   description: "صورة بارزة من المقال إن وُجدت في الخلاصة",       populated: true  },
 ];
@@ -75,6 +81,7 @@ const META_TWITTER: TokenMeta[] = [
   { token: "publishedAt",  label: "تاريخ التغريدة", description: "وقت نشر التغريدة",                              populated: true  },
   { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب التغريدة من قِبَلنا",                    populated: true  },
   { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الحساب)",                populated: true  },
+  { token: "brandName",    label: "اسم العلامة",    description: "اسم العلامة المربوطة بالمصدر — يُملأ تلقائياً (للعمود Brand)", populated: true  },
   { token: "categories",   label: "الفئات",        description: "ثابت = [\"twitter\"] — يدلّ على المنصّة فقط",   populated: false },
   { token: "imageUrl",     label: "صورة التغريدة", description: "أول صورة في التغريدة أو صورة الحساب",          populated: true  },
   // X-specific engagement metadata captured into article.engagement.
@@ -99,6 +106,7 @@ const META_LINKEDIN: TokenMeta[] = [
   { token: "publishedAt",  label: "تاريخ المنشور", description: "وقت نشر المنشور كما ورد من LinkedIn",            populated: true  },
   { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب المنشور من قِبَلنا",                     populated: true  },
   { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الصفحة/الحساب)",         populated: true  },
+  { token: "brandName",    label: "اسم العلامة",    description: "اسم العلامة المربوطة بالمصدر — يُملأ تلقائياً (للعمود Brand)", populated: true  },
   { token: "categories",   label: "الفئات",        description: "[\"linkedin\", النوع] — مثلاً [\"linkedin\", \"image\"]", populated: true  },
   { token: "imageUrl",     label: "رابط الصورة",   description: "أول صورة من المنشور أو غلاف الفيديو",            populated: true  },
   // LinkedIn-specific engagement / author metadata.
@@ -151,6 +159,7 @@ const DEFAULT_RSS: TypeMapping = {
   tableName: DEFAULT_TABLE_NAME,
   columns: {
     Source: { type: "field", field: "sourceName" },
+    Brand: { type: "field", field: "brandName" },
     "Original Post": {
       type: "field",
       field: "description",
@@ -168,6 +177,7 @@ const DEFAULT_TWITTER: TypeMapping = {
   tableName: DEFAULT_TABLE_NAME,
   columns: {
     Source: { type: "field", field: "sourceName" },
+    Brand: { type: "field", field: "brandName" },
     "Original Post": { type: "field", field: "description", fallback: "title" },
     Status: { type: "literal", value: "New" },
     "Link to Post (If Applicable)": { type: "field", field: "url" },
@@ -178,6 +188,7 @@ const DEFAULT_LINKEDIN: TypeMapping = {
   tableName: DEFAULT_TABLE_NAME,
   columns: {
     Source: { type: "field", field: "sourceName" },
+    Brand: { type: "field", field: "brandName" },
     "Original Post": { type: "field", field: "description", fallback: "title" },
     Status: { type: "literal", value: "New" },
     "Link to Post (If Applicable)": { type: "field", field: "url" },
@@ -221,6 +232,8 @@ function readToken(article: FetchedArticle, token: ArticleToken): string {
       return article.fetchedAt ?? "";
     case "sourceName":
       return article.sourceName ?? "";
+    case "brandName":
+      return article.brandName ?? "";
     case "categories":
       return Array.isArray(article.categories) ? article.categories.join(", ") : "";
     case "imageUrl":

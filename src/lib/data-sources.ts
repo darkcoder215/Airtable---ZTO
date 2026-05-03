@@ -264,6 +264,12 @@ export interface FetchedArticle {
   id: string;
   sourceId: string;
   sourceName?: string;
+  // Resolved at fetch/persist time from scraper_brands.name — exposed to
+  // the destination mapping as the `brandName` token so admins can wire
+  // the Airtable "Brand" column directly. Always set when the source is
+  // linked to a brand; empty string otherwise so the mapping renders ""
+  // instead of throwing.
+  brandName?: string;
   title: string;
   description: string;
   url: string;
@@ -1995,11 +2001,74 @@ export async function previewSource(args: {
   return { articles, error: result.error };
 }
 
+// Resolve a brand id → name. Cached for the duration of a fetch cycle so
+// fetchAllSources doesn't re-query for sources sharing a brand.
+async function resolveBrandName(
+  brandId: string | null | undefined
+): Promise<string> {
+  if (!brandId || !isUuid(brandId)) return "";
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_brands")
+    .select("name")
+    .eq("id", brandId)
+    .maybeSingle();
+  if (error) {
+    logger.warn(
+      `resolveBrandName failed for brand ${brandId}: ${error.message}`,
+      "DataSources",
+      { brandId, error: error.message }
+    );
+    return "";
+  }
+  return data?.name ?? "";
+}
+
+// Comprehensive fetch pipeline. Each stage logs structured details so the
+// /dashboard/logs page can be used as a forensic timeline:
+//   FETCH → DEDUP → PERSIST → FILTER → SAVE
+// On every branch (success, partial failure, no-op) we:
+//   - log to scraper_logs with level + context "DataSources" + a stable
+//     stageTag string so admins can grep
+//   - bump scraper_sources.last_success_at / last_error
+//   - record one row in scraper_fetch_runs
 export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   const source = await getDataSourceById(sourceId);
-  if (!source) return { articles: [], error: "Source not found" };
+  if (!source) {
+    logger.error("Fetch attempted for missing source", "DataSources", { sourceId });
+    return { articles: [], error: "Source not found" };
+  }
 
   const startedAt = new Date();
+  const ctx = {
+    sourceId: source.id,
+    sourceName: source.name,
+    sourceType: source.type,
+    sourceUrl: source.url,
+    brandId: source.brandId ?? null,
+    topic: source.topic,
+    intervalMin: source.fetchInterval,
+  };
+
+  logger.info(
+    `[FETCH:start] "${source.name}" (${source.type})`,
+    "DataSources",
+    { stage: "fetch:start", ...ctx }
+  );
+
+  // Resolve brand name once so it's available for the destination mapping
+  // (Brand column) and for clearer log messages downstream.
+  const brandName = await resolveBrandName(source.brandId);
+  if (source.brandId && !brandName) {
+    logger.warn(
+      `Source "${source.name}" links to a brand that no longer exists`,
+      "DataSources",
+      { stage: "fetch:brand-missing", ...ctx }
+    );
+  }
+
+  // ── Stage 1: actual upstream fetch ──────────────────────────────────────
+  const fetchStartedAt = Date.now();
   let result: RSSFetchResult;
   try {
     if (source.type === "rss") {
@@ -2016,9 +2085,9 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown fetch error";
     logger.error(
-      `Fetch threw for "${source.name}" (${source.type}): ${msg}`,
+      `[FETCH:throw] "${source.name}": ${msg}`,
       "DataSources",
-      { sourceId: source.id, sourceName: source.name, sourceType: source.type, sourceUrl: source.url, error: msg }
+      { stage: "fetch:throw", error: msg, elapsedMs: Date.now() - fetchStartedAt, ...ctx }
     );
     await bumpSourceStatus(source.id, false, msg);
     await recordRun({
@@ -2033,12 +2102,19 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     });
     return { articles: [], error: msg };
   }
+  const fetchElapsedMs = Date.now() - fetchStartedAt;
 
   if (result.error) {
     logger.warn(
-      `Fetch returned error for "${source.name}" (${source.type}): ${result.error}`,
+      `[FETCH:err] "${source.name}": ${result.error}`,
       "DataSources",
-      { sourceId: source.id, sourceName: source.name, sourceType: source.type, sourceUrl: source.url, error: result.error }
+      {
+        stage: "fetch:err",
+        error: result.error,
+        itemsFetched: result.articles.length,
+        elapsedMs: fetchElapsedMs,
+        ...ctx,
+      }
     );
     await bumpSourceStatus(source.id, false, result.error);
     await recordRun({
@@ -2054,83 +2130,266 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     return result;
   }
 
-  // Date-based dedup with a 30-minute safety overlap. Items whose
-  // publishedAt is newer than (cutoff − 30 min) survive — RSS feeds
-  // routinely publish out of order (a slow editorial workflow lands an
-  // "older" piece a few minutes after a "newer" one), and the 30-min
-  // window costs nothing because the known-URL set + DB-level
-  // UNIQUE(source_id, url) catch the actual duplicates inside that
-  // window. Items with no parseable date (publishedAt === null) fall
-  // through to the known-URL check unconditionally so a feed that
-  // suddenly drops dates doesn't flood Airtable on every tick.
+  logger.info(
+    `[FETCH:ok] "${source.name}" — ${result.articles.length} item(s) in ${fetchElapsedMs}ms`,
+    "DataSources",
+    {
+      stage: "fetch:ok",
+      itemsFetched: result.articles.length,
+      elapsedMs: fetchElapsedMs,
+      ...ctx,
+    }
+  );
+
+  // ── Stage 2: date-based dedup with 30-min safety overlap ────────────────
   const cutoff = await getLatestPublishedAt(source.id);
   const known = await getKnownUrls(source.id);
-  const overlap = 30 * 60 * 1000; // 30 min
+  const overlap = 30 * 60 * 1000;
+
+  let droppedByUrl = 0;
+  let droppedByDate = 0;
+  let droppedNoUrl = 0;
+  let unparseableDate = 0;
+
   const fresh = result.articles.filter((a) => {
-    if (!a.url) return false;
-    if (known.has(a.url)) return false; // saved before — skip outright
+    if (!a.url) {
+      droppedNoUrl++;
+      return false;
+    }
+    if (known.has(a.url)) {
+      droppedByUrl++;
+      return false;
+    }
     if (cutoff != null && a.publishedAt) {
       const t = Date.parse(a.publishedAt);
-      if (Number.isFinite(t)) return t >= cutoff - overlap;
+      if (Number.isFinite(t)) {
+        if (t >= cutoff - overlap) return true;
+        droppedByDate++;
+        return false;
+      }
+      unparseableDate++;
     }
-    // No cutoff yet, or unparseable / null date: known-URL check above
-    // already filtered, so this item is genuinely new.
+    // No cutoff yet OR no parseable date: known-URL check already
+    // filtered, so the item is genuinely new from our point of view.
     return true;
   });
-  fresh.forEach((a) => (a.sourceName = source.name));
 
-  const persisted = await persistArticles(source, fresh);
-  // Re-link transient ids to db ids by url so saving to Airtable updates the right row
+  // Seed source/brand metadata before persistence so the Airtable Brand
+  // column (and the brandName mapping token) get filled automatically.
+  fresh.forEach((a) => {
+    a.sourceName = source.name;
+    a.brandName = brandName;
+  });
+
+  logger.info(
+    `[DEDUP] "${source.name}" — kept ${fresh.length}/${result.articles.length} (cutoff=${
+      cutoff ? new Date(cutoff).toISOString() : "none"
+    }, dropped ${droppedByUrl} by URL, ${droppedByDate} by date, ${unparseableDate} unparseable, ${droppedNoUrl} no-URL)`,
+    "DataSources",
+    {
+      stage: "dedup",
+      itemsFetched: result.articles.length,
+      itemsKept: fresh.length,
+      droppedByUrl,
+      droppedByDate,
+      unparseableDate,
+      droppedNoUrl,
+      cutoffIso: cutoff ? new Date(cutoff).toISOString() : null,
+      ...ctx,
+    }
+  );
+
+  // ── Stage 3: persist into scraper_articles ──────────────────────────────
+  const persistStartedAt = Date.now();
+  let persisted: FetchedArticle[] = [];
+  try {
+    persisted = await persistArticles(source, fresh);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown persist error";
+    logger.error(
+      `[PERSIST:throw] "${source.name}": ${msg}`,
+      "DataSources",
+      {
+        stage: "persist:throw",
+        error: msg,
+        itemsFresh: fresh.length,
+        elapsedMs: Date.now() - persistStartedAt,
+        ...ctx,
+      }
+    );
+    await bumpSourceStatus(source.id, false, msg);
+    await recordRun({
+      sourceId: source.id,
+      brandId: source.brandId ?? null,
+      status: "error",
+      startedAt,
+      itemsFetched: result.articles.length,
+      itemsPassed: 0,
+      itemsSaved: 0,
+      errorMessage: msg,
+    });
+    return { articles: [], error: msg };
+  }
+
+  // Re-link transient ids to db ids by url so saving to Airtable updates
+  // the right row.
   const idByUrl = new Map(persisted.map((p) => [p.url, p.id]));
   fresh.forEach((a) => {
     const dbId = idByUrl.get(a.url);
     if (dbId) a.id = dbId;
   });
+  logger.info(
+    `[PERSIST:ok] "${source.name}" — ${persisted.length} row(s) upserted in ${
+      Date.now() - persistStartedAt
+    }ms`,
+    "DataSources",
+    {
+      stage: "persist:ok",
+      itemsPersisted: persisted.length,
+      elapsedMs: Date.now() - persistStartedAt,
+      ...ctx,
+    }
+  );
 
+  // ── Stage 4: AI filter (news topic only) ────────────────────────────────
   let savedCount = 0;
   let passedCount = fresh.length;
-  if (fresh.length > 0) {
-    if (source.topic === "news") {
-      try {
-        const filterSpec = await resolveFilterAgentForSource(source);
-        const { passed } = await filterArticlesWithAI(
-          fresh,
-          source.id,
-          source.name,
-          filterSpec
-        );
-        passedCount = passed.length;
-        if (passed.length > 0) savedCount = await saveArticlesToAirtable(passed, source.name, source.type);
-      } catch (err) {
-        logger.error(
-          `AI filter+save pipeline failed for "${source.name}"`,
-          "DataSources",
-          err
-        );
-      }
-    } else {
-      try {
-        savedCount = await saveArticlesToAirtable(fresh, source.name, source.type);
-      } catch (err) {
-        logger.error(
-          `Airtable save failed for "${source.name}"`,
-          "DataSources",
-          err
-        );
-      }
+  let toSave: FetchedArticle[] = fresh;
+  let filterAgentLabel = "—";
+
+  if (fresh.length > 0 && source.topic === "news") {
+    const filterStartedAt = Date.now();
+    try {
+      const filterSpec = await resolveFilterAgentForSource(source);
+      filterAgentLabel = filterSpec
+        ? `${filterSpec.agentName} (${filterSpec.model})`
+        : "fallback";
+      const { passed } = await filterArticlesWithAI(
+        fresh,
+        source.id,
+        source.name,
+        filterSpec
+      );
+      passedCount = passed.length;
+      toSave = passed;
+      logger.info(
+        `[FILTER:ok] "${source.name}" — ${passed.length}/${fresh.length} kept by agent "${filterAgentLabel}" in ${
+          Date.now() - filterStartedAt
+        }ms`,
+        "DataSources",
+        {
+          stage: "filter:ok",
+          agent: filterAgentLabel,
+          itemsIn: fresh.length,
+          itemsPassed: passed.length,
+          itemsRejected: fresh.length - passed.length,
+          elapsedMs: Date.now() - filterStartedAt,
+          ...ctx,
+        }
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown filter error";
+      logger.error(
+        `[FILTER:throw] "${source.name}": ${msg}`,
+        "DataSources",
+        {
+          stage: "filter:throw",
+          error: msg,
+          itemsIn: fresh.length,
+          elapsedMs: Date.now() - filterStartedAt,
+          ...ctx,
+        }
+      );
+      // On filter failure we deliberately skip Airtable to avoid
+      // dumping unfiltered noise into the destination — the run is
+      // recorded as partial so the admin sees the regression.
+      passedCount = 0;
+      toSave = [];
+      await bumpSourceStatus(source.id, false, `filter: ${msg}`);
+      await recordRun({
+        sourceId: source.id,
+        brandId: source.brandId ?? null,
+        status: "partial",
+        startedAt,
+        itemsFetched: result.articles.length,
+        itemsPassed: 0,
+        itemsSaved: 0,
+        errorMessage: `filter: ${msg}`,
+      });
+      return { articles: persisted };
     }
   }
 
+  // ── Stage 5: save to Airtable ───────────────────────────────────────────
+  if (toSave.length > 0) {
+    const saveStartedAt = Date.now();
+    try {
+      savedCount = await saveArticlesToAirtable(
+        toSave,
+        source.name,
+        source.type
+      );
+      logger.info(
+        `[AIRTABLE:ok] "${source.name}" — ${savedCount}/${toSave.length} saved in ${
+          Date.now() - saveStartedAt
+        }ms`,
+        "DataSources",
+        {
+          stage: "airtable:ok",
+          itemsAttempted: toSave.length,
+          itemsSaved: savedCount,
+          itemsFailed: toSave.length - savedCount,
+          elapsedMs: Date.now() - saveStartedAt,
+          ...ctx,
+        }
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown Airtable error";
+      logger.error(
+        `[AIRTABLE:throw] "${source.name}": ${msg}`,
+        "DataSources",
+        {
+          stage: "airtable:throw",
+          error: msg,
+          itemsAttempted: toSave.length,
+          elapsedMs: Date.now() - saveStartedAt,
+          ...ctx,
+        }
+      );
+    }
+  } else if (fresh.length > 0) {
+    logger.info(
+      `[AIRTABLE:skip] "${source.name}" — nothing left after filter`,
+      "DataSources",
+      { stage: "airtable:skip", itemsFresh: fresh.length, ...ctx }
+    );
+  }
+
+  // ── Stage 6: bookkeeping ────────────────────────────────────────────────
   await bumpSourceStatus(source.id, true);
+  const totalElapsed = Date.now() - startedAt.getTime();
   await recordRun({
     sourceId: source.id,
     brandId: source.brandId ?? null,
-    status: "success",
+    status: fresh.length === 0 ? "empty" : "success",
     startedAt,
     itemsFetched: result.articles.length,
     itemsPassed: passedCount,
     itemsSaved: savedCount,
   });
+  logger.info(
+    `[DONE] "${source.name}" — fetched ${result.articles.length}, kept ${fresh.length}, passed ${passedCount}, saved ${savedCount} in ${totalElapsed}ms`,
+    "DataSources",
+    {
+      stage: "done",
+      itemsFetched: result.articles.length,
+      itemsFresh: fresh.length,
+      itemsPassed: passedCount,
+      itemsSaved: savedCount,
+      totalElapsedMs: totalElapsed,
+      ...ctx,
+    }
+  );
 
   return { articles: fresh.length > 0 ? persisted : [] };
 }

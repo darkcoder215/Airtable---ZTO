@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 import {
   ScrollText,
   RefreshCw,
@@ -94,6 +95,23 @@ export default function LogsPage() {
           </button>
         </div>
       </div>
+
+      <PageGuide
+        pageName="السجلّات"
+        accent="blue"
+        storageKey="logs"
+        intro={
+          <>
+            خط زمني لكل عملية جلب وفلترة وحفظ يقوم بها النظام. هنا تذهب أوّلاً عند ظهور أيّ سلوك غير متوقّع: مصدر يعطي صفر أخبار، خبر لا يصل لـAirtable، عملية فلترة طويلة... كل عملية مسجّلة بسطر مع طوابع زمنية وتفاصيل.
+          </>
+        }
+        tips={[
+          { title: "الفلترة بالمستوى", body: <>القائمة الأولى تنتقي السجلّات بحسب الأهمّية: <span className="text-amber-300">معلومات</span> (الأحداث العادية)، <span className="text-amber-300">تحذيرات</span> (شيء يستحق الانتباه)، <span className="text-red-300">أخطاء</span> (فشل فعلي يحتاج تدخّلاً).</> },
+          { title: "مراحل الجلب", body: <>كل دورة جلب تكتب 5–6 أسطر بترتيب: <code className="text-amber-400 font-mono">FETCH → DEDUP → PERSIST → FILTER → AIRTABLE → DONE</code>. تتبّع المصدر بحسب اسمه لمشاهدة دورة كاملة.</> },
+          { title: "تتبّع خبر معيّن", body: <>اضغط أيّ سطر لعرض البيانات الكاملة (JSON). فيها معرّف المصدر، عدد العناصر، الأخطاء الخام من Airtable إلخ — كل ما تحتاجه للتشخيص.</> },
+          { title: "تنظيف السجلّات", body: <>السجلّات تُحفَظ تلقائياً (آخر 10,000 سطر). إن أردت أرشفة أو تصدير، الإجراء يتمّ من قاعدة البيانات مباشرةً عبر فريق التشغيل.</> },
+        ]}
+      />
 
       {/* Content */}
       {loading ? (

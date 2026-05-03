@@ -21,6 +21,7 @@ import {
   ListTodo,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 
 /* ───────── Types (mirror /api/dashboards response) ───────── */
 
@@ -221,6 +222,25 @@ export default function DashboardsAndViewsPage() {
           </button>
         </div>
       </div>
+
+      <PageGuide
+        pageName="لوحات الفريق والعرض"
+        accent="pink"
+        storageKey="views"
+        intro={
+          <>
+            صفحة عرض جماعية: تستعرض ما يعمل عليه كل عضو من الفريق الآن — المهام المفتوحة، المتأخّرة، والقادمة خلال أسبوع. تُغذّى من جدول
+            <code className="text-amber-400 mx-1 font-mono">Team</code>
+            داخل قاعدة Airtable نفسها.
+          </>
+        }
+        tips={[
+          { title: "اختيار عضو الفريق", body: <>القائمة الجانبية فيها كل أسماء أعضاء الفريق — اختر اسماً لرؤية كل مهامه على اليمين. كرّر يومياً مع كل عضو لمعرفة من يحتاج دعماً.</> },
+          { title: "تحديث البيانات", body: <>اضغط زرّ <span className="text-amber-300 font-bold">«تحديث»</span> لإعادة سحب أحدث المهام من Airtable. التحديث الذاتي يحدث عند فتح الصفحة فقط.</> },
+          { title: "إن لم يظهر الفريق", body: <>تأكّد من وجود جدول <code className="text-amber-400 font-mono">Team</code> في قاعدتك يحوي على الأقل الأعمدة (Name, Email, Role). البطاقة التشخيصية أعلى ستخبرك بالضبط ما الناقص.</> },
+          { title: "ربط المهام بالأعضاء", body: <>كل سجلّ مهمّة في Airtable يجب أن يحوي حقلاً نوعه «Linked record» يشير إلى الجدول Team — هذا الرابط هو ما يجمعها بالشخص المسؤول هنا.</> },
+        ]}
+      />
 
       {error && (
         <div className="zto-card p-4 flex items-start gap-2 border-red-500/30 bg-red-500/5">

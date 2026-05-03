@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 import {
   BarChart3,
   Loader2,
@@ -156,6 +157,23 @@ export default function AnalyticsPage() {
           </select>
         </div>
       </div>
+
+      <PageGuide
+        pageName="التحليلات"
+        accent="emerald"
+        storageKey="analytics"
+        intro={
+          <>
+            صفحة التحليلات تجمع كل ما حدث في النظام (جلب، فلترة، حفظ) في لوحة واحدة. استخدمها للإجابة عن أسئلة من نوع «كم نشرة وصلت من ميديا اليوم؟» أو «ما المصدر الذي يفشل أكثر من غيره؟».
+          </>
+        }
+        tips={[
+          { title: "فلترة بالعلامة", body: <>القائمة المنسدلة الأولى تُقصِر اللوحة على علامة واحدة فقط — مفيدة للحديث مع العميل عن أداء قنواته.</> },
+          { title: "نافذة زمنية", body: <>اختر آخر يوم/أسبوع/شهر/3 أشهر. كل البطاقات والرسوم تتجدّد تلقائياً.</> },
+          { title: "بطاقات المؤشّرات", body: <>الصف العلوي يلخّص: العناصر المُلتقَطة، التي مرّرتها الفلترة، التي وصلت إلى Airtable، ونسبة الأخطاء. أيّ بطاقة باللون الأحمر تستحق الفحص في صفحة السجلّات.</> },
+          { title: "أداء المصادر", body: <>الجدول السفلي يرتّب المصادر بحسب عدد العناصر — اضغط على اسم المصدر لتنتقل إلى صفحته في «مصادر البيانات».</> },
+        ]}
+      />
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">

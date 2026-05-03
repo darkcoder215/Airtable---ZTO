@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 import {
   Rss,
   Plus,
@@ -1203,6 +1204,25 @@ export default function DataSourcesPage() {
         </div>
       </div>
 
+      <PageGuide
+        pageName="مصادر البيانات"
+        accent="amber"
+        storageKey="data-sources"
+        intro={
+          <>
+            هذه الصفحة هي قلب النظام: تضيف مصادر (مواقع/X/LinkedIn)، يلتقطها النظام كل دقائق محدّدة، يفلترها وكيل ذكي، ثم يكتب الناتج إلى Airtable. تنقّل بين التبويبات لإدارة كل مرحلة بشكل مستقل.
+          </>
+        }
+        tips={[
+          { title: "تبويب «المصادر»", body: <>أضف موقعاً (RSS) أو حساب X/LinkedIn، اربطه بعلامة، وحدّد كل كم دقيقة يُجلب. <span className="text-amber-300">اختبر</span> المصدر قبل الحفظ لتأكيد أن الجلب يعمل والتاريخ يُقرأ صحيحاً.</> },
+          { title: "تبويب «الأخبار»", body: <>كل ما تمّ التقاطه. تصفّح، اقرأ، أو احفظ يدوياً إلى Airtable لو أردت تجاوز الفلتر الذكي.</> },
+          { title: "تبويب «الفلترة»", body: <>سجلّ كل دورة فلترة: ما الذي كَيِّف ولماذا. مفيد لمراجعة قرارات وكيل الفلترة وضبط تعليماته في صفحة الوكلاء.</> },
+          { title: "تبويب «الوجهة»", body: <>هنا تختار جدول Airtable لكل نوع مصدر، وتربط أعمدة الجدول مع حقول المقال. عمود <code className="text-amber-400 font-mono">Brand</code> يأخذ تلقائياً اسم العلامة المربوطة بالمصدر إن اخترت الحقل <code className="text-amber-400 font-mono">brandName</code>.</> },
+          { title: "تبويب «إضافة مصادر»", body: <>أمثلة وأدلّة لكل نوع مصدر — استخدمها كمرجع عند إضافة قنوات جديدة لم تتعامل معها من قبل.</> },
+          { title: "السجلّات والتشخيص", body: <>كل دورة جلب تكتب 5–6 أسطر مفصّلة في صفحة <span className="text-amber-300 font-bold">السجلّات</span> (FETCH → DEDUP → PERSIST → FILTER → AIRTABLE). اذهب إلى هناك مباشرةً عند ظهور أيّ خلل.</> },
+        ]}
+      />
+
       {!socialFetchEnabled && (
         <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
           <Info className="w-5 h-5 text-amber-400 shrink-0" />
@@ -1360,9 +1380,7 @@ export default function DataSourcesPage() {
                     عند فشل سلسلة المحاولات البرمجية فقط (مثلاً تاريخ عربي حر، أو
                     <code className="font-mono mx-1">«قبل ساعتين»</code>،
                     أو <code className="font-mono mx-1">«أمس»</code>): نمرّر السلسلة الخام إلى
-                    <code className="text-amber-400 mx-1 font-mono">claude-haiku-4-5</code>
-                    أو
-                    <code className="text-amber-400 mx-1 font-mono">gpt-4o-mini</code>
+                    <span className="text-amber-400 mx-1">نموذج لغوي صغير</span>
                     مع
                     <code className="text-amber-400 mx-1 font-mono">response_format: json_schema</code>
                     صارم يطلب
@@ -1385,7 +1403,7 @@ export default function DataSourcesPage() {
                   </li>
                 </ul>
                 <p className="text-[0.6rem] text-neutral-500 mt-2">
-                  التكلفة المتوقّعة: ~0.00005$ لكل تاريخ غير قابل للتحليل (Haiku صغير + 100 حرف). الاستهلاك الواقعي: قريب من الصفر بمصادرنا الحالية، لكنه يبقى احتياطياً ضرورياً عند إضافة ناشرين جدد بصيغ غير قياسية.
+                  التكلفة المتوقّعة: ~0.00005$ لكل تاريخ غير قابل للتحليل (نموذج صغير + 100 حرف). الاستهلاك الواقعي: قريب من الصفر بمصادرنا الحالية، لكنه يبقى احتياطياً ضرورياً عند إضافة ناشرين جدد بصيغ غير قياسية.
                 </p>
               </div>
             </div>

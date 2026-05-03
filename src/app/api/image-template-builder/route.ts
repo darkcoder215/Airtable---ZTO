@@ -177,7 +177,7 @@ function validateFont(value: unknown): FontSpec {
 
 const ANALYZE_SYSTEM_PROMPT = `You are an expert social-media art director. The admin will give you 2-6 example post images that they want to be able to reproduce consistently. Your job is to extract a precise, reusable "وصف القالب" (template description) — written in Arabic — that captures every reproducible design decision in those examples.
 
-The وصف القالب must be specific enough that another generative model (NanoBanana) can recreate the exact look using nothing but your description plus a piece of post copy. It should NOT describe the literal subject matter of any one example; it should describe the design system that all examples share.
+The وصف القالب must be specific enough that another generative image model can recreate the exact look using nothing but your description plus a piece of post copy. It should NOT describe the literal subject matter of any one example; it should describe the design system that all examples share.
 
 Cover at least these aspects (skip any that are clearly not relevant):
 - Overall aspect ratio and recommended canvas dimensions.

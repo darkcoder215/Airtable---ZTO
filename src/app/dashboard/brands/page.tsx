@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 import {
   Building2,
   Plus,
@@ -287,6 +288,25 @@ export default function BrandsPage() {
           </button>
         )}
       </div>
+
+      <PageGuide
+        pageName="العلامات التجارية"
+        accent="amber"
+        storageKey="brands"
+        intro={
+          <>
+            العلامة هي «المظلّة» التي تجمع كل المصادر التابعة لعميل واحد. أنشئ علامة هنا أوّلاً، ثم في صفحة المصادر اربط كل مصدر بالعلامة المناسبة. اسم العلامة يظهر تلقائياً في عمود
+            <code className="text-amber-400 mx-1 font-mono">Brand</code>
+            داخل Airtable، ويُستخدم لفلترة كل لوحة في النظام لاحقاً.
+          </>
+        }
+        tips={[
+          { title: "إنشاء علامة", body: <>اضغط <span className="text-amber-300 font-bold">«علامة جديدة»</span> ثم أدخل الاسم وSlug قصير (يُستخدم في الروابط). يمكنك ربط جدول Airtable معيّن بالعلامة لاحقاً إن أردت تصدير كل علامة لوجهة مستقلة.</> },
+          { title: "ربط المصادر", body: <>كل مصدر (موقع/X/LinkedIn) يُربط بعلامة في صفحة المصادر. مصدر بدون علامة سيظهر في كل اللوحات بقيمة Brand فارغة.</> },
+          { title: "تعطيل علامة مؤقّتاً", body: <>إذا توقّف عميل ما، احتفظ بالعلامة لكن أوقف مصادرها — أرشيف الأخبار يبقى مرئياً، والجلب الدوري يتوقّف.</> },
+          { title: "حذف علامة", body: <>الحذف لا يحذف الأخبار التي سبق التقاطها (للسلامة) — يلغي فقط الربط في المصادر التابعة. أعد الربط بعلامة أخرى أو احذف المصادر يدوياً.</> },
+        ]}
+      />
 
       {showNewBrand && (
         <div className="zto-card p-5 space-y-3 border-amber-400/30">

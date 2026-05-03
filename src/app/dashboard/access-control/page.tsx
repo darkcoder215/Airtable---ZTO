@@ -25,6 +25,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 
 type Role = "admin" | "editor" | "viewer";
 
@@ -275,6 +276,29 @@ export default function AccessControlPage() {
           </button>
         </div>
       </div>
+
+      <PageGuide
+        pageName="الصلاحيات والمستخدمون"
+        accent="indigo"
+        storageKey="access-control"
+        intro={
+          <>
+            من هنا تتحكّم في من يدخل النظام وما الذي يستطيع فعله. ثلاثة أدوار:
+            <span className="text-amber-300 mx-1 font-bold">مدير</span>
+            (كل شيء)،
+            <span className="text-blue-300 mx-1 font-bold">محرّر</span>
+            (يضيف/يعدّل لكن لا يحذف ولا يدير الحسابات)،
+            <span className="text-emerald-300 mx-1 font-bold">مشاهد</span>
+            (قراءة فقط).
+          </>
+        }
+        tips={[
+          { title: "مستخدم جديد", body: <>اضغط <span className="text-amber-300 font-bold">«مستخدم جديد»</span>، أدخل البيانات والدور. كلمة المرور تُهَش (scrypt) قبل الحفظ — لا نستطيع نحن قراءتها لاحقاً. زوّد المستخدم بكلمة المرور المؤقّتة بقناة آمنة.</> },
+          { title: "تعطيل بدل الحذف", body: <>إذا غادر شخصٌ ما، اضغط زرّ التعطيل بدل الحذف — سجلّاته (من فلتر، ومن صنع، ومن نشر) تبقى مرتبطة باسمه.</> },
+          { title: "إعادة تعيين كلمة مرور", body: <>اضغط أيقونة المفتاح بجوار المستخدم. سيُطلب منك إدخال كلمة جديدة فوراً، وتُلغى الجلسات السابقة تلقائياً.</> },
+          { title: "تفصيل الصلاحيات", body: <>افتح بطاقة «الأدوار والصلاحيات» أسفل لمعرفة بالضبط أيّ زرّ يخدم أيّ دور — مفيد عند توضيح ذلك للعميل.</> },
+        ]}
+      />
 
       {/* Roles + permissions reference */}
       <details className="zto-card p-4 group">

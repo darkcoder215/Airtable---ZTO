@@ -31,6 +31,7 @@ import {
   Smile,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 
 /* ─────────────── Constants ─────────────── */
 
@@ -355,6 +356,30 @@ export default function ImageGeneratorPage() {
           )}
         </div>
       </div>
+
+      <PageGuide
+        pageName="مولّد صور المنشورات"
+        accent="purple"
+        storageKey="image-generator"
+        intro={
+          <>
+            ثلاث تبويبات:
+            <span className="text-amber-300 mx-1 font-bold">توليد</span>
+            (اصنع صورة الآن)،
+            <span className="text-amber-300 mx-1 font-bold">الشعارات</span>
+            (مكتبة شعارات قابلة لإعادة الاستخدام)،
+            <span className="text-amber-300 mx-1 font-bold">القوالب</span>
+            (تصاميم محفوظة بنسبة أبعاد وتعليمات جاهزة، يمكن بناؤها بالذكاء الاصطناعي من أمثلة قديمة).
+          </>
+        }
+        tips={[
+          { title: "ابدأ بالشعارات والقوالب", body: <>قبل توليد أيّ صورة، أضف شعاراً واحداً على الأقل وقالباً واحداً. الشعارات أساسية — الصورة لن تُولَّد بدون شعار. القوالب اختيارية لكنها تحوّل النتيجة من «جيدة» إلى «متّسقة بشكل احترافي».</> },
+          { title: "بناء قالب بالذكاء الاصطناعي", body: <>في تبويب القوالب، اضغط <span className="text-purple-300 font-bold">«إنشاء بالذكاء الاصطناعي»</span>: ارفع صورتين أو أكثر من تصاميم مشابهة، يستخرج النظام «وصف القالب» الذي يمكنه إعادة إنتاج الأسلوب نفسه على نصوص جديدة. يمكنك أيضاً رفع ملف خط (.ttf/.otf) لإلزام النظام بأسلوب طباعي محدّد.</> },
+          { title: "صور مرافقة", body: <>أثناء بناء القالب يمكنك إرفاق حتى صورتين إضافيّتين (شعار ثانٍ، صورة منتج، وجه شخصيّة) مع وصف قصير لمكان كل صورة في التصميم — وستدمج تلقائياً في كل توليد لاحق.</> },
+          { title: "التوليد ثم التعديل", body: <>أدخل نص المنشور واضغط <span className="text-amber-300 font-bold">توليد</span>. إن لم تعجبك النتيجة، اكتب التعديل المطلوب في خانة «تعديلات» واضغط مجدداً — يحتفظ النظام بسياق المحادثة فيُعدّل الصورة بدل توليدها من الصفر.</> },
+          { title: "الجودة والأبعاد", body: <>اختر النسبة المناسبة للقناة: <code className="text-amber-400 font-mono">1:1</code> للمنشور العام، <code className="text-amber-400 font-mono">4:5</code> لـLinkedIn feed، <code className="text-amber-400 font-mono">9:16</code> للقصص. ابدأ بـ2K (متوازن) ولا تستخدم 4K إلا عند الطباعة.</> },
+        ]}
+      />
 
       {/* Top tab bar */}
       <div className="flex items-center gap-1 p-1 bg-[#1a1a1a] border border-neutral-800 rounded-xl w-fit">
@@ -2061,9 +2086,7 @@ function AITemplateWizard({
       {step === "examples" && (
         <div className="space-y-4">
           <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 text-[0.7rem] text-neutral-300 leading-relaxed">
-            ارفع صورتين على الأقل (حتى 6) من تصاميمك المعتادة. سيقوم نموذج
-            <code className="text-purple-300 mx-1 font-mono">Opus 4.7</code>
-            بتحليلها واستخراج وصف القالب — أسلوب الخطوط، الألوان، التوزيع، مكان الشعار، وغيرها.
+            ارفع صورتين على الأقل (حتى 6) من تصاميمك المعتادة. سيقوم النظام بتحليلها واستخراج وصف القالب — أسلوب الخطوط، الألوان، التوزيع، مكان الشعار، وغيرها.
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {examples.map((url, i) => (
@@ -2119,7 +2142,7 @@ function AITemplateWizard({
             </div>
             <p className="text-[0.6rem] text-neutral-500 leading-relaxed mb-2">
               صورة شعار، منتج، أو شخصية تريد دمجها داخل التصميم. اكتب لكل صورة ملاحظة قصيرة عن مكانها أو معاملتها (مثل
-              «شعار في الزاوية اليمنى العليا»، «خلفية شفّافة»). تُرسَل مع الأمثلة إلى Opus 4.7 وإلى NanoBanana عند المعاينة.
+              «شعار في الزاوية اليمنى العليا»، «خلفية شفّافة»). تُرسَل مع الأمثلة لمرحلة التحليل ولمرحلة المعاينة معاً ليتم دمجها في التصميم النهائي.
             </p>
             <div className="space-y-2">
               {extras.map((ex, i) => (
@@ -2186,7 +2209,7 @@ function AITemplateWizard({
               <code className="text-amber-400 mx-1 font-mono">.otf</code>
               أو
               <code className="text-amber-400 mx-1 font-mono">.woff[2]</code>.
-              نرسم منه عيّنة عربية + لاتينية على الـcanvas في متصفّحك ونرسلها إلى Opus 4.7 ليصف أسلوبه بدقّة كافية ليُحاكيها NanoBanana في المعاينة (نموذج التوليد لا يستطيع تركيب خط مخصّص).
+              نرسم منه عيّنة عربية + لاتينية على الـcanvas في متصفّحك ونرسلها للنظام ليصف أسلوبه بدقّة كافية ليُحاكَى في المعاينة (لا يمكن تركيب خط مخصّص داخل نموذج التوليد، لذا نعتمد على وصف الأسلوب).
             </p>
             <div className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-2">
@@ -2263,7 +2286,7 @@ function AITemplateWizard({
       {step === "wasf" && (
         <div className="space-y-4">
           <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 text-[0.7rem] text-neutral-300 leading-relaxed">
-            هذا هو <span className="font-bold">وصف القالب</span> الذي استخرجه النموذج. يمكنك تعديله يدوياً قبل المعاينة. ثم اكتب نصاً تجريبياً لتوليد معاينة عبر NanoBanana.
+            هذا هو <span className="font-bold">وصف القالب</span> الذي استخرجه النظام. يمكنك تعديله يدوياً قبل المعاينة. ثم اكتب نصاً تجريبياً لتوليد معاينة فعليّة.
           </div>
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -2369,7 +2392,7 @@ function AITemplateWizard({
                 </div>
               </div>
               <div>
-                <SubLabel>أو اطلب تعديلاً على الوصف عبر Opus 4.7</SubLabel>
+                <SubLabel>أو اطلب تعديلاً ذكياً على الوصف</SubLabel>
                 <textarea
                   className="zto-input min-h-[100px] text-xs"
                   placeholder="مثال: اجعل الخلفية أغمق، حرّك الشعار للزاوية اليسرى، استخدم خطاً أعرض للعنوان..."
@@ -2390,7 +2413,7 @@ function AITemplateWizard({
                   تحديث وصف القالب
                 </button>
                 <p className="text-[0.6rem] text-neutral-500 mt-1.5 leading-relaxed">
-                  سيتم إرسال الأمثلة الأصلية + المعاينة الحالية + الوصف الحالي + طلبك إلى Opus 4.7
+                  سيتم إرسال الأمثلة الأصلية + المعاينة الحالية + الوصف الحالي + طلبك إلى نظام التحليل
                   لتحديث الوصف. ستحتاج لتوليد معاينة جديدة بعد ذلك.
                 </p>
               </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAppStore } from "@/store/app-store";
+import PageGuide from "@/components/PageGuide";
 import {
   Bot,
   Plus,
@@ -383,6 +384,26 @@ export default function AgentsPage() {
           )}
         </div>
       </div>
+
+      <PageGuide
+        pageName="وكلاء الذكاء الاصطناعي"
+        accent="amber"
+        storageKey="agents"
+        intro={
+          <>
+            هنا تنشئ <span className="text-amber-300 font-bold">وكلاء</span> ذكيين تستخدمهم في باقي النظام: وكيل
+            <span className="font-bold mx-1">فلترة</span> يقرّر أيّ الأخبار تستحق الحفظ، ووكيل
+            <span className="font-bold mx-1">كتابة</span> يحرّر منشوراً جاهزاً، إلى آخره. اختر النموذج وضع تعليمات
+            النظام (System Prompt) ثم اختبر مباشرة قبل ربطه بمصدر بيانات.
+          </>
+        }
+        tips={[
+          { title: "إنشاء وكيل جديد", body: <>اضغط <span className="text-amber-300 font-bold">«إنشاء وكيل جديد»</span> ثم اختر النوع (filtering للأخبار، writing للمنشورات...). صَف المهمّة بدقّة في تعليمات النظام — كلما كانت أوضح، كانت النتائج أثبت.</> },
+          { title: "اختيار النموذج", body: <>اختر نموذجاً مناسباً للمهمة من القائمة. النماذج الكبيرة أدقّ لكن أبطأ وأكلف؛ المهام البسيطة (تصنيف عنوان مثلاً) يكفيها نموذج سريع.</> },
+          { title: "تبويب «اختبار»", body: <>اكتب مدخلاً افتراضياً وشاهد المخرَج قبل أن تربط الوكيل بأيّ مصدر — يوفّر عليك دورات فلترة كاملة في الإنتاج.</> },
+          { title: "تبويب «التنفيذ»", body: <>شغّل الوكيل على عيّنة بيانات حقيقية للتحقّق من سلوكه قبل التشغيل الآلي. النتائج تُسجَّل في صفحة السجلّات.</> },
+        ]}
+      />
 
       {/* AI provider not configured warning */}
       {!orConfigured && (
