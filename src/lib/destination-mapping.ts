@@ -34,6 +34,67 @@ export const ARTICLE_TOKENS = [
 ] as const;
 export type ArticleToken = (typeof ARTICLE_TOKENS)[number];
 
+// Per-source-type field metadata. The underlying FetchedArticle shape is
+// shared, but each source populates a different subset and uses different
+// semantics — e.g. for X "description" is the tweet text and "categories"
+// is just the literal ["twitter"] tag, not a real classification.
+//
+// Each entry has a short Arabic description the mapping UI shows next to
+// the field, plus a `populated` flag that's true when the corresponding
+// fetcher reliably sets that field for that source type. Fields that are
+// usually empty appear dimmed in the picker so admins don't accidentally
+// map them.
+export interface TokenMeta {
+  token: ArticleToken;
+  label: string;       // short Arabic name
+  description: string; // one-line Arabic description for the mapping UI
+  populated: boolean;  // does this source type usually fill this field?
+}
+
+const META_RSS: TokenMeta[] = [
+  { token: "title",        label: "العنوان",       description: "عنوان المقال كما يظهر في الخلاصة",                populated: true  },
+  { token: "description",  label: "الوصف",         description: "ملخّص أو فقرة من المقال (يُستخرج من الـRSS)",   populated: true  },
+  { token: "url",          label: "الرابط",        description: "رابط المقال الأصلي على الموقع",                  populated: true  },
+  { token: "author",       label: "الكاتب",        description: "اسم الكاتب — يعتمد على إتاحته في الخلاصة",      populated: true  },
+  { token: "publishedAt",  label: "تاريخ النشر",   description: "تاريخ نشر المقال كما ورد من الموقع",             populated: true  },
+  { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب المقال من قِبَلنا",                      populated: true  },
+  { token: "sourceName",   label: "اسم المصدر",    description: "اسم المصدر كما عرّفته في صفحة المصادر",        populated: true  },
+  { token: "categories",   label: "الفئات",        description: "وسوم/تصنيفات من الـRSS (مثل political/business)", populated: true  },
+  { token: "imageUrl",     label: "رابط الصورة",   description: "صورة بارزة من المقال إن وُجدت في الخلاصة",       populated: true  },
+];
+
+const META_TWITTER: TokenMeta[] = [
+  { token: "title",        label: "العنوان",       description: "نُولَّد آلياً: «اسم الحساب: أول 80 حرفاً من التغريدة...»", populated: true  },
+  { token: "description",  label: "نص التغريدة",   description: "النص الكامل للتغريدة (بدون اقتطاع)",             populated: true  },
+  { token: "url",          label: "رابط التغريدة", description: "رابط التغريدة على X",                            populated: true  },
+  { token: "author",       label: "اسم الحساب",    description: "اسم العرض أو @المُعرّف للحساب صاحب التغريدة",  populated: true  },
+  { token: "publishedAt",  label: "تاريخ التغريدة", description: "وقت نشر التغريدة",                              populated: true  },
+  { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب التغريدة من قِبَلنا",                    populated: true  },
+  { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الحساب)",                populated: true  },
+  { token: "categories",   label: "الفئات",        description: "ثابت = [\"twitter\"] — يدلّ على المنصّة فقط",   populated: false },
+  { token: "imageUrl",     label: "رابط الصورة",   description: "غير مُستخرَج للتغريدات حالياً",                 populated: false },
+];
+
+const META_LINKEDIN: TokenMeta[] = [
+  { token: "title",        label: "العنوان",       description: "نُولَّد آلياً: «الكاتب: أول 80 حرفاً من المنشور...»", populated: true  },
+  { token: "description",  label: "نص المنشور",    description: "النص الكامل للمنشور (يُقتَطَع عند 8000 حرف)",     populated: true  },
+  { token: "url",          label: "رابط المنشور",  description: "رابط المنشور على LinkedIn",                       populated: true  },
+  { token: "author",       label: "اسم الكاتب",    description: "اسم الكاتب الكامل (firstName + lastName)",        populated: true  },
+  { token: "publishedAt",  label: "تاريخ المنشور", description: "وقت نشر المنشور كما ورد من LinkedIn",            populated: true  },
+  { token: "fetchedAt",    label: "وقت الجلب",     description: "وقت سحب المنشور من قِبَلنا",                     populated: true  },
+  { token: "sourceName",   label: "اسم الحساب",    description: "اسم المصدر كما عرّفته (الصفحة/الحساب)",         populated: true  },
+  { token: "categories",   label: "الفئات",        description: "[\"linkedin\", النوع] — مثلاً [\"linkedin\", \"image\"]", populated: true  },
+  { token: "imageUrl",     label: "رابط الصورة",   description: "أول صورة من المنشور أو غلاف الفيديو",            populated: true  },
+];
+
+export const ARTICLE_TOKEN_META_BY_TYPE: Record<SourceType, TokenMeta[]> = {
+  rss: META_RSS,
+  twitter: META_TWITTER,
+  linkedin: META_LINKEDIN,
+  apify: META_RSS,
+  custom: META_RSS,
+};
+
 export type MappingEntry =
   | {
       type: "field";

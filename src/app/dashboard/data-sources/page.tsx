@@ -263,6 +263,11 @@ export default function DataSourcesPage() {
   });
   const [destActiveType, setDestActiveType] = useState<MappableType>("rss");
   const [destTokens, setDestTokens] = useState<string[]>([]);
+  // Per-type token metadata loaded with the mapping. The side panel shows
+  // these (label + Arabic one-liner + populated flag) so admins see exactly
+  // what each source type actually fills.
+  interface TokenMeta { token: string; label: string; description: string; populated: boolean }
+  const [destTokenMetaByType, setDestTokenMetaByType] = useState<Record<string, TokenMeta[]>>({});
   const [destTables, setDestTables] = useState<DestTable[]>([]);
   const [destColumnsByTable, setDestColumnsByTable] = useState<Record<string, DestColumn[]>>({});
   const [destLoading, setDestLoading] = useState(false);
@@ -378,6 +383,9 @@ export default function DataSourcesPage() {
       }
       setDestPerType(next);
       setDestTokens(Array.isArray(data.articleTokens) ? data.articleTokens : []);
+      if (data.articleTokenMetaByType && typeof data.articleTokenMetaByType === "object") {
+        setDestTokenMetaByType(data.articleTokenMetaByType as Record<string, TokenMeta[]>);
+      }
       setDestDirty(false);
     } catch (err) {
       addToast(err instanceof Error ? err.message : "فشل تحميل المخطّط", "error");
@@ -1144,6 +1152,153 @@ export default function DataSourcesPage() {
       {/* ───── Sources Tab ───── */}
       {activeTab === "sources" && (
         <>
+          {/* Dedup explainer (collapsed by default) */}
+          <details className="zto-card p-4 group">
+            <summary className="cursor-pointer flex items-center gap-2 list-none">
+              <Info className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="text-sm font-bold text-white">
+                ما المنطق الذي نستخدمه للتمييز بين الجديد والمكرّر قبل الفلترة بالذكاء الاصطناعي؟
+              </span>
+              <ChevronDown className="w-4 h-4 text-neutral-500 mr-auto group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="mt-3 text-xs text-neutral-400 leading-relaxed space-y-3 pr-6">
+              <p>
+                نعتمد حالياً منطقاً بسيطاً ومتيناً يعمل على جميع أنواع المصادر:
+                <span className="text-amber-400 font-bold mr-1">قارن الرابط مع ما حُفظ سابقاً لنفس المصدر.</span>
+                لو الرابط جديد → نمرّره لمرحلة الفلترة الذكية. لو موجود → نتخطّاه فوراً قبل أيّ استدعاء للنموذج (توفير في التكلفة والوقت).
+              </p>
+              <p>
+                التطبيق يعتمد قيداً فريداً على مستوى قاعدة البيانات
+                <code className="text-amber-400 mx-1 font-mono">UNIQUE (source_id, url)</code>
+                مع
+                <code className="text-amber-400 mx-1 font-mono">upsert(... onConflict: &quot;source_id,url&quot;)</code>
+                — أيّ سباق بين عمليات الجلب لا يُسجِّل نفس الرابط مرتين.
+              </p>
+
+              {/* Per-type breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 my-3">
+                <div className="bg-[#1a1a1a] border border-orange-400/20 rounded-lg p-3">
+                  <p className="text-xs font-bold text-orange-400 mb-1.5 flex items-center gap-1.5">
+                    <Rss className="w-3.5 h-3.5" /> المواقع
+                  </p>
+                  <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
+                    <li>المفتاح: رابط الـ
+                      <code className="text-amber-400 mx-1 font-mono">{"<link>"}</code>
+                      من الـRSS كما هو.
+                    </li>
+                    <li>الحدّ: 50 عنصراً لكل عملية جلب.</li>
+                    <li>المخاطر: لو غيّر الناشر الـslug للرابط، يُعدّ عنصراً جديداً.</li>
+                  </ul>
+                </div>
+                <div className="bg-[#1a1a1a] border border-blue-400/20 rounded-lg p-3">
+                  <p className="text-xs font-bold text-blue-400 mb-1.5 flex items-center gap-1.5">
+                    <AtSign className="w-3.5 h-3.5" /> X (تويتر)
+                  </p>
+                  <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
+                    <li>المفتاح: رابط التغريدة
+                      <code className="text-amber-400 mx-1 font-mono">tweet.twitterUrl</code>
+                      (يحتوي معرّف التغريدة الفريد).
+                    </li>
+                    <li>الحدّ: آخر 5 تغريدات لكل حساب لكل مرة.</li>
+                    <li>المخاطر: شِبه معدومة — معرّف التغريدة لا يتغيّر.</li>
+                  </ul>
+                </div>
+                <div className="bg-[#1a1a1a] border border-indigo-400/20 rounded-lg p-3">
+                  <p className="text-xs font-bold text-indigo-400 mb-1.5 flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5" /> LinkedIn
+                  </p>
+                  <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
+                    <li>المفتاح: رابط المنشور
+                      <code className="text-amber-400 mx-1 font-mono">post.url</code>
+                      (يحتوي
+                      <code className="text-amber-400 mx-1 font-mono">activity:&lt;urn&gt;</code>
+                      الفريد).
+                    </li>
+                    <li>الحدّ: 10 منشورات لكل صفحة لكل مرة.</li>
+                    <li>المخاطر: شِبه معدومة — الـURN ثابت.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                <p className="text-xs font-bold text-emerald-400 mb-1.5">
+                  ✓ مقترح برمجي (بدون نموذج لغوي)
+                </p>
+                <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
+                  <li>
+                    <span className="text-white">تطبيع الرابط</span> قبل المقارنة:
+                    إزالة الـquery params التتبّعية
+                    (<code className="text-amber-400 font-mono">utm_*</code>،
+                    <code className="text-amber-400 font-mono">fbclid</code>،
+                    <code className="text-amber-400 font-mono">gclid</code>)،
+                    وتوحيد الـtrailing slash، وإزالة الـ
+                    <code className="text-amber-400 font-mono">#fragment</code>.
+                  </li>
+                  <li>
+                    <span className="text-white">بصمة محتوى</span>:
+                    حساب
+                    <code className="text-amber-400 mx-1 font-mono">SHA-256(title + first 500 chars)</code>
+                    وفهرسة عمود
+                    <code className="text-amber-400 mx-1 font-mono">content_hash</code>
+                    — يلتقط إعادة النشر تحت رابط مختلف.
+                  </li>
+                  <li>
+                    <span className="text-white">مفاتيح خاصة بالمنصّة</span>:
+                    استخراج
+                    <code className="text-amber-400 mx-1 font-mono">tweet_id</code>
+                    من رابط X و
+                    <code className="text-amber-400 mx-1 font-mono">activity_urn</code>
+                    من رابط LinkedIn، وحفظها في عمود ثانٍ — أمتن من الرابط ككل.
+                  </li>
+                  <li>
+                    <span className="text-white">نافذة زمنية</span>: تجاهل أي عنصر أقدم من
+                    <code className="text-amber-400 mx-1 font-mono">last_success_at</code>
+                    لتقليص الفحص في الجلبات الكبيرة.
+                  </li>
+                </ul>
+                <p className="text-[0.6rem] text-neutral-500 mt-2">
+                  التكلفة: تقريباً صفر. التغطية: ~99% من الحالات الواقعية. مناسب كتحسين فوري.
+                </p>
+              </div>
+
+              <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
+                <p className="text-xs font-bold text-purple-400 mb-1.5">
+                  ✦ مقترح بالذكاء الاصطناعي (للحالات المعقّدة)
+                </p>
+                <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
+                  <li>
+                    <span className="text-white">تضمينات (embeddings)</span> صغيرة لكل عنوان+ملخّص
+                    (مثل
+                    <code className="text-amber-400 mx-1 font-mono">text-embedding-3-small</code>،
+                    1536-d). تخزين الـvector في عمود
+                    <code className="text-amber-400 mx-1 font-mono">embedding</code>
+                    عبر
+                    <code className="text-amber-400 mx-1 font-mono">pgvector</code>.
+                  </li>
+                  <li>
+                    قبل الحفظ: استعلام أقرب الجيران
+                    (<code className="text-amber-400 font-mono">embedding {"<->"} ?</code>)
+                    داخل نفس المصدر خلال آخر 30 يوم.
+                  </li>
+                  <li>
+                    اعتبار العنصر مكرّراً إذا كانت
+                    <code className="text-amber-400 mx-1 font-mono">cosine_similarity ≥ 0.92</code>
+                    — يلتقط نفس الخبر معاد صياغته من ناشرَين، أو ترجمات إنجليزي/عربي للخبر ذاته.
+                  </li>
+                  <li>
+                    سجلّ ربط
+                    <code className="text-amber-400 mx-1 font-mono">duplicate_of</code>
+                    يربط النسخ المكرّرة بالأصل بدل حذفها — يفيد في تتبّع تغطية الخبر عبر مصادر.
+                  </li>
+                </ul>
+                <p className="text-[0.6rem] text-neutral-500 mt-2">
+                  التكلفة: ~0.00002$ لكل عنوان (embedding صغير). التغطية: ~99.9%.
+                  مناسب لاحقاً إن لاحظنا تكرارات عابرة للمصادر.
+                </p>
+              </div>
+            </div>
+          </details>
+
           {/* Filter bar */}
           <div className="zto-card p-4">
             <div className="flex items-center gap-3 flex-wrap">
@@ -2265,20 +2420,46 @@ export default function DataSourcesPage() {
                 <div className="zto-card p-3">
                   <h4 className="text-xs font-bold text-white mb-2 flex items-center gap-2">
                     <BookOpen className="w-3.5 h-3.5 text-purple-400" />
-                    حقول المقال المتاحة
+                    حقول المقال المتاحة لـ {TYPE_LABELS[destActiveType]}
                   </h4>
                   <p className="text-[0.6rem] text-neutral-500 mb-2">
-                    قيم حقيقية من آخر مقال {sampleArticle ? `لـ "${sampleArticle.sourceName ?? "..."}"` : "(لا يوجد بعد)"}
+                    {sampleArticle
+                      ? `أمثلة من آخر مقال لـ "${sampleArticle.sourceName ?? "..."}". الحقول الباهتة لا يملؤها هذا النوع عادةً.`
+                      : "(لا يوجد مقال بعد لعرض قيم فعلية)"}
                   </p>
-                  <div className="space-y-1 max-h-[260px] overflow-y-auto">
-                    {destTokens.map((tk) => {
-                      const sample = sampleValueFor(tk);
+                  <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+                    {(destTokenMetaByType[destActiveType] ?? destTokens.map((t): TokenMeta => ({ token: t, label: t, description: "", populated: true }))).map((meta) => {
+                      const sample = sampleValueFor(meta.token);
                       return (
-                        <div key={tk} className="flex items-start gap-2 text-[0.65rem] border-b border-neutral-800/50 last:border-0 py-1.5">
-                          <code className="text-amber-400 font-mono shrink-0 w-[70px]">{tk}</code>
-                          <span className="text-neutral-400 break-words line-clamp-2 flex-1" dir="auto">
-                            {sample || <span className="text-neutral-600">— فارغ —</span>}
-                          </span>
+                        <div
+                          key={meta.token}
+                          className={`border-b border-neutral-800/50 last:border-0 pb-1.5 ${
+                            meta.populated ? "" : "opacity-50"
+                          }`}
+                        >
+                          <div className="flex items-baseline gap-2">
+                            <code
+                              className={`font-mono text-[0.7rem] shrink-0 ${
+                                meta.populated ? "text-amber-400" : "text-neutral-500"
+                              }`}
+                            >
+                              {meta.token}
+                            </code>
+                            <span className="text-[0.6rem] text-neutral-400">{meta.label}</span>
+                            {!meta.populated && (
+                              <span className="text-[0.55rem] text-neutral-600 font-bold">— عادةً فارغ</span>
+                            )}
+                          </div>
+                          {meta.description && (
+                            <p className="text-[0.6rem] text-neutral-500 leading-snug mt-0.5" dir="auto">
+                              {meta.description}
+                            </p>
+                          )}
+                          {sample && meta.populated && (
+                            <p className="text-[0.6rem] text-neutral-300 mt-0.5 break-words line-clamp-1 bg-[#0d0d0d] border border-neutral-800 rounded px-1.5 py-0.5" dir="auto">
+                              {sample}
+                            </p>
+                          )}
                         </div>
                       );
                     })}

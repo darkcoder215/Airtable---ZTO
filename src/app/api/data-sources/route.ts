@@ -33,6 +33,7 @@ import {
   applyMapping,
   sanitizePerTypeMapping,
   ARTICLE_TOKENS,
+  ARTICLE_TOKEN_META_BY_TYPE,
   MAPPABLE_SOURCE_TYPES,
   DESTINATION_BASE_ID,
   type TypeMapping,
@@ -126,6 +127,10 @@ export async function GET(request: NextRequest) {
         mapping,
         baseId: DESTINATION_BASE_ID,
         articleTokens: ARTICLE_TOKENS,
+        // Per-type token metadata (Arabic label + one-line description +
+        // populated flag). Lets the UI show only fields the chosen source
+        // type actually fills, with a short hint next to each.
+        articleTokenMetaByType: ARTICLE_TOKEN_META_BY_TYPE,
         sourceTypes: MAPPABLE_SOURCE_TYPES,
       });
     } catch (err) {
