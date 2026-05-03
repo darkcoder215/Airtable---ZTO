@@ -4,14 +4,20 @@
 /* Tinta Arabic — local file ships in /public/fonts. Two weights only
    (Light + Bold). We expose them as 300 and 700 in the @font-face rules,
    then let CSS interpolate from the same file with `font-weight: 100 300`
-   / `400 700` ranges so the engine picks Light for thin text and Bold for
-   emphasis. Display: swap keeps Sora visible while Tinta downloads. */
+   / `400 700` ranges so the engine picks Light for thin text and Bold
+   for emphasis. Display: swap keeps Sora visible while Tinta downloads.
+   Same unicode-range trick as Naveid below — these brand display faces
+   often have weak / missing Latin + digit glyphs, so we scope them to
+   Arabic codepoints and let the rest of the font stack (Sora / IBM Plex
+   Sans Arabic / system-ui) handle Latin and numerals. */
 @font-face {
   font-family: 'Tinta Arabic';
   font-style: normal;
   font-weight: 100 300;
   font-display: swap;
   src: url('/fonts/TintaArabic-Light.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
   font-family: 'Tinta Arabic';
@@ -19,19 +25,35 @@
   font-weight: 400 700;
   font-display: swap;
   src: url('/fonts/TintaArabic-Bold.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
 /* Naveid Arabic DEMO — three discrete weights (Thin / Regular /
    ExtraBold). We split the weight ranges so 100-300 picks Thin, 400-600
    picks Regular, 700-900 picks ExtraBold. Used by the gold ZTO themes
    (dark + light) for a more contemporary Arabic display face than the
-   default Noto Kufi. */
+   default Noto Kufi.
+
+   `unicode-range` is critical here: Naveid's DEMO build doesn't ship
+   complete Latin or digit glyphs, so without scoping the file the
+   browser would either substitute a fallback per-character (giving
+   inconsistent number widths) or render numerals as broken/wrong
+   shapes. Restricting the file to Arabic codepoints lets Latin / digits
+   fall through cleanly to the next font in the stack (Noto Kufi
+   Arabic, which has correct Latin numerals). */
 @font-face {
   font-family: 'Naveid Arabic';
   font-style: normal;
   font-weight: 100 300;
   font-display: swap;
   src: url('/fonts/NaveidArabicDEMO-Thin.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, /* Arabic                          */
+    U+0750-077F, /* Arabic Supplement               */
+    U+08A0-08FF, /* Arabic Extended-A               */
+    U+FB50-FDFF, /* Arabic Presentation Forms-A     */
+    U+FE70-FEFF; /* Arabic Presentation Forms-B     */
 }
 @font-face {
   font-family: 'Naveid Arabic';
@@ -39,6 +61,8 @@
   font-weight: 400 600;
   font-display: swap;
   src: url('/fonts/NaveidArabicDEMO-Regular.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
   font-family: 'Naveid Arabic';
@@ -46,6 +70,8 @@
   font-weight: 700 900;
   font-display: swap;
   src: url('/fonts/NaveidArabicDEMO-ExtraBold.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
 /* ============================================================
