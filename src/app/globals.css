@@ -676,7 +676,7 @@ button.zto-card:hover {
    node dots, no diagonal traces. Two soft radial signal glows
    layered on body::after add depth without competing with the
    grid lines. */
-[data-theme="signal"] body, [data-theme="signal-light"] body,
+[data-theme="signal"] body,
 [data-theme="signal-light"] body {
   font-family: var(--font-display);
   letter-spacing: -0.005em;
@@ -721,8 +721,13 @@ button.zto-card:hover {
 
 /* Backdrop — austere 48px grid + two soft radial signal glows.
    Same pattern in both signal variants, with grid line opacity
-   tuned per surface (white on dark / black on light). */
-[data-theme="signal"] body, [data-theme="signal-light"] body::before,
+   tuned per surface (white on dark / black on light). Each
+   selector is written out long-hand to avoid collapsing the
+   pseudo-element with the bare element — the previous combined
+   form accidentally applied position:fixed/inset:0 to <body>
+   itself, which removed the page from normal flow and made the
+   theme look completely broken. */
+[data-theme="signal"] body::before,
 [data-theme="signal-light"] body::before {
   content: "";
   position: fixed;
@@ -731,7 +736,7 @@ button.zto-card:hover {
   z-index: 0;
   background-size: 48px 48px;
 }
-[data-theme="signal"] body, [data-theme="signal-light"] body::before {
+[data-theme="signal"] body::before {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
@@ -741,7 +746,7 @@ button.zto-card:hover {
     linear-gradient(rgba(10, 13, 20, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(10, 13, 20, 0.04) 1px, transparent 1px);
 }
-[data-theme="signal"] body, [data-theme="signal-light"] body::after,
+[data-theme="signal"] body::after,
 [data-theme="signal-light"] body::after {
   content: "";
   position: fixed;
@@ -749,7 +754,7 @@ button.zto-card:hover {
   pointer-events: none;
   z-index: 0;
 }
-[data-theme="signal"] body, [data-theme="signal-light"] body::after {
+[data-theme="signal"] body::after {
   background:
     radial-gradient(80vmin 60vmin at 80% 10%, rgba(46, 107, 255, 0.08), transparent 60%),
     radial-gradient(60vmin 50vmin at 10% 90%, rgba(79, 212, 227, 0.04), transparent 60%);
@@ -759,10 +764,14 @@ button.zto-card:hover {
     radial-gradient(80vmin 60vmin at 80% 10%, rgba(29, 92, 224, 0.06), transparent 60%),
     radial-gradient(60vmin 50vmin at 10% 90%, rgba(12, 138, 152, 0.04), transparent 60%);
 }
-[data-theme="signal"] #__next, [data-theme="signal-light"] #__next,
-[data-theme="signal-light"] #__next,
-[data-theme="signal"] body, [data-theme="signal-light"] body > *,
-[data-theme="signal-light"] body > * { position: relative; z-index: 1; }
+/* Lift normal page content above the fixed grid + shapes layers
+   without disturbing the .signal-bg-shapes container itself
+   (it needs to keep its own position: fixed). */
+[data-theme="signal"] body > *:not(.signal-bg-shapes),
+[data-theme="signal-light"] body > *:not(.signal-bg-shapes) {
+  position: relative;
+  z-index: 1;
+}
 
 /* ===== Subtle drifting geometrical shapes ==========================
    A tiny SVG layer behind the page renders four 1px-stroked outlines
@@ -785,7 +794,7 @@ button.zto-card:hover {
      globally but stays invisible elsewhere. */
   display: none;
 }
-[data-theme="signal"] .signal-bg-shapes, [data-theme="signal-light"] .signal-bg-shapes,
+[data-theme="signal"] .signal-bg-shapes,
 [data-theme="signal-light"] .signal-bg-shapes { display: block; }
 .signal-bg-shapes .shape {
   position: absolute;
