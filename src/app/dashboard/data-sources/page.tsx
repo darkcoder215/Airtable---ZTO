@@ -3200,10 +3200,14 @@ TechCrunch | https://techcrunch.com/feed
                 </p>
               </div>
 
-              {/* Filter agent — only relevant for news topic. Other topics
-                  skip the AI filter entirely so no agent is needed. */}
-              {formData.topic === "news" && (
-                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-4 space-y-3">
+              {/* Filter agent — available for every source type (websites,
+                  X, LinkedIn). Whether it actually runs at fetch time
+                  depends on the topic (only 'news' triggers filtering);
+                  switching topic doesn't lose the saved agent assignment. */}
+              {(() => {
+                const filteringActive = formData.topic === "news";
+                return (
+                <div className={`bg-[#1a1a1a] border rounded-xl p-4 space-y-3 ${filteringActive ? "border-neutral-800" : "border-neutral-800/60"}`}>
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div>
                       <label className="zto-label flex items-center gap-2 mb-0">
@@ -3211,7 +3215,7 @@ TechCrunch | https://techcrunch.com/feed
                         وكيل الفلترة
                       </label>
                       <p className="text-[0.65rem] text-neutral-500 mt-0.5">
-                        الوكيل الذي يقرّر أيّ من الأخبار يمر إلى الوجهة. اختر &quot;افتراضي&quot; لاستخدام الوكيل المركزي.
+                        الوكيل الذي يقرّر أيّ من العناصر يمر إلى الوجهة. متاح لكل أنواع المصادر (مواقع، X، LinkedIn).
                       </p>
                     </div>
                     <button
@@ -3249,6 +3253,23 @@ TechCrunch | https://techcrunch.com/feed
                     <p className="text-[0.65rem] text-amber-400">
                       لا توجد وكلاء فلترة بعد. أنشئ وكيلاً من قسم &quot;وكلاء الكتابة&quot;.
                     </p>
+                  )}
+
+                  {/* Topic-not-news hint — the agent is saved either way, but
+                      filtering only kicks in when topic = "أخبار". */}
+                  {!filteringActive && (
+                    <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5">
+                      <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-[0.65rem] text-amber-300 leading-relaxed">
+                        الوكيل محفوظ، لكنّه لن يعمل تلقائياً ما لم يكن الموضوع
+                        <span className="text-amber-400 font-bold mx-1">«أخبار»</span>
+                        — حالياً الموضوع
+                        <span className="text-amber-400 font-bold mx-1">
+                          «{TOPICS.find((t) => t.value === formData.topic)?.label.split(" ")[0]}»
+                        </span>
+                        فالعناصر تُمرَّر دون فلترة. غيّر الموضوع لأخبار لتفعيل الفلترة الفورية.
+                      </p>
+                    </div>
                   )}
 
                   {/* Test result */}
@@ -3294,7 +3315,8 @@ TechCrunch | https://techcrunch.com/feed
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
 
               {/* Category + Fetch Interval */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
