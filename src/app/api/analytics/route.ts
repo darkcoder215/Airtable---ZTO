@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isSupabaseConfigured()) {
     return NextResponse.json(

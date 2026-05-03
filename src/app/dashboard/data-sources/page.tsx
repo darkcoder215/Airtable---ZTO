@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import {
   Rss,
@@ -15,6 +15,7 @@ import {
   ExternalLink,
   AtSign,
   Briefcase,
+  Building2,
   Globe,
   ToggleLeft,
   ToggleRight,
@@ -46,6 +47,7 @@ interface DataSource {
   createdAt: string;
   createdBy: string;
   filterAgentId?: string | null;
+  brandId?: string | null;
 }
 
 interface Article {
@@ -113,6 +115,7 @@ const defaultFormData = {
   fetchInterval: 60,
   isActive: true,
   filterAgentId: "" as string, // empty → backend resolves the seeded default
+  brandId: "" as string,        // empty → unassigned
 };
 
 /* ───────── Component ───────── */
@@ -153,6 +156,33 @@ export default function DataSourcesPage() {
       // non-fatal
     }
   };
+
+  // Brands roster — populates the brand picker on create/edit and the
+  // brand column on the sources table.
+  interface BrandSummary { id: string; name: string; slug: string }
+  const [brands, setBrands] = useState<BrandSummary[]>([]);
+  const loadBrands = async () => {
+    try {
+      const res = await fetch("/api/brands");
+      const d = await res.json();
+      if (res.ok && Array.isArray(d.brands)) {
+        setBrands(
+          d.brands.map((b: { id: string; name: string; slug: string }) => ({
+            id: b.id,
+            name: b.name,
+            slug: b.slug,
+          }))
+        );
+      }
+    } catch {
+      // non-fatal — brands tab still works on its own
+    }
+  };
+  const brandById = useMemo(() => {
+    const m = new Map<string, BrandSummary>();
+    for (const b of brands) m.set(b.id, b);
+    return m;
+  }, [brands]);
 
   // Per-source agent test results (preview pane).
   interface FilterTestDecision { title: string; url: string; passed: boolean }
@@ -301,6 +331,7 @@ export default function DataSourcesPage() {
   useEffect(() => {
     loadSources();
     loadFilterAgents();
+    void loadBrands();
     fetch("/api/data-sources?action=status")
       .then((r) => r.json())
       .then((d) => {
@@ -745,6 +776,7 @@ export default function DataSourcesPage() {
       const cleanForm = {
         ...formData,
         filterAgentId: formData.filterAgentId ? formData.filterAgentId : null,
+        brandId: formData.brandId ? formData.brandId : null,
       };
       const body = editingSource
         ? { action, id: editingSource.id, ...cleanForm }
@@ -837,10 +869,12 @@ export default function DataSourcesPage() {
       fetchInterval: source.fetchInterval,
       isActive: source.isActive,
       filterAgentId: source.filterAgentId ?? "",
+      brandId: source.brandId ?? "",
     });
     setShowModal(true);
     setFilterTestResult(null);
     void loadFilterAgents();
+    void loadBrands();
   };
 
   const closeModal = () => {
@@ -1356,7 +1390,7 @@ export default function DataSourcesPage() {
                 <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-10 text-xs"
+                  className="zto-input text-xs" style={{ paddingInlineStart: "2.5rem" }}
                   placeholder="بحث..."
                   value={sourceSearch}
                   onChange={(e) => setSourceSearch(e.target.value)}
@@ -1423,6 +1457,7 @@ export default function DataSourcesPage() {
                           <tr className="border-b border-neutral-800 text-[0.65rem] text-neutral-500 font-bold uppercase tracking-wider">
                             <th className="text-right px-4 py-3">المصدر</th>
                             <th className="text-right px-4 py-3 hidden md:table-cell">الرابط</th>
+                            <th className="text-right px-4 py-3 hidden md:table-cell">العلامة</th>
                             <th className="text-right px-4 py-3">الفئة</th>
                             <th className="text-right px-4 py-3 hidden lg:table-cell">آخر جلب</th>
                             <th className="text-right px-4 py-3 hidden xl:table-cell">وتيرة الجلب</th>
@@ -1461,6 +1496,18 @@ export default function DataSourcesPage() {
                                   <p className="text-xs text-neutral-500 truncate max-w-[250px]" title={source.url}>
                                     {source.url}
                                   </p>
+                                </td>
+
+                                {/* Brand */}
+                                <td className="px-4 py-3 hidden md:table-cell">
+                                  {source.brandId && brandById.has(source.brandId) ? (
+                                    <span className="zto-badge border border-amber-500/30 text-amber-300 text-[0.6rem] flex items-center gap-1 w-fit">
+                                      <Building2 className="w-3 h-3" />
+                                      {brandById.get(source.brandId)!.name}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[0.6rem] text-neutral-600">— بلا علامة —</span>
+                                  )}
                                 </td>
 
                                 {/* Category */}
@@ -1610,7 +1657,7 @@ export default function DataSourcesPage() {
                               </tr>
                               {isFetching && (
                                 <tr className="border-b border-neutral-800/50 bg-amber-500/5">
-                                  <td colSpan={9} className="p-0">
+                                  <td colSpan={10} className="p-0">
                                     <div
                                       className="zto-fetch-progress"
                                       role="progressbar"
@@ -1687,7 +1734,7 @@ export default function DataSourcesPage() {
                 <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-12"
+                  className="zto-input" style={{ paddingInlineStart: "2.75rem" }}
                   placeholder="بحث في الأخبار..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -1900,7 +1947,7 @@ export default function DataSourcesPage() {
                 <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-10 text-xs"
+                  className="zto-input text-xs" style={{ paddingInlineStart: "2.5rem" }}
                   placeholder="بحث في عناوين السجل..."
                   value={filterHistorySearch}
                   onChange={(e) => setFilterHistorySearch(e.target.value)}
@@ -2988,6 +3035,33 @@ TechCrunch | https://techcrunch.com/feed
                   )}
                 </div>
               )}
+
+              {/* Brand (optional) */}
+              <div>
+                <label className="zto-label flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-amber-400" />
+                  العلامة التجارية (اختياري)
+                </label>
+                <div className="zto-select-wrap">
+                  <select
+                    className="zto-input"
+                    value={formData.brandId}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, brandId: e.target.value }))
+                    }
+                  >
+                    <option value="">— بدون —</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[0.65rem] text-neutral-500 mt-1">
+                  اربط المصدر بعلامة معيّنة لتظهر في تحليلاتها وتقاريرها.
+                </p>
+              </div>
 
               {/* Topic (news / insights / real estate) */}
               <div>

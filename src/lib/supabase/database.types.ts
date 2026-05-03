@@ -157,50 +157,69 @@ export type Database = {
       }
       app_users: {
         Row: {
-          created_at: string | null
-          department_id: string | null
-          display_name: string
-          email: string | null
           id: string
-          level: number
-          password: string
-          password_hash: string | null
-          role: string
           username: string
+          email: string
+          password_hash: string
+          name: string
+          role: string
+          is_active: boolean
+          created_at: string
+          updated_at: string
+          last_login_at: string | null
+          created_by: string | null
         }
         Insert: {
-          created_at?: string | null
-          department_id?: string | null
-          display_name: string
-          email?: string | null
           id?: string
-          level?: number
-          password: string
-          password_hash?: string | null
-          role?: string
           username: string
+          email: string
+          password_hash: string
+          name: string
+          role?: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          last_login_at?: string | null
+          created_by?: string | null
         }
         Update: {
-          created_at?: string | null
-          department_id?: string | null
-          display_name?: string
-          email?: string | null
           id?: string
-          level?: number
-          password?: string
-          password_hash?: string | null
-          role?: string
           username?: string
+          email?: string
+          password_hash?: string
+          name?: string
+          role?: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          last_login_at?: string | null
+          created_by?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "app_users_department_id_fkey"
-            columns: ["department_id"]
-            isOneToOne: false
-            referencedRelation: "departments"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
+      }
+      auth_attempts: {
+        Row: {
+          id: number
+          username: string
+          ip: string | null
+          succeeded: boolean
+          attempted_at: string
+        }
+        Insert: {
+          id?: number
+          username: string
+          ip?: string | null
+          succeeded: boolean
+          attempted_at?: string
+        }
+        Update: {
+          id?: number
+          username?: string
+          ip?: string | null
+          succeeded?: boolean
+          attempted_at?: string
+        }
+        Relationships: []
       }
       audit_log: {
         Row: {

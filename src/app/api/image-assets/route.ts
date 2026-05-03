@@ -19,7 +19,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action");
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (user.role !== "admin") {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });

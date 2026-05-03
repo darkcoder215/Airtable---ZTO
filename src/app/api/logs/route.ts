@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "الجلسة منتهية" }, { status: 401 });
   }
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user || user.role !== "admin") {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
   }

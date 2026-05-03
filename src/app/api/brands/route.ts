@@ -14,7 +14,7 @@ function notConfigured() {
 }
 
 export async function GET(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isSupabaseConfigured()) return notConfigured();
   try {
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isAdmin(user)) {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });

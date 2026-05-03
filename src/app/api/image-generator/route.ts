@@ -156,7 +156,7 @@ interface ORResponse {
 }
 
 export async function POST(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) {
     return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   }

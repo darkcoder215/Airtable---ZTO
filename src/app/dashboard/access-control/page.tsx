@@ -1,608 +1,600 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useAppStore } from "@/store/app-store";
+// Admin-only user management page. All security checks happen server-side
+// in /api/users — this UI just talks to that API and renders the result.
+
+import { useEffect, useMemo, useState } from "react";
 import {
-  Shield,
+  Users,
   Plus,
-  Edit3,
   Trash2,
+  Edit3,
   Save,
   X,
   Loader2,
-  User,
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
   Eye,
-  Pencil,
-  FilePlus,
-  FileX2,
-  Lock,
-  Filter,
   EyeOff,
+  Lock,
+  Search,
+  KeyRound,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
 } from "lucide-react";
+import { useAppStore } from "@/store/app-store";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+type Role = "admin" | "editor" | "viewer";
 
-interface AccessRule {
+interface AppUser {
   id: string;
-  userId: string;
-  userName: string;
-  baseId: string;
-  baseName: string;
-  tableId: string;
-  tableName: string;
-  permissions: {
-    canView: boolean;
-    canEdit: boolean;
-    canCreate: boolean;
-    canDelete: boolean;
-  };
-  fieldRestrictions: string[];
-  filterFormula?: string;
+  username: string;
+  email: string;
+  name: string;
+  role: Role;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  lastLoginAt: string | null;
 }
 
-interface TableMeta {
-  id: string;
-  name: string;
-  fields: { id: string; name: string; type: string }[];
-}
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
-
-const BASE_ID = "appIpXIFs2yxyxaUm";
-const BASE_NAME = "Zero to One OS";
-
-const AVAILABLE_USERS = [
-  { id: "2", name: "أحمد الكاتب" },
-  { id: "3", name: "سارة المحررة" },
-  { id: "4", name: "خالد المراجع" },
-];
-
-const PERM_CONFIG = [
-  { key: "canView" as const, label: "عرض", icon: Eye, desc: "مشاهدة السجلات", badge: "zto-badge-ok" },
-  { key: "canEdit" as const, label: "تعديل", icon: Pencil, desc: "تعديل السجلات الموجودة", badge: "zto-badge-gold" },
-  { key: "canCreate" as const, label: "إنشاء", icon: FilePlus, desc: "إنشاء سجلات جديدة", badge: "zto-badge-warn" },
-  { key: "canDelete" as const, label: "حذف", icon: FileX2, desc: "حذف السجلات", badge: "zto-badge-err" },
-];
-
-const defaultFormData = {
-  userId: "",
-  userName: "",
-  baseId: BASE_ID,
-  baseName: BASE_NAME,
-  tableId: "*",
-  tableName: "جميع الجداول",
-  permissions: { canView: true, canEdit: false, canCreate: false, canDelete: false },
-  fieldRestrictions: [] as string[],
-  filterFormula: "",
+const ROLE_META: Record<Role, { label: string; description: string; color: string; bg: string; icon: typeof Shield }> = {
+  admin: {
+    label: "مدير",
+    description: "صلاحيات كاملة: المستخدمون، المصادر، الوكلاء، الوجهة، السجلات.",
+    color: "text-amber-400",
+    bg: "bg-amber-400/10 border-amber-400/30",
+    icon: ShieldCheck,
+  },
+  editor: {
+    label: "محرّر",
+    description: "إنشاء وتحرير المحتوى والمصادر، لكن دون إدارة المستخدمين أو إعدادات الوجهة.",
+    color: "text-blue-400",
+    bg: "bg-blue-400/10 border-blue-400/30",
+    icon: Shield,
+  },
+  viewer: {
+    label: "مراجع",
+    description: "قراءة فقط — لا يستطيع التعديل أو الحذف.",
+    color: "text-neutral-300",
+    bg: "bg-neutral-700/10 border-neutral-700/30",
+    icon: ShieldAlert,
+  },
 };
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                          */
-/* ------------------------------------------------------------------ */
+const PERMISSIONS = [
+  { feat: "قاعدة البيانات (Airtable)", admin: true, editor: true, viewer: true,  detail: "العرض دائماً متاح للجميع." },
+  { feat: "تعديل الخلايا في القاعدة",  admin: true, editor: true, viewer: false, detail: "المراجع يقرأ فقط." },
+  { feat: "إدارة المصادر",              admin: true, editor: false, viewer: false, detail: "إنشاء/تعديل/حذف يحتاج صلاحية مدير." },
+  { feat: "تشغيل عملية الجلب",          admin: true, editor: true, viewer: true,  detail: "التشغيل اليدوي متاح لكل مستخدم." },
+  { feat: "إعدادات الوجهة + الوكلاء",   admin: true, editor: false, viewer: false, detail: "تغييرات حساسة." },
+  { feat: "إدارة المستخدمين",           admin: true, editor: false, viewer: false, detail: "هذه الصفحة." },
+  { feat: "السجلات",                    admin: true, editor: false, viewer: false, detail: "للمدير فقط." },
+];
+
+interface FormState {
+  id?: string;
+  username: string;
+  email: string;
+  name: string;
+  role: Role;
+  password: string;
+  isActive: boolean;
+}
+
+const blankForm = (): FormState => ({
+  username: "",
+  email: "",
+  name: "",
+  role: "viewer",
+  password: "",
+  isActive: true,
+});
+
+function formatDate(s: string | null): string {
+  if (!s) return "—";
+  try {
+    return new Date(s).toLocaleDateString("ar-SA", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return s;
+  }
+}
 
 export default function AccessControlPage() {
   const { user, addToast } = useAppStore();
-  const [rules, setRules] = useState<AccessRule[]>([]);
+
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingRule, setEditingRule] = useState<AccessRule | null>(null);
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<FormState>(blankForm());
   const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState({ ...defaultFormData });
-  const [tables, setTables] = useState<TableMeta[]>([]);
-  const [tablesLoading, setTablesLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  /* ---------- Load tables from the hardcoded base on mount ---------- */
-  useEffect(() => {
-    loadRules();
-    loadTables();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const loadTables = () => {
-    setTablesLoading(true);
-    fetch(`/api/airtable?action=tables&baseId=${BASE_ID}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.tables) setTables(data.tables);
-      })
-      .catch(() => {})
-      .finally(() => setTablesLoading(false));
-  };
-
-  const loadRules = () => {
+  const load = async () => {
     setLoading(true);
-    fetch("/api/access-control")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.rules) setRules(data.rules);
-        else if (data.error) addToast(data.error, "error");
-      })
-      .catch(() => addToast("فشل تحميل قواعد الصلاحيات", "error"))
-      .finally(() => setLoading(false));
+    try {
+      const res = await fetch("/api/users", { cache: "no-store" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "فشل التحميل");
+      setUsers(d.users ?? []);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل التحميل", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (user?.role === "admin") void load();
+    else setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
+
+  const startCreate = () => {
+    setForm(blankForm());
+    setError(null);
+    setShowForm(true);
+  };
+  const startEdit = (u: AppUser) => {
+    setForm({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      password: "",
+      isActive: u.isActive,
+    });
+    setError(null);
+    setShowForm(true);
+  };
+  const closeForm = () => {
+    setShowForm(false);
+    setForm(blankForm());
+    setError(null);
+    setShowPassword(false);
   };
 
-  /* ---------- CRUD helpers ---------- */
-
-  const handleSave = async () => {
-    if (!formData.userId) {
-      addToast("اختر المستخدم", "warning");
-      return;
-    }
+  const submit = async () => {
     setSaving(true);
+    setError(null);
     try {
-      const action = editingRule ? "update" : "create";
-      const body = editingRule
-        ? { action, id: editingRule.id, ...formData }
-        : { action, ...formData };
-
-      const res = await fetch("/api/access-control", {
+      const payload: Record<string, unknown> = {
+        action: form.id ? "update" : "create",
+        username: form.username,
+        email: form.email,
+        name: form.name,
+        role: form.role,
+        isActive: form.isActive,
+      };
+      if (form.id) payload.id = form.id;
+      if (form.password || !form.id) payload.password = form.password;
+      const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (res.ok) {
-        addToast(editingRule ? "تم تحديث القاعدة" : "تم إنشاء القاعدة", "success");
-        loadRules();
-        closeModal();
-      } else {
-        addToast(data.error || "فشلت العملية", "error");
+      const d = await res.json();
+      if (!res.ok) {
+        setError(d.error || "فشلت العملية");
+        return;
       }
-    } catch {
-      addToast("حدث خطأ", "error");
+      addToast(form.id ? "تم تحديث المستخدم" : "تم إنشاء المستخدم", "success");
+      closeForm();
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطأ");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const deleteUser = async (u: AppUser) => {
+    if (!confirm(`حذف المستخدم "${u.name}" نهائياً؟`)) return;
     try {
-      const res = await fetch("/api/access-control", {
+      const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", id }),
+        body: JSON.stringify({ action: "delete", id: u.id }),
       });
-      if (res.ok) {
-        addToast("تم حذف القاعدة", "success");
-        loadRules();
-      } else {
-        const data = await res.json();
-        addToast(data.error || "فشل الحذف", "error");
-      }
+      const d = await res.json();
+      if (!res.ok) { addToast(d.error || "فشل الحذف", "error"); return; }
+      addToast("تم الحذف", "success");
+      void load();
     } catch {
-      addToast("حدث خطأ", "error");
+      addToast("خطأ في الشبكة", "error");
     }
   };
 
-  /* ---------- Modal helpers ---------- */
-
-  const openCreate = () => {
-    setEditingRule(null);
-    setFormData({ ...defaultFormData });
-    setShowModal(true);
+  const toggleActive = async (u: AppUser) => {
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update", id: u.id, isActive: !u.isActive }),
+      });
+      const d = await res.json();
+      if (!res.ok) { addToast(d.error || "فشل التعديل", "error"); return; }
+      addToast(u.isActive ? "تم التعطيل" : "تم التفعيل", "success");
+      void load();
+    } catch { addToast("خطأ في الشبكة", "error"); }
   };
 
-  const openEdit = (rule: AccessRule) => {
-    setEditingRule(rule);
-    setFormData({
-      userId: rule.userId,
-      userName: rule.userName,
-      baseId: BASE_ID,
-      baseName: BASE_NAME,
-      tableId: rule.tableId,
-      tableName: rule.tableName,
-      permissions: { ...rule.permissions },
-      fieldRestrictions: [...rule.fieldRestrictions],
-      filterFormula: rule.filterFormula || "",
-    });
-    setShowModal(true);
-  };
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) =>
+        u.username.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.name.toLowerCase().includes(q) ||
+        u.role.includes(q)
+    );
+  }, [users, search]);
 
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingRule(null);
-    setFormData({ ...defaultFormData });
-  };
-
-  /* ---------- Derived: fields for the selected table ---------- */
-  const selectedTableMeta =
-    formData.tableId !== "*"
-      ? tables.find((t) => t.id === formData.tableId)
-      : null;
-
-  const toggleHiddenField = (fieldName: string) => {
-    setFormData((prev) => {
-      const exists = prev.fieldRestrictions.includes(fieldName);
-      return {
-        ...prev,
-        fieldRestrictions: exists
-          ? prev.fieldRestrictions.filter((f) => f !== fieldName)
-          : [...prev.fieldRestrictions, fieldName],
-      };
-    });
-  };
-
-  /* ---------- Resolve table name from id for cards ---------- */
-  const resolveTableName = (tableId: string) => {
-    if (tableId === "*") return "جميع الجداول";
-    const t = tables.find((t) => t.id === tableId);
-    return t?.name || tableId;
-  };
-
-  /* ================================================================ */
-  /*  Admin guard                                                      */
-  /* ================================================================ */
-  if (user?.role !== "admin") {
+  if (user && user.role !== "admin") {
     return (
-      <div className="zto-card p-16 text-center">
+      <div className="zto-card p-12 text-center max-w-md mx-auto" dir="rtl">
         <Lock className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
-        <p className="text-neutral-400 text-sm font-bold">
-          متاحة للمديرين فقط
-        </p>
+        <p className="text-sm font-bold text-white">هذه الصفحة متاحة للمديرين فقط</p>
+        <p className="text-xs text-neutral-500 mt-1">تواصل مع مدير النظام إن احتجت صلاحيات إضافية.</p>
       </div>
     );
   }
 
-  /* ================================================================ */
-  /*  Main render                                                      */
-  /* ================================================================ */
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-6 zto-fade-in" dir="rtl">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-black text-white flex items-center gap-2">
-            <Shield className="w-5 h-5 text-[#c9a84c]" />
-            التحكم بالصلاحيات
+            <Users className="w-5 h-5 text-amber-400" />
+            الصلاحيات والمستخدمون
           </h2>
           <p className="text-neutral-500 text-sm mt-1">
-            تحكم في صلاحيات المستخدمين على قاعدة{" "}
-            <span className="text-[#c9a84c] font-bold">{BASE_NAME}</span>
+            أضف المستخدمين، حدّد دور كل واحد، وفعّل/عطّل الحساب وقتما تشاء. جميع التحقّقات تتم على الخادم.
           </p>
         </div>
-        <button onClick={openCreate} className="zto-btn zto-btn-gold">
-          <Plus className="w-4 h-4" />
-          قاعدة جديدة
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={load} disabled={loading} className="zto-btn zto-btn-ghost zto-btn-sm">
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            تحديث
+          </button>
+          <button onClick={startCreate} className="zto-btn zto-btn-gold zto-btn-sm">
+            <Plus className="w-3.5 h-3.5" />
+            مستخدم جديد
+          </button>
+        </div>
       </div>
 
-      {/* Rules list */}
+      {/* Roles + permissions reference */}
+      <details className="zto-card p-4 group">
+        <summary className="cursor-pointer flex items-center gap-2 list-none">
+          <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="text-sm font-bold text-white">الأدوار والصلاحيات</span>
+          <span className="mr-auto text-[0.65rem] text-neutral-500">اضغط لعرض التفاصيل</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(Object.keys(ROLE_META) as Role[]).map((r) => {
+            const meta = ROLE_META[r];
+            const Icon = meta.icon;
+            return (
+              <div key={r} className={`rounded-lg border p-3 ${meta.bg}`}>
+                <p className={`text-sm font-bold flex items-center gap-1.5 ${meta.color}`}>
+                  <Icon className="w-4 h-4" />
+                  {meta.label}
+                </p>
+                <p className="text-[0.7rem] text-neutral-300 mt-1.5 leading-relaxed">{meta.description}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 zto-card overflow-hidden">
+          <table className="w-full text-[0.7rem]">
+            <thead>
+              <tr className="border-b border-neutral-800 text-[0.6rem] text-neutral-500 font-bold uppercase tracking-wider">
+                <th className="text-right px-3 py-2">الميزة</th>
+                <th className="text-center px-3 py-2 text-amber-400">مدير</th>
+                <th className="text-center px-3 py-2 text-blue-400">محرّر</th>
+                <th className="text-center px-3 py-2 text-neutral-300">مراجع</th>
+                <th className="text-right px-3 py-2 hidden md:table-cell">ملاحظة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PERMISSIONS.map((p) => (
+                <tr key={p.feat} className="border-b border-neutral-800/50 last:border-0">
+                  <td className="px-3 py-2 text-white">{p.feat}</td>
+                  <PermCell on={p.admin} />
+                  <PermCell on={p.editor} />
+                  <PermCell on={p.viewer} />
+                  <td className="px-3 py-2 text-neutral-500 hidden md:table-cell">{p.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      {/* Search */}
+      <div className="zto-card p-3">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="بحث بالاسم أو البريد أو الدور..."
+            className="zto-input text-xs"
+            style={{ paddingInlineStart: "2.5rem" }}
+          />
+        </div>
+      </div>
+
+      {/* Users list */}
       {loading ? (
-        <div className="zto-card p-16 flex items-center justify-center">
+        <div className="zto-card p-12 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
         </div>
-      ) : rules.length === 0 ? (
-        <div className="zto-card p-16 text-center">
-          <Shield className="w-10 h-10 text-neutral-700 mx-auto mb-3" />
-          <p className="text-neutral-500 text-sm font-bold">لا توجد قواعد صلاحيات</p>
-          <p className="text-neutral-600 text-xs mt-1">أنشئ قاعدة جديدة للبدء</p>
+      ) : filtered.length === 0 ? (
+        <div className="zto-card p-12 text-center text-sm text-neutral-500">
+          {users.length === 0 ? "لا مستخدمون بعد" : "لا نتائج للفلتر"}
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {rules.map((rule) => (
-            <div
-              key={rule.id}
-              className="zto-card p-5 hover:border-neutral-700 transition-colors"
-            >
-              {/* Card header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#1a1a1a] flex items-center justify-center">
-                    <User className="w-4 h-4 text-[#c9a84c]" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-white">{rule.userName}</h3>
-                    <p className="text-[11px] text-neutral-500 mt-0.5">
-                      <span className="text-[#c9a84c]">{BASE_NAME}</span>
-                      {" / "}
-                      <span className="text-neutral-400 font-bold">
-                        {resolveTableName(rule.tableId)}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => openEdit(rule)}
-                    className="zto-btn zto-btn-ghost zto-btn-sm"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(rule.id)}
-                    className="zto-btn zto-btn-ghost zto-btn-sm text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Permission badges */}
-              <div className="flex gap-2 flex-wrap">
-                {rule.permissions.canView && (
-                  <span className="zto-badge zto-badge-ok flex items-center gap-1">
-                    <Eye className="w-3 h-3" /> عرض
-                  </span>
-                )}
-                {rule.permissions.canEdit && (
-                  <span className="zto-badge zto-badge-gold flex items-center gap-1">
-                    <Pencil className="w-3 h-3" /> تعديل
-                  </span>
-                )}
-                {rule.permissions.canCreate && (
-                  <span className="zto-badge zto-badge-warn flex items-center gap-1">
-                    <FilePlus className="w-3 h-3" /> إنشاء
-                  </span>
-                )}
-                {rule.permissions.canDelete && (
-                  <span className="zto-badge zto-badge-err flex items-center gap-1">
-                    <FileX2 className="w-3 h-3" /> حذف
-                  </span>
-                )}
-              </div>
-
-              {/* Hidden fields + filter info */}
-              {(rule.fieldRestrictions.length > 0 || rule.filterFormula) && (
-                <div className="mt-3 pt-3 border-t border-neutral-800 space-y-1.5">
-                  {rule.fieldRestrictions.length > 0 && (
-                    <div>
-                      <p className="text-[11px] text-neutral-500 flex items-center gap-1 mb-1">
-                        <EyeOff className="w-3 h-3" />
-                        حقول مخفية ({rule.fieldRestrictions.length})
-                      </p>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {rule.fieldRestrictions.map((f) => (
-                          <span
-                            key={f}
-                            className="zto-badge zto-badge-default text-[10px]"
-                          >
-                            {f}
+        <div className="zto-card overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-neutral-800 text-[0.65rem] text-neutral-500 font-bold uppercase tracking-wider">
+                <th className="text-right px-4 py-3">المستخدم</th>
+                <th className="text-right px-4 py-3 hidden md:table-cell">البريد</th>
+                <th className="text-right px-4 py-3">الدور</th>
+                <th className="text-right px-4 py-3 hidden lg:table-cell">آخر تسجيل دخول</th>
+                <th className="text-center px-4 py-3">الحالة</th>
+                <th className="text-left px-4 py-3">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((u) => {
+                const meta = ROLE_META[u.role];
+                const Icon = meta.icon;
+                const isMe = u.id === user?.id;
+                return (
+                  <tr key={u.id} className="border-b border-neutral-800/50 last:border-0 hover:bg-neutral-800/20 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400/30 to-purple-500/30 border border-neutral-700 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] font-black text-white">
+                            {(u.name?.trim()[0] ?? "?").toUpperCase()}
                           </span>
-                        ))}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{u.name}</p>
+                          <p className="text-[0.6rem] text-neutral-500 font-mono">@{u.username}</p>
+                        </div>
+                        {isMe && (
+                          <span className="zto-badge text-[0.55rem] border border-amber-400/30 text-amber-400">
+                            أنت
+                          </span>
+                        )}
                       </div>
-                    </div>
-                  )}
-                  {rule.filterFormula && (
-                    <p className="text-[11px] text-neutral-500 font-mono flex items-center gap-1">
-                      <Filter className="w-3 h-3" />
-                      {rule.filterFormula}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell text-[0.7rem] text-neutral-400" dir="ltr">
+                      {u.email}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`zto-badge text-[0.6rem] border ${meta.bg} ${meta.color} flex items-center gap-1 w-fit`}>
+                        <Icon className="w-3 h-3" />
+                        {meta.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell text-[0.65rem] text-neutral-500">
+                      {formatDate(u.lastLoginAt)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => toggleActive(u)}
+                        title={u.isActive ? "اضغط للتعطيل" : "اضغط للتفعيل"}
+                        disabled={isMe}
+                        className={`text-[0.6rem] font-bold rounded-full px-2 py-0.5 border transition-colors ${
+                          u.isActive
+                            ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20"
+                            : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                        } ${isMe ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        {u.isActive ? "مفعّل" : "معطّل"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1 justify-end">
+                        <button onClick={() => startEdit(u)} className="zto-btn zto-btn-ghost zto-btn-sm" title="تعديل">
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deleteUser(u)}
+                          disabled={isMe}
+                          className="zto-btn zto-btn-ghost zto-btn-sm text-red-400 hover:text-red-300 disabled:opacity-30"
+                          title={isMe ? "لا يمكنك حذف نفسك" : "حذف"}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* ============================================================ */}
-      {/*  Create / Edit Modal                                          */}
-      {/* ============================================================ */}
-      {showModal && (
-        <div className="zto-overlay" onClick={closeModal}>
-          <div
-            className="zto-modal w-full max-w-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal header */}
+      {/* Form modal */}
+      {showForm && (
+        <div className="zto-overlay" onClick={closeForm}>
+          <div className="zto-modal w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b border-neutral-800 flex items-center justify-between">
               <h3 className="text-base font-black text-white flex items-center gap-2">
-                <Shield className="w-4 h-4 text-[#c9a84c]" />
-                {editingRule ? "تعديل قاعدة الصلاحية" : "قاعدة صلاحية جديدة"}
+                {form.id ? <Edit3 className="w-4 h-4 text-amber-400" /> : <Plus className="w-4 h-4 text-amber-400" />}
+                {form.id ? "تعديل مستخدم" : "مستخدم جديد"}
               </h3>
-              <button
-                onClick={closeModal}
-                className="text-neutral-500 hover:text-white transition-colors"
-              >
+              <button onClick={closeForm} className="text-neutral-500 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            {/* Modal body */}
-            <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
-              {/* Base info (read-only) */}
-              <div>
-                <label className="zto-label">القاعدة</label>
-                <div className="zto-input flex items-center gap-2 opacity-70 cursor-default">
-                  <Shield className="w-3.5 h-3.5 text-[#c9a84c]" />
-                  <span>{BASE_NAME}</span>
-                </div>
-              </div>
-
-              {/* User selector */}
-              <div>
-                <label className="zto-label">المستخدم</label>
-                <div className="zto-select-wrap">
-                  <select
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="zto-label">الاسم الكامل *</label>
+                  <input
+                    type="text"
                     className="zto-input"
-                    value={formData.userId}
-                    onChange={(e) => {
-                      const u = AVAILABLE_USERS.find((u) => u.id === e.target.value);
-                      setFormData((prev) => ({
-                        ...prev,
-                        userId: e.target.value,
-                        userName: u?.name || "",
-                      }));
-                    }}
-                  >
-                    <option value="">-- اختر مستخدم --</option>
-                    {AVAILABLE_USERS.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
+                    value={form.name}
+                    onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="مثال: أحمد المحرّر"
+                  />
+                </div>
+                <div>
+                  <label className="zto-label">اسم المستخدم *</label>
+                  <input
+                    type="text"
+                    className="zto-input font-mono text-xs"
+                    value={form.username}
+                    onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+                    placeholder="ahmed.editor"
+                    dir="ltr"
+                  />
+                  <p className="text-[0.6rem] text-neutral-500 mt-1">حروف لاتينية، أرقام، نقطة، شرطة (3-64 حرف)</p>
                 </div>
               </div>
 
-              {/* Table selector */}
               <div>
-                <label className="zto-label">الجدول</label>
-                <div className="zto-select-wrap">
-                  <select
-                    className="zto-input"
-                    value={formData.tableId}
-                    disabled={tablesLoading}
-                    onChange={(e) => {
-                      const table = tables.find((t) => t.id === e.target.value);
-                      setFormData((prev) => ({
-                        ...prev,
-                        tableId: e.target.value,
-                        tableName: table?.name || "جميع الجداول",
-                        fieldRestrictions: [],
-                      }));
-                    }}
-                  >
-                    <option value="*">جميع الجداول</option>
-                    {tables.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {tablesLoading && (
-                  <p className="text-[11px] text-neutral-600 mt-1 flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    جاري تحميل الجداول...
-                  </p>
-                )}
-              </div>
-
-              {/* Permission checkboxes */}
-              <div>
-                <label className="zto-label">الصلاحيات</label>
-                <div className="grid grid-cols-2 gap-3 mt-1">
-                  {PERM_CONFIG.map(({ key, label, icon: Icon, desc }) => (
-                    <label
-                      key={key}
-                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                        formData.permissions[key]
-                          ? "border-[#c9a84c]/40 bg-[#c9a84c]/5"
-                          : "border-neutral-800 hover:border-neutral-700"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={formData.permissions[key]}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            permissions: {
-                              ...prev.permissions,
-                              [key]: e.target.checked,
-                            },
-                          }))
-                        }
-                        className="w-4 h-4 rounded accent-[#c9a84c]"
-                      />
-                      <div>
-                        <div className="flex items-center gap-1.5 text-white">
-                          <Icon className="w-3.5 h-3.5" />
-                          <span className="text-sm font-bold">{label}</span>
-                        </div>
-                        <p className="text-[11px] text-neutral-500 mt-0.5">{desc}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Filter formula */}
-              <div>
-                <label className="zto-label">صيغة الفلترة (اختياري)</label>
+                <label className="zto-label">البريد الإلكتروني *</label>
                 <input
-                  type="text"
+                  type="email"
                   className="zto-input"
-                  placeholder='مثال: {الحالة} = "منشور"'
-                  value={formData.filterFormula}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      filterFormula: e.target.value,
-                    }))
-                  }
+                  value={form.email}
+                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="ahmed@example.com"
+                  dir="ltr"
                 />
-                <p className="text-[11px] text-neutral-600 mt-1.5">
-                  تقييد السجلات التي يراها المستخدم
+              </div>
+
+              <div>
+                <label className="zto-label flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  كلمة المرور {form.id ? "(اتركها فارغة للإبقاء على القديمة)" : "*"}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    className="zto-input"
+                    style={{ paddingInlineEnd: "2.5rem" }}
+                    value={form.password}
+                    onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                    placeholder={form.id ? "••••••••" : "8 حروف على الأقل"}
+                    autoComplete="new-password"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white"
+                    title={showPassword ? "إخفاء" : "إظهار"}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[0.6rem] text-neutral-500 mt-1">
+                  تُحفظ مُجزّأة (scrypt) — لن تظهر مجدداً حتى للمدير.
                 </p>
               </div>
 
-              {/* Hidden fields section */}
-              {selectedTableMeta && selectedTableMeta.fields.length > 0 && (
+              <div>
+                <label className="zto-label">الدور *</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  {(Object.keys(ROLE_META) as Role[]).map((r) => {
+                    const meta = ROLE_META[r];
+                    const Icon = meta.icon;
+                    const active = form.role === r;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, role: r }))}
+                        className={`text-right rounded-lg border-2 p-3 transition-all ${
+                          active
+                            ? `${meta.bg} ${meta.color} border-current`
+                            : "border-neutral-800 hover:border-neutral-700 text-neutral-400"
+                        }`}
+                      >
+                        <p className="text-sm font-bold flex items-center gap-1.5">
+                          <Icon className="w-4 h-4" />
+                          {meta.label}
+                          {active && <CheckCircle2 className="w-3.5 h-3.5 mr-auto" />}
+                        </p>
+                        <p className="text-[0.65rem] mt-1 leading-snug">{meta.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between">
                 <div>
-                  <label className="zto-label flex items-center gap-1.5">
-                    <EyeOff className="w-3.5 h-3.5" />
-                    الحقول المخفية
-                  </label>
-                  <p className="text-[11px] text-neutral-600 mb-2">
-                    حدد الحقول التي تريد إخفاءها عن المستخدم في جدول{" "}
-                    <span className="text-neutral-400 font-bold">
-                      {selectedTableMeta.name}
-                    </span>
+                  <p className="text-sm font-bold text-white">حالة الحساب</p>
+                  <p className="text-[0.65rem] text-neutral-500">
+                    {form.isActive ? "المستخدم يستطيع تسجيل الدخول الآن" : "تسجيل الدخول معطّل لهذا المستخدم"}
                   </p>
-                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto rounded-xl border border-neutral-800 p-3">
-                    {selectedTableMeta.fields.map((field) => {
-                      const isHidden = formData.fieldRestrictions.includes(field.name);
-                      return (
-                        <label
-                          key={field.id}
-                          className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all text-sm ${
-                            isHidden
-                              ? "border-red-500/30 bg-red-500/5 text-red-300"
-                              : "border-neutral-800 hover:border-neutral-700 text-neutral-400"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isHidden}
-                            onChange={() => toggleHiddenField(field.name)}
-                            className="w-3.5 h-3.5 rounded accent-red-500"
-                          />
-                          <span className="truncate text-[12px]">{field.name}</span>
-                          <span className="text-[10px] text-neutral-600 mr-auto">
-                            {field.type}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {formData.fieldRestrictions.length > 0 && (
-                    <p className="text-[11px] text-red-400/70 mt-1.5">
-                      {formData.fieldRestrictions.length} حقل سيتم إخفاؤه
-                    </p>
-                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
+                  className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors ${
+                    form.isActive
+                      ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+                      : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                  }`}
+                >
+                  {form.isActive ? "مفعّل" : "معطّل"}
+                </button>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                  <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-400">{error}</p>
                 </div>
               )}
             </div>
-
-            {/* Modal footer */}
             <div className="p-5 border-t border-neutral-800 flex items-center gap-3 justify-end">
-              <button onClick={closeModal} className="zto-btn zto-btn-ghost">
-                إلغاء
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="zto-btn zto-btn-gold"
-              >
-                {saving ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                {editingRule ? "حفظ التغييرات" : "إنشاء القاعدة"}
+              <button onClick={closeForm} className="zto-btn zto-btn-ghost">إلغاء</button>
+              <button onClick={submit} disabled={saving} className="zto-btn zto-btn-gold">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {form.id ? "حفظ التغييرات" : "إنشاء"}
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function PermCell({ on }: { on: boolean }) {
+  return (
+    <td className="px-3 py-2 text-center">
+      {on ? (
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 inline" />
+      ) : (
+        <XCircle className="w-3.5 h-3.5 text-neutral-700 inline" />
+      )}
+    </td>
   );
 }

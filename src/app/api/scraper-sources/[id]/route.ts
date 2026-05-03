@@ -17,7 +17,7 @@ export async function GET(
   request: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isSupabaseConfigured()) return notConfigured();
   const { id } = await ctx.params;
@@ -35,7 +35,7 @@ export async function PATCH(
   request: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isAdmin(user)) {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
@@ -79,7 +79,7 @@ export async function DELETE(
   request: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   if (!isAdmin(user)) {
     return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });

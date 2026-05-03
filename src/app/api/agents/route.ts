@@ -14,16 +14,16 @@ import {
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 
-function getUser(request: NextRequest) {
+async function getUser(request: NextRequest) {
   const token = request.cookies.get("session")?.value;
   if (!token) return null;
   const session = verifySessionToken(token);
   if (!session) return null;
-  return getUserById(session.userId);
+  return await getUserById(session.userId);
 }
 
 export async function GET(request: NextRequest) {
-  const user = getUser(request);
+  const user = await getUser(request);
   if (!user) {
     return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   }
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const user = getUser(request);
+  const user = await getUser(request);
   if (!user) {
     return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
   }

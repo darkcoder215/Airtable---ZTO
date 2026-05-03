@@ -1489,7 +1489,7 @@ function NewTemplateForm({
                 <Tag className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                 <input
                   type="text"
-                  className="zto-input pr-10 text-xs"
+                  className="zto-input text-xs" style={{ paddingInlineStart: "2.5rem" }}
                   placeholder="اكتب وسماً واضغط Enter"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}

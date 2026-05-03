@@ -30,6 +30,8 @@ interface TeamMember {
   role?: string;
   email?: string;
   avatarUrl?: string;
+  department?: string;
+  managerId?: string;
 }
 interface BucketCounts {
   total: number;
@@ -139,16 +141,47 @@ export default function DashboardsAndViewsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Group roster by department when at least one member has one set;
+  // otherwise keep a single "all" group so the layout doesn't shift for
+  // bases that don't track departments.
+  const allDepartments = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of summaries) if (s.member.department) set.add(s.member.department);
+    return Array.from(set).sort();
+  }, [summaries]);
+  const [departmentFilter, setDepartmentFilter] = useState<string>("");
+
   const filteredSummaries = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return summaries;
-    return summaries.filter(
-      (s) =>
+    return summaries.filter((s) => {
+      if (departmentFilter && s.member.department !== departmentFilter) return false;
+      if (!q) return true;
+      return (
         s.member.name.toLowerCase().includes(q) ||
-        s.member.role?.toLowerCase().includes(q) ||
-        s.member.email?.toLowerCase().includes(q)
-    );
-  }, [summaries, search]);
+        (s.member.role?.toLowerCase().includes(q) ?? false) ||
+        (s.member.email?.toLowerCase().includes(q) ?? false) ||
+        (s.member.department?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [summaries, search, departmentFilter]);
+
+  // Group filtered summaries by department for the roster sidebar.
+  const summariesByDepartment = useMemo(() => {
+    const groups = new Map<string, typeof filteredSummaries>();
+    const unassignedKey = "__none__";
+    for (const s of filteredSummaries) {
+      const k = s.member.department ?? unassignedKey;
+      const arr = groups.get(k) ?? [];
+      arr.push(s);
+      groups.set(k, arr);
+    }
+    // Stable order: alphabetical departments first, "بدون قسم" last.
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === unassignedKey) return 1;
+      if (b === unassignedKey) return -1;
+      return a.localeCompare(b);
+    });
+  }, [filteredSummaries]);
 
   const overall = useMemo(() => {
     const t: BucketCounts = { total: 0, done: 0, inProgress: 0, overdue: 0, dueSoon: 0 };
@@ -284,43 +317,87 @@ export default function DashboardsAndViewsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="بحث في الأعضاء..."
-                className="zto-input pr-10 text-xs"
+                className="zto-input text-xs" style={{ paddingInlineStart: "2.5rem" }}
               />
             </div>
-            <div className="space-y-1.5">
+            {/* Department pill filter — only when the Team table actually has dept info */}
+            {allDepartments.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => setDepartmentFilter("")}
+                  className={`text-[0.6rem] rounded-full px-2 py-0.5 border transition-colors ${
+                    !departmentFilter
+                      ? "bg-amber-400/15 text-amber-400 border-amber-400/40"
+                      : "border-neutral-800 text-neutral-400 hover:border-neutral-600"
+                  }`}
+                >
+                  الكل
+                </button>
+                {allDepartments.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDepartmentFilter(departmentFilter === d ? "" : d)}
+                    className={`text-[0.6rem] rounded-full px-2 py-0.5 border transition-colors ${
+                      departmentFilter === d
+                        ? "bg-amber-400/15 text-amber-400 border-amber-400/40"
+                        : "border-neutral-800 text-neutral-400 hover:border-neutral-600"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="space-y-3">
               {filteredSummaries.length === 0 && (
                 <p className="text-xs text-neutral-500 text-center py-6">لا نتائج</p>
               )}
-              {filteredSummaries.map((s) => {
-                const isActive = (active?.member.id ?? "") === s.member.id;
-                const overdue = s.totals.overdue;
+              {summariesByDepartment.map(([deptKey, list]) => {
+                const isUnassigned = deptKey === "__none__";
                 return (
-                  <button
-                    key={s.member.id}
-                    onClick={() => setActiveId(s.member.id)}
-                    className={`zto-roster-row w-full text-right ${
-                      isActive ? "zto-roster-row-active" : ""
-                    }`}
-                  >
-                    <Avatar member={s.member} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-xs font-bold text-white truncate">{s.member.name}</p>
-                        {overdue > 0 && (
-                          <span className="zto-badge zto-badge-err text-[0.55rem] !py-0">
-                            {overdue}
-                          </span>
-                        )}
-                      </div>
-                      {s.member.role && (
-                        <p className="text-[0.6rem] text-neutral-500 truncate">{s.member.role}</p>
-                      )}
+                  <div key={deptKey}>
+                    {/* Show the dept header only when we actually detected dept info. */}
+                    {allDepartments.length > 0 && (
+                      <p className="text-[0.55rem] font-black text-neutral-500 uppercase tracking-wider mb-1.5 px-1">
+                        {isUnassigned ? "بدون قسم" : deptKey}
+                        <span className="text-neutral-700 mr-1">· {list.length}</span>
+                      </p>
+                    )}
+                    <div className="space-y-1.5">
+                      {list.map((s) => {
+                        const isActive = (active?.member.id ?? "") === s.member.id;
+                        const overdue = s.totals.overdue;
+                        return (
+                          <button
+                            key={s.member.id}
+                            onClick={() => setActiveId(s.member.id)}
+                            className={`zto-roster-row w-full text-right ${
+                              isActive ? "zto-roster-row-active" : ""
+                            }`}
+                          >
+                            <Avatar member={s.member} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-bold text-white truncate">{s.member.name}</p>
+                                {overdue > 0 && (
+                                  <span className="zto-badge zto-badge-err text-[0.55rem] !py-0">
+                                    {overdue}
+                                  </span>
+                                )}
+                              </div>
+                              {s.member.role && (
+                                <p className="text-[0.6rem] text-neutral-500 truncate">{s.member.role}</p>
+                              )}
+                            </div>
+                            <div className="text-[0.6rem] text-neutral-500 tabular-nums shrink-0">
+                              {s.totals.total}
+                            </div>
+                            {isActive && <ChevronRight className="w-3 h-3 text-amber-400" />}
+                          </button>
+                        );
+                      })}
                     </div>
-                    <div className="text-[0.6rem] text-neutral-500 tabular-nums shrink-0">
-                      {s.totals.total}
-                    </div>
-                    {isActive && <ChevronRight className="w-3 h-3 text-amber-400" />}
-                  </button>
+                  </div>
                 );
               })}
             </div>

@@ -29,8 +29,6 @@ export default function LoginPage() {
     } catch { setError("فشل الاتصال بالخادم"); } finally { setLoading(false); }
   };
 
-  const fill = (u: string, p: string) => { setUsername(u); setPassword(p); };
-
   if (checking) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
 
   return (
@@ -82,25 +80,10 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-10 pt-6 border-t border-neutral-800">
-            <p className="text-[11px] text-neutral-600 font-bold tracking-wider mb-3 uppercase">حسابات تجريبية</p>
-            <div className="space-y-2">
-              {[
-                { l: "مدير النظام", u: "admin", p: "admin123", r: "مدير" },
-                { l: "أحمد الكاتب", u: "writer1", p: "writer123", r: "محرر" },
-                { l: "خالد المراجع", u: "viewer1", p: "viewer123", r: "مراجع" },
-              ].map((c) => (
-                <button key={c.u} type="button" onClick={() => fill(c.u, c.p)}
-                  className="w-full flex items-center justify-between bg-[#1a1a1a] hover:bg-[#222] border border-neutral-800 hover:border-neutral-700 rounded-xl px-4 py-3 transition-all cursor-pointer group">
-                  <div className="flex items-center gap-3">
-                    <span className="zto-badge zto-badge-default">{c.r}</span>
-                    <span className="text-neutral-300 text-[13px] font-semibold">{c.l}</span>
-                  </div>
-                  <ArrowLeft className="w-3.5 h-3.5 text-neutral-700 group-hover:text-[#c9a84c] transition-colors" />
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="text-[11px] text-neutral-600 mt-8 leading-relaxed text-center">
+            حسابك الإداري الأول يُنشأ تلقائياً من متغيّرات البيئة عند أول إقلاع.
+            بعد الدخول يمكنك إضافة بقية المستخدمين من صفحة الصلاحيات.
+          </p>
         </div>
       </div>
     </div>

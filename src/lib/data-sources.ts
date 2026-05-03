@@ -1468,6 +1468,26 @@ async function getKnownUrls(sourceId: string): Promise<Set<string>> {
   return new Set((data ?? []).map((r) => r.url));
 }
 
+// Returns the most recent published_at (in ms epoch) we've already saved for
+// this source, or null when nothing's been saved yet. Drives date-based
+// dedup so we don't reprocess articles older than what we have on file.
+async function getLatestPublishedAt(sourceId: string): Promise<number | null> {
+  if (!isUuid(sourceId)) return null;
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("scraper_articles")
+    .select("published_at")
+    .eq("source_id", sourceId)
+    .order("published_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`getLatestPublishedAt: ${error.message}`);
+  const v = data?.published_at;
+  if (!v) return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 async function persistArticles(
   source: DataSource,
   newArticles: FetchedArticle[]
@@ -1851,8 +1871,25 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     return result;
   }
 
-  const known = await getKnownUrls(source.id);
-  const fresh = result.articles.filter((a) => a.url && !known.has(a.url));
+  // Date-based dedup: only keep items whose publishedAt is strictly newer
+  // than the latest publishedAt we already have for this source. Articles
+  // with no usable publishedAt fall through to the URL set as a safety net.
+  // The DB-level UNIQUE(source_id, url) + upsert in persistArticles still
+  // catches any edge case where two ticks race.
+  const cutoff = await getLatestPublishedAt(source.id);
+  const known = cutoff == null ? await getKnownUrls(source.id) : null;
+  const fresh = result.articles.filter((a) => {
+    if (!a.url) return false;
+    if (cutoff != null) {
+      const t = Date.parse(a.publishedAt ?? "");
+      if (Number.isFinite(t)) return t > cutoff;
+      // Unknown date with a known cutoff → fall back to url check so we
+      // don't spam Airtable on every fetch with the same undated item.
+      return !known?.has(a.url);
+    }
+    // First-ever fetch for this source: nothing to compare against.
+    return !known || !known.has(a.url);
+  });
   fresh.forEach((a) => (a.sourceName = source.name));
 
   const persisted = await persistArticles(source, fresh);

@@ -29,6 +29,11 @@ const TITLE_FIELD_CANDIDATES = ["Name", "Title", "Task Name", "Item", "العن�
 const ROLE_FIELD_CANDIDATES = ["Role", "Title", "Position", "المسمى الوظيفي", "الدور"];
 const EMAIL_FIELD_CANDIDATES = ["Email", "Work Email", "البريد الإلكتروني"];
 const AVATAR_FIELD_CANDIDATES = ["Avatar", "Photo", "Picture", "Profile Photo"];
+// Hierarchy detection: a free-text "Department" / "Team" / Arabic equivalent
+// gives us a flat grouping; an explicit Manager / Reports To link gives the
+// tree edges. Either or both can be missing — we degrade gracefully.
+const DEPT_FIELD_CANDIDATES = ["Department", "Dept", "Team", "Group", "Division", "القسم", "الإدارة", "الفريق"];
+const MANAGER_FIELD_CANDIDATES = ["Manager", "Reports To", "Reports to", "Supervisor", "المدير", "المسؤول"];
 
 // Keep the Airtable bill bounded — most teams have <100 members and most
 // tables <500 active records. Rolls of 500+ tables/records are paginated by
@@ -49,6 +54,12 @@ interface TeamMember {
   role?: string;
   email?: string;
   avatarUrl?: string;
+  // Free-text department / "team" classification — same value across people
+  // = same department.
+  department?: string;
+  // Record id of the member's manager when set via a record-link field on
+  // the Team table. Drives the hierarchy tree.
+  managerId?: string;
 }
 
 interface BucketCounts {
@@ -143,6 +154,8 @@ function teamMemberFromRecord(
   const roleField = findField(table, ROLE_FIELD_CANDIDATES);
   const emailField = findField(table, EMAIL_FIELD_CANDIDATES);
   const avatarField = findField(table, AVATAR_FIELD_CANDIDATES);
+  const deptField = findField(table, DEPT_FIELD_CANDIDATES);
+  const managerField = findField(table, MANAGER_FIELD_CANDIDATES);
   const name =
     (nameField && typeof rec.fields[nameField.name] === "string"
       ? (rec.fields[nameField.name] as string)
@@ -163,7 +176,25 @@ function teamMemberFromRecord(
       if (first && typeof first.url === "string") avatarUrl = first.url;
     }
   }
-  return { id: rec.id, name, role, email, avatarUrl };
+  // Department: accept a single text or singleSelect value, or take the
+  // first element of a multipleSelect array.
+  let department: string | undefined;
+  if (deptField) {
+    const v = rec.fields[deptField.name];
+    if (typeof v === "string") department = v;
+    else if (Array.isArray(v) && typeof v[0] === "string") department = v[0];
+    else if (v && typeof v === "object" && "name" in v && typeof (v as { name: unknown }).name === "string") {
+      department = (v as { name: string }).name;
+    }
+  }
+  // Manager: a single record link to another row in the same Team table.
+  let managerId: string | undefined;
+  if (managerField) {
+    const v = rec.fields[managerField.name];
+    if (Array.isArray(v) && typeof v[0] === "string") managerId = v[0];
+    else if (typeof v === "string") managerId = v;
+  }
+  return { id: rec.id, name, role, email, avatarUrl, department, managerId };
 }
 
 async function loadAllRecords(
@@ -187,7 +218,7 @@ async function loadAllRecords(
 }
 
 export async function GET(request: NextRequest) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "غير مصادق" }, { status: 401 });
 
   try {

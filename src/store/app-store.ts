@@ -28,7 +28,7 @@ interface AppState {
   toggleSidebar: () => void;
   addToast: (message: string, type: Toast["type"]) => void;
   removeToast: (id: string) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -51,8 +51,14 @@ export const useAppStore = create<AppState>((set) => ({
     }, 4000);
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-  logout: () => {
-    document.cookie = "session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  logout: async () => {
+    // Cookie is HttpOnly now — JS can't clear it. Call the auth route to
+    // expire it server-side, then drop in-memory state and redirect home.
+    try {
+      await fetch("/api/auth", { method: "DELETE" });
+    } catch {
+      // best-effort; the redirect still happens.
+    }
     set({ user: null, isAuthenticated: false, selectedBaseId: null, selectedTableId: null });
     window.location.href = "/";
   },
