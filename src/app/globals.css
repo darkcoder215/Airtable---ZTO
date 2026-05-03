@@ -1,6 +1,26 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Sora:wght@200;300;400;500;600;700;800&display=swap');
 
+/* Tinta Arabic — local file ships in /public/fonts. Two weights only
+   (Light + Bold). We expose them as 300 and 700 in the @font-face rules,
+   then let CSS interpolate from the same file with `font-weight: 100 300`
+   / `400 700` ranges so the engine picks Light for thin text and Bold for
+   emphasis. Display: swap keeps Sora visible while Tinta downloads. */
+@font-face {
+  font-family: 'Tinta Arabic';
+  font-style: normal;
+  font-weight: 100 300;
+  font-display: swap;
+  src: url('/fonts/TintaArabic-Light.otf') format('opentype');
+}
+@font-face {
+  font-family: 'Tinta Arabic';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/TintaArabic-Bold.otf') format('opentype');
+}
+
 /* ============================================================
    Tailwind theme tokens — these stay in @theme so utilities
    like bg-brand and text-gold work. Default values match the
@@ -117,7 +137,15 @@
     background: var(--surface-page);
     color: var(--text-base);
     font-family: var(--font-sans);
+    /* Sharp text rendering across themes — fixes the "blurry small
+       text" effect that thin weights show on dark backgrounds.
+       optimizeLegibility enables kerning + ligatures, and the
+       font-feature shorthand makes that explicit so cached pages
+       don't fall back to "auto". */
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
   ::selection { background: var(--c-gold); color: #000; }
@@ -529,7 +557,7 @@ button.zto-card:hover {
    list it inside the font stack so Latin glyphs pick up Sora
    while Arabic glyphs pick up IBM Plex Sans Arabic.
    ============================================================ */
-[data-theme="signal"] {
+[data-theme="signal"], [data-theme="signal-light"] {
   /* Signal palette — see SIGNAL ENGINEERING / DESIGN SYSTEM v2 */
   --signal: #2E6BFF;
   --signal-bright: #4F8BFF;
@@ -581,7 +609,65 @@ button.zto-card:hover {
      IBM Plex Sans Arabic, which pairs with Sora's geometric
      character and ships in matching weights. Mono = JetBrains
      Mono for tags, labels, numeric readouts. */
-  --font-display: 'Sora', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  /* Display chain: Sora handles Latin/numerals; the browser falls
+     through to Tinta Arabic (the brand-owned face shipped from
+     /public/fonts) for Arabic codepoints, with IBM Plex Sans Arabic
+     as a safe fallback when Tinta hasn't loaded yet. */
+  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-display);
+}
+
+/* ========== Signal — LIGHT inversion ==========
+   Same engineering identity, paper-on-card. The brand chroma deepens
+   to #1D5CE0 for AA contrast on light surfaces, body weight bumps to
+   400 (per spec §3.4), semantic colours shift darker. Toggle via
+   data-theme="signal-light" on <html>. */
+[data-theme="signal-light"] {
+  --signal: #1D5CE0;
+  --signal-bright: #1248C0;
+  --signal-deep: #0D3699;
+  --signal-glow: rgba(29, 92, 224, 0.25);
+  --signal-wash: rgba(29, 92, 224, 0.06);
+  --cyan-edge: #0C8A98;
+  --success: #148C4E;
+  --amber-warn: #A86200;
+
+  --c-brand: #FFFFFF;
+  --c-brand-light: #EFF0F4;
+  --c-brand-lighter: #E5E7ED;
+  --c-brand-border: #B8BCC8;
+  --c-brand-hover: #D8DBE3;
+  --c-gold: var(--signal);
+  --c-gold-dark: var(--signal-deep);
+  --c-gold-light: var(--signal-bright);
+  --c-gold-bg: var(--signal-wash);
+  --c-txt: #0A0D14;
+  --c-txt-dim: #2D3348;
+  --c-txt-faint: #464E68;
+  --c-ok: var(--success);
+  --c-ok-bg: rgba(20, 140, 78, 0.10);
+  --c-warn: var(--amber-warn);
+  --c-warn-bg: rgba(168, 98, 0, 0.10);
+  --c-err: var(--amber-warn);
+  --c-err-bg: rgba(168, 98, 0, 0.10);
+  --c-info: var(--signal);
+  --c-info-bg: var(--signal-wash);
+
+  --surface-page: #F7F8FA;
+  --surface-card: #FFFFFF;
+  --surface-elevated: #EFF0F4;
+  --surface-sunken: #E5E7ED;
+  --surface-header: #FFFFFF;
+  --border-strong: #B8BCC8;
+  --border-soft: #D8DBE3;
+  --text-strong: #0A0D14;
+  --text-base: #0A0D14;
+  --text-dim: #2D3348;
+  --text-faint: #464E68;
+  --modal-overlay: rgba(10, 13, 20, 0.4);
+
+  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
   --font-sans: var(--font-display);
 }
@@ -590,56 +676,168 @@ button.zto-card:hover {
    node dots, no diagonal traces. Two soft radial signal glows
    layered on body::after add depth without competing with the
    grid lines. */
-[data-theme="signal"] body {
+[data-theme="signal"] body, [data-theme="signal-light"] body,
+[data-theme="signal-light"] body {
   font-family: var(--font-display);
-  font-weight: 300;
   letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss01" 1;
 }
-[data-theme="signal"] body::before {
+[data-theme="signal"] body { font-weight: 300; }
+/* Light variant uses 400 body per spec §3.4 — thin weight on a
+   light surface looks washed out otherwise. */
+[data-theme="signal-light"] body { font-weight: 400; }
+
+/* Blur safeguard for small UI text. Sora 200/300 reads cleanly at
+   display sizes but pixel-snapping at <=12px on a dark surface
+   makes the weight look fuzzy. We bump the floor weight to 500
+   for tiny text and keep mono numerics aliased.
+   These selectors pick up the Tailwind size utilities the codebase
+   uses heavily (text-[0.55rem] through text-[0.7rem] and text-xs). */
+[data-theme="signal"] .text-\[0\.55rem\],
+[data-theme="signal"] .text-\[0\.6rem\],
+[data-theme="signal"] .text-\[0\.65rem\],
+[data-theme="signal"] .text-\[0\.7rem\],
+[data-theme="signal-light"] .text-\[0\.55rem\],
+[data-theme="signal-light"] .text-\[0\.6rem\],
+[data-theme="signal-light"] .text-\[0\.65rem\],
+[data-theme="signal-light"] .text-\[0\.7rem\] {
+  font-weight: 500;
+}
+[data-theme="signal"] .text-xs,
+[data-theme="signal-light"] .text-xs {
+  font-weight: 500;
+}
+[data-theme="signal"] .font-mono,
+[data-theme="signal-light"] .font-mono {
+  font-family: var(--font-mono);
+  /* Mono numerics stay aliased — antialiasing softens their stroke
+     contrast which is exactly what makes timestamps look fuzzy. */
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Backdrop — austere 48px grid + two soft radial signal glows.
+   Same pattern in both signal variants, with grid line opacity
+   tuned per surface (white on dark / black on light). */
+[data-theme="signal"] body, [data-theme="signal-light"] body::before,
+[data-theme="signal-light"] body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  background-size: 48px 48px;
+}
+[data-theme="signal"] body, [data-theme="signal-light"] body::before {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: 48px 48px;
 }
-[data-theme="signal"] body::after {
+[data-theme="signal-light"] body::before {
+  background-image:
+    linear-gradient(rgba(10, 13, 20, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10, 13, 20, 0.04) 1px, transparent 1px);
+}
+[data-theme="signal"] body, [data-theme="signal-light"] body::after,
+[data-theme="signal-light"] body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
+}
+[data-theme="signal"] body, [data-theme="signal-light"] body::after {
   background:
     radial-gradient(80vmin 60vmin at 80% 10%, rgba(46, 107, 255, 0.08), transparent 60%),
     radial-gradient(60vmin 50vmin at 10% 90%, rgba(79, 212, 227, 0.04), transparent 60%);
 }
-[data-theme="signal"] #__next,
-[data-theme="signal"] body > * { position: relative; z-index: 1; }
+[data-theme="signal-light"] body::after {
+  background:
+    radial-gradient(80vmin 60vmin at 80% 10%, rgba(29, 92, 224, 0.06), transparent 60%),
+    radial-gradient(60vmin 50vmin at 10% 90%, rgba(12, 138, 152, 0.04), transparent 60%);
+}
+[data-theme="signal"] #__next, [data-theme="signal-light"] #__next,
+[data-theme="signal-light"] #__next,
+[data-theme="signal"] body, [data-theme="signal-light"] body > *,
+[data-theme="signal-light"] body > * { position: relative; z-index: 1; }
+
+/* ===== Subtle drifting geometrical shapes ==========================
+   A tiny SVG layer behind the page renders four 1px-stroked outlines
+   (square, circle, triangle, hexagon) drifting at 60–100s loops with
+   ~0.06 opacity. The shapes are positioned absolutely in viewport
+   units so they never crowd content. CSS variables let signal-light
+   recolour them without duplicating the markup.
+   pointer-events: none keeps them invisible to interactions; will-
+   change isolates them on the GPU so the body composite stays cheap.
+*/
+[data-theme="signal"],
+[data-theme="signal-light"] { --signal-shape: var(--signal); }
+.signal-bg-shapes {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  /* Only render under signal themes; the holder element is mounted
+     globally but stays invisible elsewhere. */
+  display: none;
+}
+[data-theme="signal"] .signal-bg-shapes, [data-theme="signal-light"] .signal-bg-shapes,
+[data-theme="signal-light"] .signal-bg-shapes { display: block; }
+.signal-bg-shapes .shape {
+  position: absolute;
+  opacity: 0.07;
+  color: var(--signal);
+  will-change: transform, opacity;
+}
+[data-theme="signal-light"] .signal-bg-shapes .shape { opacity: 0.06; }
+.signal-bg-shapes .s1 { top: 8%;  right: 12%; width: 220px; height: 220px; animation: zto-bg-drift-a 80s ease-in-out infinite; }
+.signal-bg-shapes .s2 { top: 62%; right: 38%; width: 160px; height: 160px; animation: zto-bg-drift-b 95s ease-in-out infinite; }
+.signal-bg-shapes .s3 { top: 30%; left:  6%;  width: 280px; height: 280px; animation: zto-bg-drift-c 110s ease-in-out infinite; }
+.signal-bg-shapes .s4 { top: 78%; left:  20%; width: 180px; height: 180px; animation: zto-bg-drift-d 70s ease-in-out infinite; }
+@keyframes zto-bg-drift-a {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(-20px, 30px) rotate(45deg); }
+}
+@keyframes zto-bg-drift-b {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(28px, -22px) rotate(-30deg); }
+}
+@keyframes zto-bg-drift-c {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  50%      { transform: translate(40px, 18px) rotate(60deg) scale(1.05); }
+}
+@keyframes zto-bg-drift-d {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(-26px, -34px) rotate(-50deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signal-bg-shapes .shape { animation: none; }
+}
 
 /* Sharp engineering corners — override the rounded shapes the
    default dark theme uses for the signature 2-4px radius. */
-[data-theme="signal"] .zto-card { border-radius: 4px; border-width: 1px; }
-[data-theme="signal"] .zto-btn { border-radius: 4px; }
-[data-theme="signal"] .zto-btn-sm { border-radius: 4px; }
-[data-theme="signal"] .zto-input { border-radius: 4px; border-width: 1px; }
-[data-theme="signal"] .zto-input:focus {
+[data-theme="signal"] .zto-card, [data-theme="signal-light"] .zto-card { border-radius: 4px; border-width: 1px; }
+[data-theme="signal"] .zto-btn, [data-theme="signal-light"] .zto-btn { border-radius: 4px; }
+[data-theme="signal"] .zto-btn-sm, [data-theme="signal-light"] .zto-btn-sm { border-radius: 4px; }
+[data-theme="signal"] .zto-input, [data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
+[data-theme="signal"] .zto-input:focus, [data-theme="signal-light"] .zto-input:focus {
   border-color: var(--signal);
   box-shadow: 0 0 0 3px var(--signal-glow);
 }
-[data-theme="signal"] .zto-section { padding: 22px; }
-[data-theme="signal"] .zto-badge {
+[data-theme="signal"] .zto-section, [data-theme="signal-light"] .zto-section { padding: 22px; }
+[data-theme="signal"] .zto-badge, [data-theme="signal-light"] .zto-badge {
   border-radius: 2px;
   letter-spacing: 0.12em;
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
 }
-[data-theme="signal"] .zto-roster-row { border-radius: 4px; }
-[data-theme="signal"] .zto-glow-edge::before {
+[data-theme="signal"] .zto-roster-row, [data-theme="signal-light"] .zto-roster-row { border-radius: 4px; }
+[data-theme="signal"] .zto-glow-edge::before, [data-theme="signal-light"] .zto-glow-edge::before {
   background: linear-gradient(180deg, var(--signal) 0%, transparent 60%);
 }
 
@@ -647,7 +845,7 @@ button.zto-card:hover {
    mono, uppercase, 0.18em tracking, 2px corners, signal-blue fill
    with void text. This recolors every existing zto-btn-gold the
    app already uses, so all CTAs flip in unison. */
-[data-theme="signal"] .zto-btn-gold {
+[data-theme="signal"] .zto-btn-gold, [data-theme="signal-light"] .zto-btn-gold {
   background: var(--signal);
   color: #000000;
   border-color: var(--signal);
@@ -657,12 +855,12 @@ button.zto-card:hover {
   text-transform: uppercase;
   border-radius: 2px;
 }
-[data-theme="signal"] .zto-btn-gold:hover:not(:disabled) {
+[data-theme="signal"] .zto-btn-gold:hover:not, [data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
   background: var(--signal-bright);
   border-color: var(--signal-bright);
   box-shadow: 0 0 0 3px var(--signal-glow);
 }
-[data-theme="signal"] .zto-btn-outline {
+[data-theme="signal"] .zto-btn-outline, [data-theme="signal-light"] .zto-btn-outline {
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0.18em;
@@ -672,38 +870,38 @@ button.zto-card:hover {
 /* Tailwind utility remap — the default app uses amber/emerald
    freely; under Signal those flatten into signal-blue / success
    so the visual language stays coherent. */
-[data-theme="signal"] .text-amber-400,
-[data-theme="signal"] .text-amber-300,
-[data-theme="signal"] .text-amber-500,
-[data-theme="signal"] .text-yellow-400 {
+[data-theme="signal"] .text-amber-400, [data-theme="signal-light"] .text-amber-400,
+[data-theme="signal"] .text-amber-300, [data-theme="signal-light"] .text-amber-300,
+[data-theme="signal"] .text-amber-500, [data-theme="signal-light"] .text-amber-500,
+[data-theme="signal"] .text-yellow-400, [data-theme="signal-light"] .text-yellow-400 {
   color: var(--signal-bright) !important;
 }
-[data-theme="signal"] .bg-amber-400\/10,
-[data-theme="signal"] .bg-amber-400\/15,
-[data-theme="signal"] .bg-amber-400\/20,
-[data-theme="signal"] .bg-amber-500\/10 {
+[data-theme="signal"] .bg-amber-400\/10, [data-theme="signal-light"] .bg-amber-400\/10,
+[data-theme="signal"] .bg-amber-400\/15, [data-theme="signal-light"] .bg-amber-400\/15,
+[data-theme="signal"] .bg-amber-400\/20, [data-theme="signal-light"] .bg-amber-400\/20,
+[data-theme="signal"] .bg-amber-500\/10, [data-theme="signal-light"] .bg-amber-500\/10 {
   background-color: var(--signal-wash) !important;
 }
-[data-theme="signal"] .border-amber-400\/30,
-[data-theme="signal"] .border-amber-400\/40,
-[data-theme="signal"] .border-amber-500\/30 {
+[data-theme="signal"] .border-amber-400\/30, [data-theme="signal-light"] .border-amber-400\/30,
+[data-theme="signal"] .border-amber-400\/40, [data-theme="signal-light"] .border-amber-400\/40,
+[data-theme="signal"] .border-amber-500\/30, [data-theme="signal-light"] .border-amber-500\/30 {
   border-color: rgba(46, 107, 255, 0.4) !important;
 }
-[data-theme="signal"] .text-emerald-400,
-[data-theme="signal"] .text-emerald-300 { color: var(--success) !important; }
-[data-theme="signal"] .bg-emerald-400\/10,
-[data-theme="signal"] .bg-emerald-500\/10 { background-color: rgba(61, 214, 140, 0.10) !important; }
-[data-theme="signal"] .border-emerald-400\/30,
-[data-theme="signal"] .border-emerald-500\/30 { border-color: rgba(61, 214, 140, 0.30) !important; }
+[data-theme="signal"] .text-emerald-400, [data-theme="signal-light"] .text-emerald-400,
+[data-theme="signal"] .text-emerald-300, [data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
+[data-theme="signal"] .bg-emerald-400\/10, [data-theme="signal-light"] .bg-emerald-400\/10,
+[data-theme="signal"] .bg-emerald-500\/10, [data-theme="signal-light"] .bg-emerald-500\/10 { background-color: rgba(61, 214, 140, 0.10) !important; }
+[data-theme="signal"] .border-emerald-400\/30, [data-theme="signal-light"] .border-emerald-400\/30,
+[data-theme="signal"] .border-emerald-500\/30, [data-theme="signal-light"] .border-emerald-500\/30 { border-color: rgba(61, 214, 140, 0.30) !important; }
 /* Spec says: never red for warnings — flip Tailwind reds to amber-warn. */
-[data-theme="signal"] .text-red-400,
-[data-theme="signal"] .text-red-300 { color: var(--amber-warn) !important; }
-[data-theme="signal"] .bg-red-500\/10,
-[data-theme="signal"] .bg-red-500\/5 { background-color: rgba(232, 163, 61, 0.10) !important; }
-[data-theme="signal"] .border-red-500\/30,
-[data-theme="signal"] .border-red-500\/40 { border-color: rgba(232, 163, 61, 0.30) !important; }
+[data-theme="signal"] .text-red-400, [data-theme="signal-light"] .text-red-400,
+[data-theme="signal"] .text-red-300, [data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
+[data-theme="signal"] .bg-red-500\/10, [data-theme="signal-light"] .bg-red-500\/10,
+[data-theme="signal"] .bg-red-500\/5, [data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(232, 163, 61, 0.10) !important; }
+[data-theme="signal"] .border-red-500\/30, [data-theme="signal-light"] .border-red-500\/30,
+[data-theme="signal"] .border-red-500\/40, [data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(232, 163, 61, 0.30) !important; }
 
-[data-theme="signal"] ::selection { background: var(--signal); color: #FFFFFF; }
+[data-theme="signal"] ::selection, [data-theme="signal-light"] ::selection { background: var(--signal); color: #FFFFFF; }
 
 /* ============================================================
    Signal utility classes — eyebrow / tag / logo-mark / chrome /
@@ -827,8 +1025,8 @@ button.zto-card:hover {
    Spec stays on data-theme=signal so the dark+gold theme's
    regular cards aren't accidentally branded. */
 .corner-frame { position: relative; }
-[data-theme="signal"] .corner-frame::before,
-[data-theme="signal"] .corner-frame::after {
+[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before,
+[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
   content: "";
   position: absolute;
   width: 16px;
@@ -836,13 +1034,13 @@ button.zto-card:hover {
   border: 1px solid var(--signal);
   pointer-events: none;
 }
-[data-theme="signal"] .corner-frame::before {
+[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before {
   top: 20px;
   left: 20px;
   border-right: none;
   border-bottom: none;
 }
-[data-theme="signal"] .corner-frame::after {
+[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
   bottom: 20px;
   right: 20px;
   border-left: none;
@@ -979,10 +1177,152 @@ button.zto-card:hover {
 
 /* SVG dash-flow — used on architecture diagrams + signal traces. */
 @keyframes ztoSignalDash { to { stroke-dashoffset: -24; } }
-[data-theme="signal"] .signal-dash {
+[data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash {
   stroke-dasharray: 4 8;
   animation: ztoSignalDash 2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-theme="signal"] .signal-dash { animation: none; }
+  [data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash { animation: none; }
 }
+
+/* ============================================================
+   Comprehensive component coverage under both Signal variants.
+   Every surface that ships its own background / border / radius
+   gets re-tuned here so the engineering identity is consistent
+   across cards, tables, dividers, scrollbars, modals, popovers,
+   roster rows, and the page-guide accent strip.
+   ============================================================ */
+
+/* Tables — sharper rows, mono headers, colour-tuned hover. */
+[data-theme="signal"] .zto-th,
+[data-theme="signal-light"] .zto-th {
+  background: var(--c-brand-light);
+  color: var(--c-txt-faint);
+  border-bottom: 1px solid var(--c-brand-border);
+  font-family: var(--font-mono);
+  letter-spacing: 0.18em;
+}
+[data-theme="signal"] .zto-td,
+[data-theme="signal-light"] .zto-td {
+  border-bottom-color: var(--c-brand-border);
+  font-weight: 400;
+}
+[data-theme="signal"] table tbody tr:hover,
+[data-theme="signal-light"] table tbody tr:hover {
+  background: var(--c-gold-bg);
+}
+
+/* Dividers + soft borders. */
+[data-theme="signal"] .border-neutral-800,
+[data-theme="signal"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
+[data-theme="signal-light"] .border-neutral-800,
+[data-theme="signal-light"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
+[data-theme="signal"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]),
+[data-theme="signal-light"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--c-brand-border) !important;
+}
+
+/* Neutral surfaces (lots of components use bg-[#1a1a1a] / [#0d0d0d]
+   / [#161616] inline). Map them onto Signal's ink-1 / ink-2 / ink. */
+[data-theme="signal"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
+[data-theme="signal"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
+[data-theme="signal"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
+[data-theme="signal-light"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
+[data-theme="signal-light"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
+[data-theme="signal-light"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal-light"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal-light"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
+/* Hard text colours used in places. */
+[data-theme="signal-light"] .text-white { color: var(--text-strong) !important; }
+[data-theme="signal-light"] .text-neutral-300,
+[data-theme="signal-light"] .text-neutral-400 { color: var(--c-txt) !important; }
+[data-theme="signal-light"] .text-neutral-500 { color: var(--c-txt-dim) !important; }
+[data-theme="signal-light"] .text-neutral-600,
+[data-theme="signal-light"] .text-neutral-700 { color: var(--c-txt-faint) !important; }
+
+/* Scrollbar accents pick up the brand. */
+[data-theme="signal"] ::-webkit-scrollbar-thumb,
+[data-theme="signal-light"] ::-webkit-scrollbar-thumb {
+  background: var(--c-brand-border);
+  border-radius: 2px;
+}
+[data-theme="signal"] ::-webkit-scrollbar-thumb:hover,
+[data-theme="signal-light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--signal);
+}
+
+/* Modal / popover surfaces — Signal prefers ink-2 popovers with a
+   thin signal border so they read as instrument panels. */
+[data-theme="signal"] .zto-modal,
+[data-theme="signal"] .zto-modal-content,
+[data-theme="signal-light"] .zto-modal,
+[data-theme="signal-light"] .zto-modal-content {
+  border-radius: 4px;
+  border: 1px solid var(--c-brand-border);
+  background: var(--surface-elevated);
+}
+
+/* Page guide accent — when the bg color uses an emerald/blue/amber
+   wash, swap in the signal wash so the colour family is consistent. */
+[data-theme="signal"] .zto-card.bg-emerald-400\/5,
+[data-theme="signal"] .zto-card.bg-blue-400\/5,
+[data-theme="signal"] .zto-card.bg-purple-400\/5,
+[data-theme="signal"] .zto-card.bg-amber-400\/5,
+[data-theme="signal-light"] .zto-card.bg-emerald-400\/5,
+[data-theme="signal-light"] .zto-card.bg-blue-400\/5,
+[data-theme="signal-light"] .zto-card.bg-purple-400\/5,
+[data-theme="signal-light"] .zto-card.bg-amber-400\/5 {
+  background-color: var(--signal-wash) !important;
+  border-color: rgba(46, 107, 255, 0.30) !important;
+}
+
+/* Buttons — Signal-light keeps the same engineering treatment as
+   Signal-dark but with a deeper signal-blue for AA contrast on
+   paper, and white text instead of void. */
+[data-theme="signal-light"] .zto-btn-gold {
+  background: var(--signal);
+  color: #FFFFFF;
+  border-color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
+  background: var(--signal-deep);
+  border-color: var(--signal-deep);
+}
+[data-theme="signal-light"] .zto-btn-outline {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Inputs — focus ring under signal-light. */
+[data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
+[data-theme="signal-light"] .zto-input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px rgba(29, 92, 224, 0.18);
+}
+
+/* Severity remap to honour the spec's "amber not red for warnings"
+   rule under signal-light too. */
+[data-theme="signal-light"] .text-red-400,
+[data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
+[data-theme="signal-light"] .bg-red-500\/10,
+[data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(168, 98, 0, 0.10) !important; }
+[data-theme="signal-light"] .border-red-500\/30,
+[data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(168, 98, 0, 0.30) !important; }
+[data-theme="signal-light"] .text-amber-400,
+[data-theme="signal-light"] .text-amber-300,
+[data-theme="signal-light"] .text-amber-500 { color: var(--signal) !important; }
+[data-theme="signal-light"] .bg-amber-400\/10,
+[data-theme="signal-light"] .bg-amber-400\/15 { background-color: var(--signal-wash) !important; }
+[data-theme="signal-light"] .border-amber-400\/30,
+[data-theme="signal-light"] .border-amber-400\/40 { border-color: rgba(29, 92, 224, 0.30) !important; }
+[data-theme="signal-light"] .text-emerald-400,
+[data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }

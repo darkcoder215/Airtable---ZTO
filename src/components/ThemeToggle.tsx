@@ -1,26 +1,38 @@
 "use client";
 
-// Three-way theme picker: dark (gold) / light / signal (engineering blue).
-// All three themes are pure CSS-token swaps driven by data-theme on <html>;
+// Four-way theme picker:
+//   dark         → ZTO gold-on-near-black (default)
+//   light        → ZTO gold-on-paper
+//   signal       → Signal Engineering, dark
+//   signal-light → Signal Engineering, light
+//
+// All four themes are pure CSS-token swaps driven by data-theme on <html>;
 // see globals.css for the token definitions. The user's choice persists in
-// localStorage under the same key the original two-way toggle used.
+// localStorage under the same key the original toggles used. The control
+// renders as a segmented pill with one icon per option; a small "ZTO"/"SIG"
+// label sits between the gold pair and the signal pair so users can tell
+// which family each icon belongs to at a glance.
 
 import { useEffect, useState } from "react";
-import { Sun, Moon, Radio } from "lucide-react";
+import { Sun, Moon, Radio, Cpu } from "lucide-react";
 
-type Theme = "dark" | "light" | "signal";
+type Theme = "dark" | "light" | "signal" | "signal-light";
 
 const STORAGE_KEY = "zto-theme";
-const THEMES: Array<{
+
+interface ThemeOption {
   key: Theme;
-  // Tooltip text — used because the picker collapses to icons.
   hint: string;
-  // Icon component from lucide. Sized to 16x16 in render.
   Icon: typeof Sun;
-}> = [
-  { key: "dark",   hint: "السمة الذهبية الداكنة",                 Icon: Moon },
-  { key: "light",  hint: "السمة الفاتحة",                          Icon: Sun },
-  { key: "signal", hint: "Signal Engineering — هندسي بلون أزرق",  Icon: Radio },
+  // family used for the divider label
+  family: "zto" | "signal";
+}
+
+const THEMES: ThemeOption[] = [
+  { key: "dark",         hint: "ZTO ذهبي · داكن",        Icon: Moon,  family: "zto"    },
+  { key: "light",        hint: "ZTO ذهبي · فاتح",        Icon: Sun,   family: "zto"    },
+  { key: "signal",       hint: "Signal · داكن (هندسي)",  Icon: Radio, family: "signal" },
+  { key: "signal-light", hint: "Signal · فاتح (هندسي)",  Icon: Cpu,   family: "signal" },
 ];
 
 function applyTheme(theme: Theme) {
@@ -36,7 +48,10 @@ export function ThemeToggle() {
   // matches a "dark" render to avoid the well-known hydration warning.
   useEffect(() => {
     const saved = (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) as Theme | null;
-    const initial: Theme = saved === "light" || saved === "signal" || saved === "dark" ? saved : "dark";
+    const initial: Theme =
+      saved === "light" || saved === "signal" || saved === "signal-light" || saved === "dark"
+        ? saved
+        : "dark";
     setTheme(initial);
     applyTheme(initial);
     setMounted(true);
@@ -74,24 +89,33 @@ export function ThemeToggle() {
       className="inline-flex items-center bg-[var(--c-brand-lighter)] border border-[var(--c-brand-border)] rounded-lg p-0.5 gap-0.5"
       title="تبديل السمة"
     >
-      {THEMES.map(({ key, hint, Icon }) => {
+      {THEMES.map(({ key, hint, Icon, family }, i) => {
         const active = theme === key;
+        const prevFamily = i > 0 ? THEMES[i - 1].family : null;
+        const showFamilyDivider = prevFamily !== null && prevFamily !== family;
         return (
-          <button
-            key={key}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => pick(key)}
-            title={hint}
-            className={`px-2 py-1.5 rounded-md transition-all duration-150 flex items-center gap-1.5 text-[11px] font-bold ${
-              active
-                ? "bg-[var(--c-brand)] text-[var(--c-gold)] shadow-sm"
-                : "text-[var(--c-txt-dim)] hover:text-[var(--c-txt)]"
-            }`}
-          >
-            <Icon className="w-4 h-4" />
-          </button>
+          <span key={key} className="flex items-center">
+            {showFamilyDivider && (
+              <span
+                className="mx-1 h-3 w-px bg-[var(--c-brand-border)]"
+                aria-hidden="true"
+              />
+            )}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => pick(key)}
+              title={hint}
+              className={`px-2 py-1.5 rounded-md transition-all duration-150 flex items-center gap-1.5 text-[11px] font-bold ${
+                active
+                  ? "bg-[var(--c-brand)] text-[var(--c-gold)] shadow-sm"
+                  : "text-[var(--c-txt-dim)] hover:text-[var(--c-txt)]"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+            </button>
+          </span>
         );
       })}
     </div>
