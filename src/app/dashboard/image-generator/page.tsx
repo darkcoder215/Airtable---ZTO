@@ -136,6 +136,7 @@ export default function ImageGeneratorPage() {
   /* Library forms */
   const [showLogoForm, setShowLogoForm] = useState(false);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [showAIBuilder, setShowAIBuilder] = useState(false);
 
   /* ─────────────── Loaders ─────────────── */
 
@@ -671,6 +672,8 @@ export default function ImageGeneratorPage() {
           }}
           showForm={showTemplateForm}
           setShowForm={setShowTemplateForm}
+          showAIBuilder={showAIBuilder}
+          setShowAIBuilder={setShowAIBuilder}
         />
       )}
     </div>
@@ -1271,6 +1274,8 @@ function TemplatesLibrary({
   onDelete,
   showForm,
   setShowForm,
+  showAIBuilder,
+  setShowAIBuilder,
 }: {
   templates: SavedTemplate[];
   loading: boolean;
@@ -1287,6 +1292,8 @@ function TemplatesLibrary({
   onDelete: (id: string) => Promise<void>;
   showForm: boolean;
   setShowForm: (v: boolean) => void;
+  showAIBuilder: boolean;
+  setShowAIBuilder: (v: boolean) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -1299,11 +1306,33 @@ function TemplatesLibrary({
           <code className="text-amber-400 mx-1 font-mono">عقارات</code>.
           عند توليد صورة لاحقاً يمكن للمستخدم اختيار القالب فوراً وستُطبَّق نسبة أبعاده وتعليماته على الفور.
         </p>
+        <p className="text-[0.7rem] text-purple-300 leading-relaxed mt-2">
+          أو دع الذكاء الاصطناعي يبني لك القالب: ارفع صورتين أو أكثر من تصاميمك المعتادة وسنستخرج
+          منها <span className="font-bold">وصف القالب</span> ثم نعرض معاينة فعلية قبل الحفظ.
+        </p>
       </div>
 
       {isAdmin && (
-        <div className="flex items-center justify-end">
-          <button onClick={() => setShowForm(!showForm)} className="zto-btn zto-btn-gold zto-btn-sm">
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <button
+            onClick={() => {
+              setShowAIBuilder(!showAIBuilder);
+              if (!showAIBuilder) setShowForm(false);
+            }}
+            className={`zto-btn zto-btn-sm ${
+              showAIBuilder ? "zto-btn-ghost" : "zto-btn-outline border-purple-500/40 !text-purple-300"
+            }`}
+          >
+            <Wand2 className="w-3.5 h-3.5" />
+            {showAIBuilder ? "إلغاء البناء بالذكاء الاصطناعي" : "إنشاء بالذكاء الاصطناعي"}
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(!showForm);
+              if (!showForm) setShowAIBuilder(false);
+            }}
+            className="zto-btn zto-btn-gold zto-btn-sm"
+          >
             <Plus className="w-3.5 h-3.5" />
             {showForm ? "إلغاء" : "قالب جديد"}
           </button>
@@ -1312,6 +1341,13 @@ function TemplatesLibrary({
 
       {showForm && isAdmin && (
         <NewTemplateForm onSubmit={onCreate} onCancel={() => setShowForm(false)} />
+      )}
+
+      {showAIBuilder && isAdmin && (
+        <AITemplateWizard
+          onSave={onCreate}
+          onClose={() => setShowAIBuilder(false)}
+        />
       )}
 
       {loading ? (
@@ -1564,6 +1600,659 @@ function NewTemplateForm({
           حفظ القالب
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────── AI template wizard ───────────────
+   Walks the admin through: upload examples → analyze → preview →
+   approve or revise → save. Every API call goes through
+   /api/image-template-builder; on save we hand the resulting وصف +
+   preview image back to the parent's onCreate which uses the existing
+   create-template endpoint, so the storage path is unchanged. */
+
+type WizardStep = "examples" | "wasf" | "preview" | "save";
+
+function AITemplateWizard({
+  onSave,
+  onClose,
+}: {
+  onSave: (p: {
+    name: string;
+    description: string;
+    dataUrl: string;
+    tags: string[];
+    instructions: string;
+    aspectRatio: string;
+    imageSize: string;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const { addToast } = useAppStore();
+
+  const [step, setStep] = useState<WizardStep>("examples");
+  const [examples, setExamples] = useState<string[]>([]);
+  const [brandNotes, setBrandNotes] = useState("");
+
+  const [analyzing, setAnalyzing] = useState(false);
+  const [wasf, setWasf] = useState("");
+  const [sampleText, setSampleText] = useState("");
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [imageSize, setImageSize] = useState("2K");
+
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  const [editPrompt, setEditPrompt] = useState("");
+  const [revising, setRevising] = useState(false);
+
+  // Save form
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [tagInput, setTagInput] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // History of revisions for transparency.
+  const [revisions, setRevisions] = useState<
+    { previewUrl: string; wasf: string; editPrompt?: string }[]
+  >([]);
+
+  const onAddExamples = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    const toAdd: string[] = [];
+    for (const f of files) {
+      if (examples.length + toAdd.length >= 6) {
+        addToast("الحد الأقصى 6 صور", "warning");
+        break;
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        addToast(`"${f.name}" أكبر من 6MB`, "error");
+        continue;
+      }
+      try {
+        toAdd.push(await readAsDataUrl(f));
+      } catch {
+        addToast(`فشل قراءة "${f.name}"`, "error");
+      }
+    }
+    if (toAdd.length) setExamples((cur) => [...cur, ...toAdd]);
+  };
+
+  const removeExample = (i: number) => {
+    setExamples((cur) => cur.filter((_, idx) => idx !== i));
+  };
+
+  const callBuilder = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/image-template-builder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let data: Record<string, unknown> = {};
+    try {
+      data = await res.json();
+    } catch {
+      // server returned non-JSON — keep going so the caller can surface
+      // a generic error message instead of crashing.
+    }
+    return { ok: res.ok, status: res.status, data };
+  };
+
+  const onAnalyze = async () => {
+    if (examples.length < 2) {
+      addToast("ارفع صورتين على الأقل", "warning");
+      return;
+    }
+    setAnalyzing(true);
+    try {
+      const { ok, data } = await callBuilder({
+        action: "analyze",
+        examples,
+        brandNotes: brandNotes.trim() || undefined,
+      });
+      if (!ok) {
+        const msg = (data.error as string) || "فشل التحليل";
+        addToast(msg, "error");
+        return;
+      }
+      const generatedWasf = (data.wasf as string) ?? "";
+      if (!generatedWasf) {
+        addToast("لم يُرجع النموذج وصفاً", "error");
+        return;
+      }
+      setWasf(generatedWasf);
+      setStep("wasf");
+      addToast("تم استخراج وصف القالب", "success");
+    } catch {
+      addToast("خطأ في الشبكة", "error");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const onPreview = async () => {
+    if (!wasf.trim()) {
+      addToast("وصف القالب فارغ", "warning");
+      return;
+    }
+    if (!sampleText.trim()) {
+      addToast("اكتب نص العيّنة لتجريب القالب", "warning");
+      return;
+    }
+    setPreviewing(true);
+    try {
+      const { ok, data } = await callBuilder({
+        action: "preview",
+        wasf,
+        sampleText,
+        examples: examples.slice(0, 1), // first example as style anchor
+        aspectRatio,
+        imageSize,
+      });
+      if (!ok) {
+        const msg = (data.error as string) || "فشل توليد المعاينة";
+        addToast(msg, "error");
+        return;
+      }
+      const url = data.imageUrl as string | undefined;
+      if (!url) {
+        addToast("لم يُرجع النموذج صورة", "error");
+        return;
+      }
+      setPreviewUrl(url);
+      setRevisions((cur) => [...cur, { previewUrl: url, wasf }]);
+      setStep("preview");
+      addToast("تم توليد المعاينة", "success");
+    } catch {
+      addToast("خطأ في الشبكة", "error");
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const onRevise = async () => {
+    if (!previewUrl) {
+      addToast("لا توجد معاينة لتعديلها", "warning");
+      return;
+    }
+    if (!editPrompt.trim()) {
+      addToast("اكتب طلب التعديل", "warning");
+      return;
+    }
+    setRevising(true);
+    try {
+      const { ok, data } = await callBuilder({
+        action: "revise",
+        examples,
+        previousWasf: wasf,
+        previewImage: previewUrl,
+        editPrompt,
+      });
+      if (!ok) {
+        const msg = (data.error as string) || "فشل تحديث الوصف";
+        addToast(msg, "error");
+        return;
+      }
+      const newWasf = (data.wasf as string) ?? "";
+      if (!newWasf) {
+        addToast("لم يُرجع النموذج وصفاً جديداً", "error");
+        return;
+      }
+      setWasf(newWasf);
+      setRevisions((cur) => {
+        const last = cur[cur.length - 1];
+        return [
+          ...cur.slice(0, -1),
+          last ? { ...last, editPrompt } : last,
+        ].filter(Boolean) as typeof cur;
+      });
+      setEditPrompt("");
+      addToast("تم تحديث الوصف — اضغط معاينة لتوليد نسخة جديدة", "success");
+      setStep("wasf");
+    } catch {
+      addToast("خطأ في الشبكة", "error");
+    } finally {
+      setRevising(false);
+    }
+  };
+
+  const addTag = (raw: string) => {
+    const t = raw.trim().replace(/^#/, "");
+    if (!t) return;
+    if (tags.length >= 10) return;
+    if (tags.map((x) => x.toLowerCase()).includes(t.toLowerCase())) return;
+    setTags([...tags, t]);
+  };
+
+  const onApprove = () => {
+    if (!previewUrl) {
+      addToast("ولّد المعاينة أولاً", "warning");
+      return;
+    }
+    setStep("save");
+  };
+
+  const onSubmitSave = async () => {
+    if (!name.trim()) {
+      addToast("اسم القالب مطلوب", "warning");
+      return;
+    }
+    if (!previewUrl) {
+      addToast("لا توجد صورة معاينة لحفظها", "warning");
+      return;
+    }
+    if (!wasf.trim()) {
+      addToast("وصف القالب فارغ", "warning");
+      return;
+    }
+    setSaving(true);
+    try {
+      // Truncate to 4000 to fit the existing instructions column. We keep the
+      // most informative top of the وصف.
+      const truncatedWasf = wasf.length > 4000 ? wasf.slice(0, 4000) : wasf;
+      await onSave({
+        name: name.trim(),
+        description: description.trim(),
+        dataUrl: previewUrl,
+        tags,
+        instructions: truncatedWasf,
+        aspectRatio,
+        imageSize,
+      });
+      addToast("تم حفظ القالب", "success");
+      onClose();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "فشل الحفظ", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const StepBadge = ({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) => (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`w-5 h-5 rounded-full flex items-center justify-center text-[0.6rem] font-black border ${
+          done
+            ? "bg-emerald-400/20 border-emerald-400/60 text-emerald-300"
+            : active
+            ? "bg-purple-400/20 border-purple-400/60 text-purple-200"
+            : "bg-neutral-800 border-neutral-700 text-neutral-500"
+        }`}
+      >
+        {done ? <CheckCircle2 className="w-3 h-3" /> : n}
+      </span>
+      <span className={`text-[0.65rem] font-bold ${active ? "text-white" : "text-neutral-500"}`}>{label}</span>
+    </div>
+  );
+
+  return (
+    <div className="zto-card zto-section space-y-4 border-purple-500/30">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Wand2 className="w-5 h-5 text-purple-400" />
+          <h3 className="text-sm font-bold text-white">بناء قالب بالذكاء الاصطناعي</h3>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <StepBadge n={1} label="الأمثلة" active={step === "examples"} done={["wasf", "preview", "save"].includes(step)} />
+          <span className="text-neutral-700">›</span>
+          <StepBadge n={2} label="وصف القالب" active={step === "wasf"} done={["preview", "save"].includes(step)} />
+          <span className="text-neutral-700">›</span>
+          <StepBadge n={3} label="المعاينة" active={step === "preview"} done={step === "save"} />
+          <span className="text-neutral-700">›</span>
+          <StepBadge n={4} label="الحفظ" active={step === "save"} done={false} />
+        </div>
+      </div>
+
+      {/* === Step 1: Examples === */}
+      {step === "examples" && (
+        <div className="space-y-4">
+          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 text-[0.7rem] text-neutral-300 leading-relaxed">
+            ارفع صورتين على الأقل (حتى 6) من تصاميمك المعتادة. سيقوم نموذج
+            <code className="text-purple-300 mx-1 font-mono">Opus 4.7</code>
+            بتحليلها واستخراج وصف القالب — أسلوب الخطوط، الألوان، التوزيع، مكان الشعار، وغيرها.
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {examples.map((url, i) => (
+              <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-neutral-800 bg-[#1a1a1a]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`example ${i + 1}`} className="w-full h-full object-cover" />
+                <button
+                  onClick={() => removeExample(i)}
+                  className="absolute top-1 right-1 bg-black/60 hover:bg-black rounded p-0.5 text-white"
+                  title="حذف"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+                <span className="absolute bottom-1 left-1 text-[0.55rem] bg-black/60 text-white rounded px-1.5 py-0.5 font-mono">
+                  {i + 1}
+                </span>
+              </div>
+            ))}
+            {examples.length < 6 && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="aspect-square rounded-lg border-2 border-dashed border-neutral-700 hover:border-purple-400 hover:text-purple-300 text-neutral-500 transition-colors flex flex-col items-center justify-center gap-1"
+              >
+                <Upload className="w-5 h-5" />
+                <span className="text-[0.6rem] font-bold">إضافة</span>
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT_MIME}
+            hidden
+            onChange={onAddExamples}
+          />
+          <div>
+            <SubLabel>ملاحظات عن العلامة (اختياري)</SubLabel>
+            <textarea
+              className="zto-input min-h-[60px] text-xs"
+              placeholder="مثال: لون العلامة #c8a85a، الخط الأساسي Noto Kufi Arabic، الشعار دائماً في الزاوية اليمنى العليا..."
+              value={brandNotes}
+              onChange={(e) => setBrandNotes(e.target.value)}
+              maxLength={2000}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-[0.65rem] text-neutral-500">
+              {examples.length} / 6 صور — الحد الأدنى 2.
+            </p>
+            <div className="flex items-center gap-2">
+              <button onClick={onClose} className="zto-btn zto-btn-ghost zto-btn-sm">إلغاء</button>
+              <button
+                onClick={onAnalyze}
+                disabled={analyzing || examples.length < 2}
+                className="zto-btn zto-btn-sm zto-btn-outline border-purple-500/40 !text-purple-300"
+              >
+                {analyzing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                تحليل الأمثلة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === Step 2: Wasf + sample text === */}
+      {step === "wasf" && (
+        <div className="space-y-4">
+          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 text-[0.7rem] text-neutral-300 leading-relaxed">
+            هذا هو <span className="font-bold">وصف القالب</span> الذي استخرجه النموذج. يمكنك تعديله يدوياً قبل المعاينة. ثم اكتب نصاً تجريبياً لتوليد معاينة عبر NanoBanana.
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <SubLabel className="!mb-0">وصف القالب</SubLabel>
+              <span className="text-[0.55rem] text-neutral-500 font-mono">{wasf.length} حرف</span>
+            </div>
+            <textarea
+              className="zto-input min-h-[260px] text-xs leading-relaxed font-mono"
+              value={wasf}
+              onChange={(e) => setWasf(e.target.value)}
+              dir="auto"
+              maxLength={12000}
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr] gap-3">
+            <div>
+              <SubLabel>نص العيّنة (يُستخدم كنص المنشور للمعاينة)</SubLabel>
+              <textarea
+                className="zto-input min-h-[80px] text-xs"
+                placeholder="مثال: شركة ناشئة سعودية تجمع 5 ملايين دولار بقيادة صندوق سُند..."
+                value={sampleText}
+                onChange={(e) => setSampleText(e.target.value)}
+                maxLength={4000}
+              />
+            </div>
+            <div>
+              <SubLabel>نسبة الأبعاد</SubLabel>
+              <select
+                className="zto-input text-xs"
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+              >
+                {ASPECTS.map((a) => (
+                  <option key={a.value} value={a.value}>{a.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <SubLabel>الجودة</SubLabel>
+              <select
+                className="zto-input text-xs"
+                value={imageSize}
+                onChange={(e) => setImageSize(e.target.value)}
+              >
+                {SIZES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <button onClick={() => setStep("examples")} className="zto-btn zto-btn-ghost zto-btn-sm">
+              ← العودة للأمثلة
+            </button>
+            <button
+              onClick={onPreview}
+              disabled={previewing || !wasf.trim() || !sampleText.trim()}
+              className="zto-btn zto-btn-gold zto-btn-sm"
+            >
+              {previewing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="w-3.5 h-3.5" />
+              )}
+              توليد المعاينة
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* === Step 3: Preview === */}
+      {step === "preview" && previewUrl && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
+            <div>
+              <SubLabel>المعاينة</SubLabel>
+              <div className="rounded-lg overflow-hidden border border-neutral-800 bg-[#1a1a1a]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewUrl} alt="preview" className="w-full h-auto" />
+              </div>
+              <p className="text-[0.6rem] text-neutral-500 mt-1.5 text-center">
+                {aspectRatio} · {imageSize}
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <SubLabel>هل التصميم يطابق ما تتوقعه؟</SubLabel>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <button
+                    onClick={onApprove}
+                    className="zto-btn zto-btn-sm zto-btn-outline border-emerald-500/40 !text-emerald-300"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5" />
+                    ممتاز — احفظ كقالب
+                  </button>
+                  <button
+                    onClick={() => setStep("wasf")}
+                    className="zto-btn zto-btn-ghost zto-btn-sm"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    إعادة المعاينة
+                  </button>
+                </div>
+              </div>
+              <div>
+                <SubLabel>أو اطلب تعديلاً على الوصف عبر Opus 4.7</SubLabel>
+                <textarea
+                  className="zto-input min-h-[100px] text-xs"
+                  placeholder="مثال: اجعل الخلفية أغمق، حرّك الشعار للزاوية اليسرى، استخدم خطاً أعرض للعنوان..."
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  maxLength={2000}
+                />
+                <button
+                  onClick={onRevise}
+                  disabled={revising || !editPrompt.trim()}
+                  className="zto-btn zto-btn-sm zto-btn-outline border-purple-500/40 !text-purple-300 mt-2 w-full"
+                >
+                  {revising ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="w-3.5 h-3.5" />
+                  )}
+                  تحديث وصف القالب
+                </button>
+                <p className="text-[0.6rem] text-neutral-500 mt-1.5 leading-relaxed">
+                  سيتم إرسال الأمثلة الأصلية + المعاينة الحالية + الوصف الحالي + طلبك إلى Opus 4.7
+                  لتحديث الوصف. ستحتاج لتوليد معاينة جديدة بعد ذلك.
+                </p>
+              </div>
+              {revisions.length > 1 && (
+                <div className="border-t border-neutral-800 pt-3">
+                  <SubLabel>المعاينات السابقة ({revisions.length - 1})</SubLabel>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {revisions.slice(0, -1).map((r, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setPreviewUrl(r.previewUrl)}
+                        className="w-12 h-12 rounded border border-neutral-800 hover:border-amber-400 overflow-hidden"
+                        title={r.editPrompt || `Revision ${i + 1}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={r.previewUrl} alt={`rev ${i + 1}`} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === Step 4: Save form === */}
+      {step === "save" && previewUrl && (
+        <div className="space-y-4">
+          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-[0.7rem] text-emerald-300 flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>المعاينة معتمدة. أكمل بيانات القالب لحفظه واستخدامه لاحقاً من تبويب التوليد.</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-4">
+            <div>
+              <SubLabel>المعاينة المعتمدة</SubLabel>
+              <div className="aspect-square w-full rounded-lg overflow-hidden border border-neutral-800 bg-[#1a1a1a]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewUrl} alt="approved" className="w-full h-full object-cover" />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <SubLabel>اسم القالب *</SubLabel>
+                <input
+                  type="text"
+                  className="zto-input text-xs"
+                  placeholder="مثال: قالب أخبار الاستثمار"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div>
+                <SubLabel>وصف موجز (اختياري)</SubLabel>
+                <input
+                  type="text"
+                  className="zto-input text-xs"
+                  placeholder="ما الذي يميّز هذا القالب؟"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+              <div>
+                <SubLabel>الوسوم</SubLabel>
+                <div className="flex items-center flex-wrap gap-1.5 mb-2">
+                  {SUGGESTED_TAGS.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => addTag(t)}
+                      className="text-[0.65rem] rounded-full px-2 py-0.5 border border-neutral-700 text-neutral-400 hover:border-amber-400 hover:text-amber-400 transition-colors"
+                    >
+                      + {t}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative">
+                  <Tag className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    className="zto-input text-xs"
+                    style={{ paddingInlineStart: "2.5rem" }}
+                    placeholder="اكتب وسماً واضغط Enter"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTag(tagInput);
+                        setTagInput("");
+                      }
+                    }}
+                  />
+                </div>
+                {tags.length > 0 && (
+                  <div className="flex items-center flex-wrap gap-1.5 mt-2">
+                    {tags.map((t) => (
+                      <span
+                        key={t}
+                        className="text-[0.65rem] rounded-full px-2 py-0.5 bg-amber-400/15 text-amber-400 border border-amber-400/40 flex items-center gap-1"
+                      >
+                        #{t}
+                        <button onClick={() => setTags(tags.filter((x) => x !== t))}>
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="text-[0.6rem] text-neutral-500 leading-relaxed">
+                نسبة الأبعاد المُقترحة: <span className="text-amber-400 font-mono">{aspectRatio}</span> ·
+                الجودة: <span className="text-amber-400 font-mono">{imageSize}</span>
+                <br />
+                وصف القالب ({wasf.length} حرف) سيُحفظ كتعليمات استخدام
+                {wasf.length > 4000 && (
+                  <span className="text-amber-400">
+                    {" "}— سيُختصر إلى أول 4000 حرف لمطابقة قيود التخزين.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <button onClick={() => setStep("preview")} className="zto-btn zto-btn-ghost zto-btn-sm">
+              ← العودة للمعاينة
+            </button>
+            <button
+              onClick={onSubmitSave}
+              disabled={saving || !name.trim()}
+              className="zto-btn zto-btn-gold zto-btn-sm"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
+              حفظ القالب
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
