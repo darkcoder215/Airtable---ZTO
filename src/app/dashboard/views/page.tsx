@@ -63,6 +63,7 @@ interface Diagnostics {
     id: string;
     name: string;
     linkField: string;
+    linkKind?: "recordLink" | "collaborator" | "textName";
     statusField: string | null;
     dueField: string | null;
   }>;
@@ -352,11 +353,16 @@ export default function DashboardsAndViewsPage() {
           </summary>
           <div className="mt-2 space-y-1">
             {diag.linkedTables.map((l) => (
-              <div key={l.id} className="flex items-center gap-2 flex-wrap">
+              <div key={`${l.id}-${l.linkField}`} className="flex items-center gap-2 flex-wrap">
                 <code className="text-amber-400 font-mono">{l.name}</code>
                 <span className="text-neutral-600">·</span>
                 <span>عبر حقل</span>
                 <code className="text-purple-400 font-mono">{l.linkField}</code>
+                {l.linkKind && (
+                  <span className="text-[0.55rem] text-neutral-500 font-mono">
+                    [{l.linkKind === "recordLink" ? "ربط" : l.linkKind === "collaborator" ? "متعاون" : "اسم"}]
+                  </span>
+                )}
                 {l.statusField && (
                   <>
                     <span className="text-neutral-600">·</span>

@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestUser } from "@/lib/api-auth";
 import { logger } from "@/lib/logger";
+import { getLogo, getTemplate } from "@/lib/image-assets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +34,11 @@ interface RequestBody {
   edits?: unknown;
   logoDataUrl?: unknown;
   referenceDataUrl?: unknown;
+  // New: pick a saved logo / template instead of (or in addition to)
+  // uploading. The endpoint resolves them to data URLs + instructions
+  // server-side so the client doesn't need to fetch first.
+  logoId?: unknown;
+  templateId?: unknown;
   aspectRatio?: unknown;
   imageSize?: unknown;
   history?: unknown;
@@ -91,6 +97,9 @@ function buildInitialUser(args: {
   edits: string;
   logoDataUrl?: string;
   referenceDataUrl?: string;
+  logoInstructions?: string;
+  templateInstructions?: string;
+  templateName?: string;
 }): ContentPart[] {
   const intro = [
     "Generate a polished social-media post graphic that prominently features the supplied brand logo (kept legible and unaltered).",
@@ -101,6 +110,15 @@ function buildInitialUser(args: {
     "POST COPY:",
     args.postText.trim(),
   ];
+  if (args.templateName?.trim()) {
+    intro.push("", `DESIGN TEMPLATE: ${args.templateName.trim()}`);
+  }
+  if (args.templateInstructions?.trim()) {
+    intro.push("TEMPLATE GUIDANCE:", args.templateInstructions.trim());
+  }
+  if (args.logoInstructions?.trim()) {
+    intro.push("", "BRAND LOGO USAGE NOTES:", args.logoInstructions.trim());
+  }
   if (args.edits.trim()) {
     intro.push("", "ADDITIONAL CUSTOMIZATIONS:", args.edits.trim());
   }
@@ -165,6 +183,11 @@ export async function POST(request: NextRequest) {
   let history: HistoryTurn[] = [];
   let aspectRatio = "1:1";
   let imageSize = "2K";
+  let logoInstructions: string | undefined;
+  let templateInstructions: string | undefined;
+  let templateName: string | undefined;
+  let resolvedLogoId: string | null = null;
+  let resolvedTemplateId: string | null = null;
 
   try {
     if (typeof body.postText !== "string" || !body.postText.trim()) {
@@ -182,11 +205,39 @@ export async function POST(request: NextRequest) {
       edits = body.edits;
     }
 
-    logoDataUrl = validateDataUrl(body.logoDataUrl, "الشعار");
-    if (!logoDataUrl) {
-      throw new Error("الشعار مطلوب — ارفع صورة شعارك أولاً");
+    // Resolve saved logo first; if a literal upload is also supplied it
+    // wins (admin previewing a one-off without saving).
+    if (typeof body.logoId === "string" && body.logoId) {
+      const saved = await getLogo(body.logoId);
+      if (!saved) throw new Error("الشعار المحفوظ غير موجود");
+      resolvedLogoId = saved.id;
+      logoDataUrl = saved.dataUrl;
+      logoInstructions = saved.instructions;
     }
-    referenceDataUrl = validateDataUrl(body.referenceDataUrl, "الصورة المرجعية");
+    if (body.logoDataUrl !== undefined && body.logoDataUrl !== null && body.logoDataUrl !== "") {
+      const uploaded = validateDataUrl(body.logoDataUrl, "الشعار");
+      if (uploaded) logoDataUrl = uploaded;
+    }
+    if (!logoDataUrl) {
+      throw new Error("الشعار مطلوب — اختر شعاراً محفوظاً أو ارفع واحداً جديداً");
+    }
+
+    if (typeof body.templateId === "string" && body.templateId) {
+      const tpl = await getTemplate(body.templateId);
+      if (!tpl) throw new Error("القالب المحفوظ غير موجود");
+      resolvedTemplateId = tpl.id;
+      referenceDataUrl = tpl.dataUrl;
+      templateInstructions = tpl.instructions;
+      templateName = tpl.name;
+      // Template can suggest its own aspect / size. Body still overrides.
+      if (!body.aspectRatio) aspectRatio = tpl.aspectRatio;
+      if (!body.imageSize) imageSize = tpl.imageSize;
+    }
+    if (body.referenceDataUrl !== undefined && body.referenceDataUrl !== null && body.referenceDataUrl !== "") {
+      const uploaded = validateDataUrl(body.referenceDataUrl, "الصورة المرجعية");
+      if (uploaded) referenceDataUrl = uploaded;
+    }
+
     history = validateHistory(body.history);
 
     if (typeof body.aspectRatio === "string" && ALLOWED_ASPECT.has(body.aspectRatio)) {
@@ -211,7 +262,15 @@ export async function POST(request: NextRequest) {
   const messages: { role: string; content: ContentPart[] }[] = [
     {
       role: "user",
-      content: buildInitialUser({ postText, edits, logoDataUrl, referenceDataUrl }),
+      content: buildInitialUser({
+        postText,
+        edits,
+        logoDataUrl,
+        referenceDataUrl,
+        logoInstructions,
+        templateInstructions,
+        templateName,
+      }),
     },
     ...turnsToMessages(history),
   ];
@@ -330,6 +389,8 @@ export async function POST(request: NextRequest) {
       aspectRatio,
       imageSize,
       historyTurns: history.length,
+      logoId: resolvedLogoId,
+      templateId: resolvedTemplateId,
       assistantTextPreview: assistantText.slice(0, 120),
     },
     user.id

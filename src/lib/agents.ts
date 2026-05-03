@@ -52,19 +52,22 @@ export interface AgentExecution {
   executedBy: string;
 }
 
+// Internal model registry. The `id` is what the upstream API requires; the
+// user-facing `label` and `tier` are intentionally anonymised so the UI
+// doesn't surface vendor branding.
 export const OPENROUTER_MODELS = [
-  { id: "openai/gpt-4o", label: "GPT-4o", provider: "OpenAI" },
-  { id: "openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
-  { id: "openai/gpt-4-turbo", label: "GPT-4 Turbo", provider: "OpenAI" },
-  { id: "anthropic/claude-opus-4-20250514", label: "Claude Opus 4", provider: "Anthropic" },
-  { id: "anthropic/claude-sonnet-4-20250514", label: "Claude Sonnet 4", provider: "Anthropic" },
-  { id: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", provider: "Anthropic" },
-  { id: "google/gemini-2.0-flash-exp:free", label: "Gemini 2.0 Flash", provider: "Google" },
-  { id: "google/gemini-pro-1.5", label: "Gemini Pro 1.5", provider: "Google" },
-  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B", provider: "Meta" },
-  { id: "mistralai/mistral-large-latest", label: "Mistral Large", provider: "Mistral" },
-  { id: "deepseek/deepseek-chat-v3-0324:free", label: "DeepSeek V3", provider: "DeepSeek" },
-  { id: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B", provider: "Qwen" },
+  { id: "openai/gpt-4o-mini",                        label: "نموذج سريع وموفّر",   tier: "خفيف" },
+  { id: "openai/gpt-4o",                             label: "نموذج متوازن",         tier: "قياسي" },
+  { id: "openai/gpt-4-turbo",                        label: "نموذج عالي الأداء",    tier: "قياسي" },
+  { id: "anthropic/claude-haiku-4-5-20251001",       label: "نموذج خفيف وسريع",     tier: "خفيف" },
+  { id: "anthropic/claude-sonnet-4-20250514",        label: "نموذج متقدّم",          tier: "متقدم" },
+  { id: "anthropic/claude-opus-4-20250514",          label: "نموذج رائد",            tier: "متقدم" },
+  { id: "google/gemini-2.0-flash-exp:free",          label: "نموذج سريع — مجاني",   tier: "خفيف" },
+  { id: "google/gemini-pro-1.5",                     label: "نموذج طويل السياق",    tier: "قياسي" },
+  { id: "meta-llama/llama-3.3-70b-instruct",         label: "نموذج مفتوح كبير",      tier: "قياسي" },
+  { id: "mistralai/mistral-large-latest",            label: "نموذج عام",             tier: "قياسي" },
+  { id: "deepseek/deepseek-chat-v3-0324:free",       label: "نموذج اقتصادي",         tier: "خفيف" },
+  { id: "qwen/qwen-2.5-72b-instruct",                label: "نموذج متعدد اللغات",   tier: "قياسي" },
 ];
 
 export function getOpenRouterKey(): string | null {

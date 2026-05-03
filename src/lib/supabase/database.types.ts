@@ -1493,6 +1493,78 @@ export type Database = {
           },
         ]
       }
+      image_logos: {
+        Row: {
+          id: string
+          name: string
+          data_url: string
+          instructions: string
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          data_url: string
+          instructions?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          data_url?: string
+          instructions?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      image_templates: {
+        Row: {
+          id: string
+          name: string
+          description: string
+          data_url: string
+          tags: string[]
+          instructions: string
+          aspect_ratio: string
+          image_size: string
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description?: string
+          data_url: string
+          tags?: string[]
+          instructions?: string
+          aspect_ratio?: string
+          image_size?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string
+          data_url?: string
+          tags?: string[]
+          instructions?: string
+          aspect_ratio?: string
+          image_size?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       scraper_logs: {
         Row: {
           context: string | null

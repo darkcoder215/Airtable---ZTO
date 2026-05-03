@@ -57,7 +57,9 @@ interface AgentConfig {
 interface OpenRouterModel {
   id: string;
   label: string;
-  provider: string;
+  // Tier replaced provider — anonymised label so we can group without
+  // surfacing vendor branding to end users.
+  tier: string;
 }
 
 interface TestResult {
@@ -325,10 +327,10 @@ export default function AgentsPage() {
     });
   };
 
-  /* group models by provider */
-  const modelsByProvider = orModels.reduce<Record<string, OpenRouterModel[]>>((acc, m) => {
-    if (!acc[m.provider]) acc[m.provider] = [];
-    acc[m.provider].push(m);
+  /* group models by tier */
+  const modelsByTier = orModels.reduce<Record<string, OpenRouterModel[]>>((acc, m) => {
+    if (!acc[m.tier]) acc[m.tier] = [];
+    acc[m.tier].push(m);
     return acc;
   }, {});
 
@@ -346,7 +348,7 @@ export default function AgentsPage() {
             وكلاء الذكاء الاصطناعي
           </h2>
           <p className="text-neutral-500 text-sm mt-1">
-            إنشاء واختبار وكلاء الذكاء الاصطناعي عبر OpenRouter
+            إنشاء واختبار وكلاء الذكاء الاصطناعي
           </p>
         </div>
 
@@ -382,14 +384,14 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* OpenRouter not configured warning */}
+      {/* AI provider not configured warning */}
       {!orConfigured && (
         <div className="zto-alert zto-alert-err flex items-center gap-3">
           <AlertCircle className="w-5 h-5 shrink-0" />
           <div>
-            <p className="font-bold text-sm">مفتاح OpenRouter API غير مُعَد</p>
+            <p className="font-bold text-sm">خدمة الذكاء الاصطناعي غير مفعّلة</p>
             <p className="text-xs text-neutral-400 mt-0.5">
-              أضف <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-amber-400">OPENROUTER_API_KEY</code> في إعدادات البيئة (Vercel أو .env.local) للتفعيل
+              تواصل مع المسؤول لتفعيل الخدمة قبل إنشاء الوكلاء.
             </p>
           </div>
         </div>
@@ -524,8 +526,8 @@ export default function AgentsPage() {
                     value={modelOverride}
                     onChange={(e) => setModelOverride(e.target.value)}
                   >
-                    {Object.entries(modelsByProvider).map(([provider, models]) => (
-                      <optgroup key={provider} label={provider}>
+                    {Object.entries(modelsByTier).map(([tier, models]) => (
+                      <optgroup key={tier} label={tier}>
                         {models.map((m) => (
                           <option key={m.id} value={m.id}>{m.label}</option>
                         ))}
@@ -670,9 +672,9 @@ export default function AgentsPage() {
               <div>
                 <label className="zto-label mb-2">اختر النماذج للمقارنة</label>
                 <div className="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-4 max-h-[320px] overflow-y-auto space-y-3">
-                  {Object.entries(modelsByProvider).map(([provider, models]) => (
-                    <div key={provider}>
-                      <p className="text-[10px] text-neutral-500 font-black uppercase tracking-wider mb-1.5">{provider}</p>
+                  {Object.entries(modelsByTier).map(([tier, models]) => (
+                    <div key={tier}>
+                      <p className="text-[10px] text-neutral-500 font-black uppercase tracking-wider mb-1.5">{tier}</p>
                       {models.map((m) => (
                         <label
                           key={m.id}
@@ -802,7 +804,7 @@ export default function AgentsPage() {
               <div className="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-4 space-y-4">
                 <h4 className="font-bold text-sm text-white flex items-center gap-2">
                   <Settings className="w-4 h-4 text-amber-400" />
-                  إعدادات النموذج (OpenRouter)
+                  إعدادات النموذج
                 </h4>
 
                 <div>
@@ -810,8 +812,8 @@ export default function AgentsPage() {
                   <div className="zto-select-wrap">
                     <select className="zto-input" value={formData.modelName}
                       onChange={(e) => setFormData((p) => ({ ...p, modelName: e.target.value }))}>
-                      {Object.entries(modelsByProvider).map(([provider, models]) => (
-                        <optgroup key={provider} label={provider}>
+                      {Object.entries(modelsByTier).map(([tier, models]) => (
+                        <optgroup key={tier} label={tier}>
                           {models.map((m) => (
                             <option key={m.id} value={m.id}>{m.label}</option>
                           ))}

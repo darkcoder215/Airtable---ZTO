@@ -210,6 +210,9 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
   transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
+/* Stepped section inside a zto-card: padding + an optional numbered head. */
+.zto-section { padding: 18px; }
+
 /* Subtle gold glow on the leading edge — used to highlight the active
    member dashboard panel. */
 .zto-glow-edge::before {

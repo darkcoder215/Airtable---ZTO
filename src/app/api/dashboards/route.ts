@@ -226,22 +226,60 @@ export async function GET(request: NextRequest) {
     const teamRecords = await loadAllRecords(DESTINATION_BASE_ID, teamTable.id);
     const members = teamRecords.map((r) => teamMemberFromRecord(r, teamTable));
     const memberById = new Map(members.map((m) => [m.id, m]));
+    // Index members by lowercased email so we can resolve
+    // singleCollaborator / multipleCollaborators fields too.
+    const memberIdByEmail = new Map<string, string>();
+    for (const m of members) {
+      if (m.email) memberIdByEmail.set(m.email.trim().toLowerCase(), m.id);
+    }
+    // Index by case-insensitive name as a last-resort fallback for tables
+    // that store the assignee as a plain text field instead of a link.
+    const memberIdByName = new Map<string, string>();
+    for (const m of members) {
+      memberIdByName.set(m.name.trim().toLowerCase(), m.id);
+    }
 
-    // Discover all link fields in the base that point at the Team table.
-    const teamLinks: TeamLink[] = [];
+    // Discover every field in the base that can identify a team member.
+    // We accept three shapes:
+    //   • multipleRecordLinks / singleRecordLink → linkedTableId === teamTable.id
+    //   • singleCollaborator / multipleCollaborators → resolved by email
+    //   • text-ish field with a name like "Owner" / "Assignee" / "المسؤول"
+    //     when its value matches a Team member name verbatim.
+    type LinkKind = "recordLink" | "collaborator" | "textName";
+    interface TeamLinkX extends TeamLink { kind: LinkKind }
+    const teamLinks: TeamLinkX[] = [];
+    const ASSIGNEE_NAME_HINTS = [
+      /assignee/i, /owner/i, /assigned/i, /responsible/i, /lead\b/i,
+      /\bteam\b/i, /\bmember/i, /المسؤول/i, /المُسند/i, /مكلّف/i, /مكلف/i,
+      /مسند/i, /قائد/i, /صاحب/i,
+    ];
     for (const t of tables) {
       if (t.id === teamTable.id) continue;
+      const statusField = findField(t, STATUS_FIELD_CANDIDATES);
+      const dueField = findField(t, DUE_FIELD_CANDIDATES);
+      const titleField = findField(t, TITLE_FIELD_CANDIDATES);
       for (const f of t.fields) {
-        if (f.type !== "multipleRecordLinks") continue;
-        const opts = (f.options ?? {}) as { linkedTableId?: string };
-        if (opts.linkedTableId !== teamTable.id) continue;
-        teamLinks.push({
-          table: t,
-          linkField: f,
-          statusField: findField(t, STATUS_FIELD_CANDIDATES),
-          dueField: findField(t, DUE_FIELD_CANDIDATES),
-          titleField: findField(t, TITLE_FIELD_CANDIDATES),
-        });
+        // Direct record link to Team (multiple or single).
+        if (f.type === "multipleRecordLinks" || f.type === "singleRecordLink") {
+          const opts = (f.options ?? {}) as { linkedTableId?: string };
+          if (opts.linkedTableId === teamTable.id) {
+            teamLinks.push({ table: t, linkField: f, statusField, dueField, titleField, kind: "recordLink" });
+          }
+          continue;
+        }
+        // Collaborator field — Airtable stores { id, email, name }. We
+        // resolve to a Team member by email.
+        if (f.type === "singleCollaborator" || f.type === "multipleCollaborators") {
+          if (memberIdByEmail.size === 0) continue;
+          teamLinks.push({ table: t, linkField: f, statusField, dueField, titleField, kind: "collaborator" });
+          continue;
+        }
+        // Text-name fallback: only opt in when the field's NAME hints
+        // assignee semantics, to avoid matching arbitrary text fields.
+        if ((f.type === "singleLineText" || f.type === "multilineText") &&
+            ASSIGNEE_NAME_HINTS.some((re) => re.test(f.name))) {
+          teamLinks.push({ table: t, linkField: f, statusField, dueField, titleField, kind: "textName" });
+        }
       }
     }
 
@@ -275,9 +313,50 @@ export async function GET(request: NextRequest) {
       const perMemberStatus = new Map<string, Map<string, number>>();
       const primary = link.table.fields.find((f) => f.id === link.table.primaryFieldId);
 
+      // Pull a list of member ids out of one record's link-field value.
+      // Each link kind stores its assignees differently; this normalises
+      // them to a Set<string> of Team record ids.
+      const extractMemberIds = (raw: unknown, kind: typeof link.kind): Set<string> => {
+        const out = new Set<string>();
+        if (raw == null) return out;
+        if (kind === "recordLink") {
+          // multipleRecordLinks → string[]; singleRecordLink stores a
+          // single string OR a 1-length array, depending on field options.
+          const arr = Array.isArray(raw) ? raw : [raw];
+          for (const v of arr) {
+            if (typeof v === "string" && memberById.has(v)) out.add(v);
+          }
+        } else if (kind === "collaborator") {
+          // singleCollaborator → { id, email, name }; multipleCollaborators → that[].
+          const arr = Array.isArray(raw) ? raw : [raw];
+          for (const v of arr) {
+            if (!v || typeof v !== "object") continue;
+            const o = v as { email?: unknown; name?: unknown };
+            if (typeof o.email === "string") {
+              const m = memberIdByEmail.get(o.email.trim().toLowerCase());
+              if (m) out.add(m);
+              continue;
+            }
+            if (typeof o.name === "string") {
+              const m = memberIdByName.get(o.name.trim().toLowerCase());
+              if (m) out.add(m);
+            }
+          }
+        } else if (kind === "textName") {
+          if (typeof raw !== "string") return out;
+          // Allow comma-separated names in a single text field.
+          for (const part of raw.split(/[,،;؛]/)) {
+            const m = memberIdByName.get(part.trim().toLowerCase());
+            if (m) out.add(m);
+          }
+        }
+        return out;
+      };
+
       for (const rec of records) {
         const v = rec.fields[link.linkField.name];
-        if (!Array.isArray(v) || v.length === 0) continue;
+        const linkedMembers = extractMemberIds(v, link.kind);
+        if (linkedMembers.size === 0) continue;
         const status = statusOf(rec, link.statusField);
         const due = dueOf(rec, link.dueField);
         const dueMs = due ? Date.parse(due) : NaN;
@@ -285,25 +364,23 @@ export async function GET(request: NextRequest) {
         const overdue = !done && Number.isFinite(dueMs) && dueMs < now;
         const dueSoon = !done && Number.isFinite(dueMs) && dueMs >= now && dueMs - now <= SOON_MS;
 
-        for (const linkedId of v as string[]) {
-          if (typeof linkedId !== "string") continue;
-          if (!memberById.has(linkedId)) continue;
-          const counts = perMemberCounts.get(linkedId) ?? emptyBucket();
+        for (const memberId of linkedMembers) {
+          const counts = perMemberCounts.get(memberId) ?? emptyBucket();
           counts.total++;
           if (done) counts.done++;
           else counts.inProgress++;
           if (overdue) counts.overdue++;
           if (dueSoon) counts.dueSoon++;
-          perMemberCounts.set(linkedId, counts);
+          perMemberCounts.set(memberId, counts);
 
           if (status) {
-            const m = perMemberStatus.get(linkedId) ?? new Map<string, number>();
+            const m = perMemberStatus.get(memberId) ?? new Map<string, number>();
             m.set(status, (m.get(status) ?? 0) + 1);
-            perMemberStatus.set(linkedId, m);
+            perMemberStatus.set(memberId, m);
           }
 
           // Roll up upcoming / overdue items at the per-member level.
-          const summary = summaryById.get(linkedId);
+          const summary = summaryById.get(memberId);
           if (summary) {
             const item: UpcomingItem = {
               recordId: rec.id,
@@ -373,6 +450,7 @@ export async function GET(request: NextRequest) {
           id: l.table.id,
           name: l.table.name,
           linkField: l.linkField.name,
+          linkKind: l.kind,
           statusField: l.statusField?.name ?? null,
           dueField: l.dueField?.name ?? null,
         })),
