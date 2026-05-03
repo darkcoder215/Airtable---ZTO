@@ -1218,42 +1218,59 @@ export default function DataSourcesPage() {
       {/* ───── Sources Tab ───── */}
       {activeTab === "sources" && (
         <>
-          {/* Dedup explainer (collapsed by default) */}
+          {/* How do we know an item is new? — date-based dedup explainer. */}
           <details className="zto-card p-4 group">
             <summary className="cursor-pointer flex items-center gap-2 list-none">
-              <Info className="w-4 h-4 text-amber-400 shrink-0" />
+              <Clock className="w-4 h-4 text-amber-400 shrink-0" />
               <span className="text-sm font-bold text-white">
-                ما المنطق الذي نستخدمه للتمييز بين الجديد والمكرّر قبل الفلترة بالذكاء الاصطناعي؟
+                نلتقط البيانات كل 60 دقيقة — كيف نعرف أن العنصر فعلاً جديد ولم نلتقطه سابقاً؟
               </span>
               <ChevronDown className="w-4 h-4 text-neutral-500 mr-auto group-open:rotate-180 transition-transform" />
             </summary>
             <div className="mt-3 text-xs text-neutral-400 leading-relaxed space-y-3 pr-6">
               <p>
-                نعتمد حالياً منطقاً بسيطاً ومتيناً يعمل على جميع أنواع المصادر:
-                <span className="text-amber-400 font-bold mr-1">قارن الرابط مع ما حُفظ سابقاً لنفس المصدر.</span>
-                لو الرابط جديد → نمرّره لمرحلة الفلترة الذكية. لو موجود → نتخطّاه فوراً قبل أيّ استدعاء للنموذج (توفير في التكلفة والوقت).
+                لكل مصدر نخزّن أحدث
+                <code className="text-amber-400 mx-1 font-mono">published_at</code>
+                التقطناه فعلاً (الـcutoff). عند كل دورة جلب نقارن تاريخ كل عنصر جديد بهذا الـcutoff:
               </p>
+              <ul className="text-[0.7rem] list-disc pr-5 space-y-1">
+                <li>
+                  <span className="text-emerald-400 font-bold">أحدث من الـcutoff</span> → عنصر جديد، يُمرَّر إلى الفلترة الذكية ثم إلى الوجهة.
+                </li>
+                <li>
+                  <span className="text-neutral-300 font-bold">أقدم أو يساوي الـcutoff</span> → سبق التقاطه — نتخطّاه قبل أيّ استدعاء للنموذج (توفير في التكلفة والوقت).
+                </li>
+                <li>
+                  <span className="text-amber-400 font-bold">لا يوجد تاريخ صالح</span> → نرجع لمقارنة الرابط بقائمة الروابط المعروفة لنفس المصدر كشبكة أمان.
+                </li>
+              </ul>
               <p>
-                التطبيق يعتمد قيداً فريداً على مستوى قاعدة البيانات
+                ضمان أخير على مستوى قاعدة البيانات:
                 <code className="text-amber-400 mx-1 font-mono">UNIQUE (source_id, url)</code>
                 مع
-                <code className="text-amber-400 mx-1 font-mono">upsert(... onConflict: &quot;source_id,url&quot;)</code>
-                — أيّ سباق بين عمليات الجلب لا يُسجِّل نفس الرابط مرتين.
+                <code className="text-amber-400 mx-1 font-mono">upsert(...)</code>
+                — حتى لو سبقت دورتان بعضهما، لا يُسجَّل نفس العنصر مرتين.
               </p>
 
-              {/* Per-type breakdown */}
+              {/* Per-type date format reality, based on what's actually stored. */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 my-3">
                 <div className="bg-[#1a1a1a] border border-orange-400/20 rounded-lg p-3">
                   <p className="text-xs font-bold text-orange-400 mb-1.5 flex items-center gap-1.5">
-                    <Rss className="w-3.5 h-3.5" /> المواقع
+                    <Rss className="w-3.5 h-3.5" /> المواقع (RSS / Atom)
                   </p>
                   <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
-                    <li>المفتاح: رابط الـ
-                      <code className="text-amber-400 mx-1 font-mono">{"<link>"}</code>
-                      من الـRSS كما هو.
+                    <li>الحقول التي نقرأها بالترتيب:
+                      <code className="text-amber-400 mx-1 font-mono">pubDate</code>،
+                      <code className="text-amber-400 mx-1 font-mono">published</code>،
+                      <code className="text-amber-400 mx-1 font-mono">updated</code>،
+                      <code className="text-amber-400 mx-1 font-mono">dc:date</code>.
                     </li>
-                    <li>الحدّ: 50 عنصراً لكل عملية جلب.</li>
-                    <li>المخاطر: لو غيّر الناشر الـslug للرابط، يُعدّ عنصراً جديداً.</li>
+                    <li>الصيغ الواقعية:
+                      <span className="block mt-0.5">RFC 822 — <code className="font-mono">Mon, 28 Apr 2025 14:30:00 +0000</code></span>
+                      <span className="block">ISO 8601 — <code className="font-mono">2026-04-28T14:30:00Z</code></span>
+                      <span className="block">أحياناً تواريخ بالعربي أو بدون منطقة زمنية.</span>
+                    </li>
+                    <li>الخطر: ناشر عربي يكتب <code className="font-mono">«الاثنين 28 أبريل 2025»</code> → فشل التحليل.</li>
                   </ul>
                 </div>
                 <div className="bg-[#1a1a1a] border border-blue-400/20 rounded-lg p-3">
@@ -1261,12 +1278,17 @@ export default function DataSourcesPage() {
                     <AtSign className="w-3.5 h-3.5" /> X (تويتر)
                   </p>
                   <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
-                    <li>المفتاح: رابط التغريدة
-                      <code className="text-amber-400 mx-1 font-mono">tweet.twitterUrl</code>
-                      (يحتوي معرّف التغريدة الفريد).
+                    <li>الحقل:
+                      <code className="text-amber-400 mx-1 font-mono">tweet.createdAt</code>
+                      من Apify.
                     </li>
-                    <li>الحدّ: آخر 5 تغريدات لكل حساب لكل مرة.</li>
-                    <li>المخاطر: شِبه معدومة — معرّف التغريدة لا يتغيّر.</li>
+                    <li>الصيغة الفعلية المُلتقَطة في قاعدتنا:
+                      <code className="font-mono block mt-0.5">2026-04-30 07:25:35+00</code>
+                      (دقّة بالثانية، UTC ثابت).
+                    </li>
+                    <li>الخطر: شِبه معدوم. أحياناً Apify يُرجع RFC 822 بدلاً من ISO، لكن
+                      <code className="font-mono mx-1">new Date()</code> يستوعب الاثنين.
+                    </li>
                   </ul>
                 </div>
                 <div className="bg-[#1a1a1a] border border-indigo-400/20 rounded-lg p-3">
@@ -1274,92 +1296,96 @@ export default function DataSourcesPage() {
                     <Briefcase className="w-3.5 h-3.5" /> LinkedIn
                   </p>
                   <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
-                    <li>المفتاح: رابط المنشور
-                      <code className="text-amber-400 mx-1 font-mono">post.url</code>
-                      (يحتوي
-                      <code className="text-amber-400 mx-1 font-mono">activity:&lt;urn&gt;</code>
-                      الفريد).
+                    <li>الحقول بالترتيب:
+                      <code className="text-amber-400 mx-1 font-mono">postedAtISO</code>
+                      ثم
+                      <code className="text-amber-400 mx-1 font-mono">postedAtTimestamp</code>
+                      (epoch ms).
                     </li>
-                    <li>الحدّ: 10 منشورات لكل صفحة لكل مرة.</li>
-                    <li>المخاطر: شِبه معدومة — الـURN ثابت.</li>
+                    <li>الصيغة الفعلية المُلتقَطة:
+                      <code className="font-mono block mt-0.5">2026-05-01 13:56:51.479+00</code>
+                      (دقّة بالميلي ثانية).
+                    </li>
+                    <li>الخطر: شِبه معدوم — Apify يُطبّع التاريخ قبل أن يصلنا.</li>
                   </ul>
                 </div>
               </div>
 
+              {/* Programmatic, no-LLM hardening. */}
               <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
                 <p className="text-xs font-bold text-emerald-400 mb-1.5">
-                  ✓ مقترح برمجي (بدون نموذج لغوي)
+                  ✓ التطبيع البرمجي للتاريخ (لا يحتاج نموذج لغوي)
                 </p>
                 <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
                   <li>
-                    <span className="text-white">تطبيع الرابط</span> قبل المقارنة:
-                    إزالة الـquery params التتبّعية
-                    (<code className="text-amber-400 font-mono">utm_*</code>،
-                    <code className="text-amber-400 font-mono">fbclid</code>،
-                    <code className="text-amber-400 font-mono">gclid</code>)،
-                    وتوحيد الـtrailing slash، وإزالة الـ
-                    <code className="text-amber-400 font-mono">#fragment</code>.
+                    <span className="text-white">سلسلة محاوَلات</span> بترتيب:
+                    ISO 8601 → RFC 822 → epoch ms → epoch s → <code className="font-mono">Date.parse()</code> الافتراضي.
                   </li>
                   <li>
-                    <span className="text-white">بصمة محتوى</span>:
-                    حساب
-                    <code className="text-amber-400 mx-1 font-mono">SHA-256(title + first 500 chars)</code>
-                    وفهرسة عمود
-                    <code className="text-amber-400 mx-1 font-mono">content_hash</code>
-                    — يلتقط إعادة النشر تحت رابط مختلف.
+                    <span className="text-white">رفض المستقبل</span>: أي تاريخ أبعد من 5 دقائق في المستقبل يُعتبر عطلاً ولا يُحدّث الـcutoff
+                    (يحمينا من ناشر معطّل ساعته).
                   </li>
                   <li>
-                    <span className="text-white">مفاتيح خاصة بالمنصّة</span>:
-                    استخراج
+                    <span className="text-white">فشل التحليل ≠ now()</span>: حالياً RSS يُرجع
+                    <code className="text-amber-400 mx-1 font-mono">now()</code>
+                    عند الفشل، فيظهر العنصر «جديداً» في كل دورة. الأفضل تركه
+                    <code className="text-amber-400 mx-1 font-mono">null</code>
+                    والاعتماد على فحص الرابط.
+                  </li>
+                  <li>
+                    <span className="text-white">هامش أمان</span>: قارن
+                    <code className="text-amber-400 mx-1 font-mono">{"published_at >= cutoff - 30min"}</code>
+                    بدل <code className="font-mono">{">"}</code> — يلتقط النشر غير المرتّب زمنياً (شائع في RSS).
+                  </li>
+                  <li>
+                    <span className="text-white">معرّف ثابت كمفتاح ثاني</span>: لـX استخرج
                     <code className="text-amber-400 mx-1 font-mono">tweet_id</code>
-                    من رابط X و
+                    ولـLinkedIn
                     <code className="text-amber-400 mx-1 font-mono">activity_urn</code>
-                    من رابط LinkedIn، وحفظها في عمود ثانٍ — أمتن من الرابط ككل.
-                  </li>
-                  <li>
-                    <span className="text-white">نافذة زمنية</span>: تجاهل أي عنصر أقدم من
-                    <code className="text-amber-400 mx-1 font-mono">last_success_at</code>
-                    لتقليص الفحص في الجلبات الكبيرة.
+                    وقارن بهما — أمتن من المقارنة بالتاريخ وحده.
                   </li>
                 </ul>
                 <p className="text-[0.6rem] text-neutral-500 mt-2">
-                  التكلفة: تقريباً صفر. التغطية: ~99% من الحالات الواقعية. مناسب كتحسين فوري.
+                  التكلفة: صفر. التغطية: ~99% من الحالات لمصادرنا الحاليّة (التحقّق من قاعدتنا أظهر صفر فشل تحليل عبر 130 عنصراً مُلتقَطاً).
                 </p>
               </div>
 
+              {/* AI fallback — only when programmatic parsing fails. */}
               <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-400 mb-1.5">
-                  ✦ مقترح بالذكاء الاصطناعي (للحالات المعقّدة)
+                  ✦ طبقة ذكاء اصطناعي للتطبيع (احتياطية)
                 </p>
                 <ul className="text-[0.65rem] text-neutral-400 space-y-1 list-disc pr-4">
                   <li>
-                    <span className="text-white">تضمينات (embeddings)</span> صغيرة لكل عنوان+ملخّص
-                    (مثل
-                    <code className="text-amber-400 mx-1 font-mono">text-embedding-3-small</code>،
-                    1536-d). تخزين الـvector في عمود
-                    <code className="text-amber-400 mx-1 font-mono">embedding</code>
-                    عبر
-                    <code className="text-amber-400 mx-1 font-mono">pgvector</code>.
+                    عند فشل سلسلة المحاولات البرمجية فقط (مثلاً تاريخ عربي حر، أو
+                    <code className="font-mono mx-1">«قبل ساعتين»</code>،
+                    أو <code className="font-mono mx-1">«أمس»</code>): نمرّر السلسلة الخام إلى
+                    <code className="text-amber-400 mx-1 font-mono">claude-haiku-4-5</code>
+                    أو
+                    <code className="text-amber-400 mx-1 font-mono">gpt-4o-mini</code>
+                    مع
+                    <code className="text-amber-400 mx-1 font-mono">response_format: json_schema</code>
+                    صارم يطلب
+                    <code className="font-mono mx-1">{"{ iso: string, confidence: 'high'|'medium'|'low' }"}</code>.
                   </li>
                   <li>
-                    قبل الحفظ: استعلام أقرب الجيران
-                    (<code className="text-amber-400 font-mono">embedding {"<->"} ?</code>)
-                    داخل نفس المصدر خلال آخر 30 يوم.
+                    <span className="text-white">تخزين مؤقّت بالسلسلة الخام</span> (cache by raw string) — نفس الصيغة لا تُسأل مرتين.
                   </li>
                   <li>
-                    اعتبار العنصر مكرّراً إذا كانت
-                    <code className="text-amber-400 mx-1 font-mono">cosine_similarity ≥ 0.92</code>
-                    — يلتقط نفس الخبر معاد صياغته من ناشرَين، أو ترجمات إنجليزي/عربي للخبر ذاته.
+                    قبول النتيجة فقط إذا
+                    <code className="font-mono mx-1">confidence ≠ low</code>
+                    وكان التاريخ خلال آخر 90 يوم وغير مستقبل. وإلا
+                    <span className="text-amber-400 mx-1">null</span>
+                    ونرجع لمقارنة الرابط.
                   </li>
                   <li>
-                    سجلّ ربط
-                    <code className="text-amber-400 mx-1 font-mono">duplicate_of</code>
-                    يربط النسخ المكرّرة بالأصل بدل حذفها — يفيد في تتبّع تغطية الخبر عبر مصادر.
+                    تسجيل كامل في
+                    <code className="text-amber-400 mx-1 font-mono">scraper_logs</code>:
+                    السلسلة الخام، النتيجة، الثقة، النموذج، زمن الاستجابة — لمراقبة كم نستهلك من النموذج وأيّ المصادر يحتاج تحسيناً برمجياً بدلاً من ذلك.
                   </li>
                 </ul>
                 <p className="text-[0.6rem] text-neutral-500 mt-2">
-                  التكلفة: ~0.00002$ لكل عنوان (embedding صغير). التغطية: ~99.9%.
-                  مناسب لاحقاً إن لاحظنا تكرارات عابرة للمصادر.
+                  التكلفة المتوقّعة: ~0.00005$ لكل تاريخ غير قابل للتحليل (Haiku صغير + 100 حرف). الاستهلاك الواقعي: قريب من الصفر بمصادرنا الحالية، لكنه يبقى احتياطياً ضرورياً عند إضافة ناشرين جدد بصيغ غير قياسية.
                 </p>
               </div>
             </div>
