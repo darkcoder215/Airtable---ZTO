@@ -289,8 +289,49 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes ztoStaggerIn {
+  /* Slightly stronger entrance for grouped lists — each child can apply a
+     short staggered delay so the rows ripple in instead of popping. */
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes ztoPulseRing {
+  /* Subtle attention pulse — used on KPI tiles when their value just
+     changed (e.g. after a refetch). One iteration only, then idle. */
+  0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.35); }
+  70%  { box-shadow: 0 0 0 12px rgba(251, 191, 36, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+}
 .zto-fade-in { animation: ztoFadeIn 0.32s ease-out both; }
 .zto-slide-up { animation: ztoSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.zto-stagger-in { animation: ztoStaggerIn 0.36s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.zto-pulse-ring { animation: ztoPulseRing 1.6s ease-out both; }
+
+/* Cards subtly lift on hover — only when the card is interactive
+   (anchor / button / role=button parent). Plain-info cards stay still. */
+.zto-card.zto-card-interactive,
+a.zto-card,
+button.zto-card {
+  cursor: pointer;
+}
+.zto-card.zto-card-interactive:hover,
+a.zto-card:hover,
+button.zto-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 0 rgba(255,255,255,0.04) inset,
+    0 12px 32px -18px rgba(0,0,0,0.7);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+/* When the user prefers reduced motion, drop all keyframe animations and
+   the lift transform. The transitions stay for state colours though. */
+@media (prefers-reduced-motion: reduce) {
+  .zto-fade-in, .zto-slide-up, .zto-stagger-in, .zto-pulse-ring { animation: none; }
+  .zto-card.zto-card-interactive:hover,
+  a.zto-card:hover,
+  button.zto-card:hover { transform: none; }
+}
 
 /* ========== Labels / Badges ========== */
 .zto-label { display: block; font-size: 13px; font-weight: 700; color: var(--c-txt-dim); margin-bottom: 6px; }

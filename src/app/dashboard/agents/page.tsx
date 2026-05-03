@@ -344,11 +344,11 @@ export default function AgentsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-lg font-black text-white flex items-center gap-2">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 tracking-tight">
             <Bot className="w-5 h-5 text-amber-400" />
             وكلاء الذكاء الاصطناعي
           </h2>
-          <p className="text-neutral-500 text-sm mt-1">
+          <p className="text-neutral-400 text-[13px] font-bold mt-1">
             إنشاء واختبار وكلاء الذكاء الاصطناعي
           </p>
         </div>

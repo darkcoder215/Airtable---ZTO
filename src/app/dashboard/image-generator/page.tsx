@@ -387,11 +387,11 @@ export default function ImageGeneratorPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-black text-white flex items-center gap-2">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 tracking-tight">
             <Wand2 className="w-5 h-5 text-amber-400" />
             مولّد صور المنشورات
           </h2>
-          <p className="text-neutral-500 text-sm mt-1">
+          <p className="text-neutral-400 text-[13px] font-bold mt-1">
             اختر شعاراً وقالباً محفوظَيْن، اكتب نص منشورك، واطلب الصورة بمظهر مهني فوري.
           </p>
         </div>

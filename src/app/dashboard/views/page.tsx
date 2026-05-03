@@ -89,6 +89,12 @@ interface Diagnostics {
     linkKind?: "recordLink" | "collaborator" | "textName";
     statusField: string | null;
     dueField: string | null;
+    // Per-link diagnostics added by /api/dashboards so the UI can show
+    // "why are there zeros?" without tailing logs.
+    recordsRead?: number;
+    recordsWithLinkValue?: number;
+    recordsMatchedToMember?: number;
+    uniqueMembersTouched?: number;
   }>;
   warnings: string[];
   availableTables?: Array<{ id: string; name: string }>;
@@ -438,11 +444,11 @@ export default function DashboardsAndViewsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-black text-white flex items-center gap-2">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 tracking-tight">
             <Users className="w-5 h-5 text-amber-400" />
             لوحات الفريق والعرض
           </h2>
-          <p className="text-neutral-500 text-sm mt-1">
+          <p className="text-neutral-400 text-[13px] font-bold mt-1">
             نظرة عامة على عمل كل عضو من فريقك — مهام مفتوحة، تأخّرات، قادم خلال أسبوع.
           </p>
         </div>
@@ -543,7 +549,7 @@ export default function DashboardsAndViewsPage() {
 
       {/* Top stats — overall */}
       {summaries.length > 0 && prefs.showStatTiles && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 zto-fade-in">
           <StatTile
             icon={<Users className="w-4 h-4" />}
             label="أعضاء"
@@ -712,40 +718,103 @@ export default function DashboardsAndViewsPage() {
         </div>
       )}
 
-      {/* Diagnostics footer */}
+      {/* "Why zeros?" prompt — appears the moment we detect linked tables
+          that returned zero matches. Saves admins from guessing. */}
+      {diag?.linkedTables && diag.linkedTables.length > 0 && overall.total === 0 && (
+        <div className="zto-card p-4 border-amber-500/30 bg-amber-500/5 zto-fade-in">
+          <p className="text-sm font-black text-amber-400 mb-2 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            لماذا كل الأرقام صفر؟
+          </p>
+          <p className="text-[0.7rem] text-neutral-300 leading-relaxed mb-3">
+            تمّ العثور على جدول الفريق و
+            <span className="text-amber-300 font-bold mx-1">{diag.linkedTables.length}</span>
+            جدول مرتبط به، لكن لم يتطابق أيّ سجلّ مع أعضاء فريقك. عادةً يحدث هذا لأحد سببين:
+          </p>
+          <ul className="text-[0.7rem] text-neutral-300 list-disc pr-5 space-y-1 mb-3">
+            <li><span className="text-white font-bold">السجلّات لم تُربط بعد:</span> الجدول موجود لكن لم يحدّد أحد المسؤول عن كل سجلّ.</li>
+            <li><span className="text-white font-bold">حقل المسؤول من نوع غير مدعوم:</span> مثلاً Lookup أو Formula بدلاً من Linked record / Collaborator.</li>
+          </ul>
+          <p className="text-[0.65rem] text-neutral-400 leading-relaxed">
+            تفقّد البطاقة التشخيصيّة أسفل الصفحة لرؤية كم سجلّاً قُرئ من كل جدول وكم تطابق فعلاً.
+          </p>
+        </div>
+      )}
+
+      {/* Diagnostics footer — now per-link (records read / matched / members) */}
       {diag?.linkedTables && diag.linkedTables.length > 0 && (
-        <details className="zto-card p-3 text-[0.65rem] text-neutral-500">
-          <summary className="cursor-pointer text-neutral-400 font-bold">
-            مصادر البيانات: {diag.linkedTables.length} جدول مرتبط بـ &quot;{diag.teamTable?.name}&quot;
+        <details className="zto-card p-3 text-[0.65rem] text-neutral-500" open={overall.total === 0}>
+          <summary className="cursor-pointer text-neutral-300 font-black flex items-center gap-2 select-none">
+            <span className="w-2 h-2 rounded-full bg-blue-400/60" />
+            تشخيصات: {diag.linkedTables.length} جدول مرتبط بـ «{diag.teamTable?.name}»
           </summary>
-          <div className="mt-2 space-y-1">
-            {diag.linkedTables.map((l) => (
-              <div key={`${l.id}-${l.linkField}`} className="flex items-center gap-2 flex-wrap">
-                <code className="text-amber-400 font-mono">{l.name}</code>
-                <span className="text-neutral-600">·</span>
-                <span>عبر حقل</span>
-                <code className="text-purple-400 font-mono">{l.linkField}</code>
-                {l.linkKind && (
-                  <span className="text-[0.55rem] text-neutral-500 font-mono">
-                    [{l.linkKind === "recordLink" ? "ربط" : l.linkKind === "collaborator" ? "متعاون" : "اسم"}]
-                  </span>
-                )}
-                {l.statusField && (
-                  <>
+          <div className="mt-3 space-y-2">
+            {diag.linkedTables.map((l) => {
+              const noMatches = (l.recordsMatchedToMember ?? 0) === 0;
+              const noLinkValues = (l.recordsWithLinkValue ?? 0) === 0;
+              const tone = noMatches ? "border-red-500/30 bg-red-500/5" : "border-emerald-500/20 bg-emerald-500/5";
+              return (
+                <div
+                  key={`${l.id}-${l.linkField}`}
+                  className={`rounded-lg border p-2.5 transition-colors ${tone}`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                    <code className="text-amber-300 font-mono font-bold">{l.name}</code>
                     <span className="text-neutral-600">·</span>
-                    <span>حالة</span>
-                    <code className="text-blue-400 font-mono">{l.statusField}</code>
-                  </>
-                )}
-                {l.dueField && (
-                  <>
-                    <span className="text-neutral-600">·</span>
-                    <span>استحقاق</span>
-                    <code className="text-emerald-400 font-mono">{l.dueField}</code>
-                  </>
-                )}
-              </div>
-            ))}
+                    <span>عبر</span>
+                    <code className="text-purple-300 font-mono">{l.linkField}</code>
+                    {l.linkKind && (
+                      <span className="text-[0.55rem] text-neutral-500 font-mono">
+                        [{l.linkKind === "recordLink" ? "ربط" : l.linkKind === "collaborator" ? "متعاون" : "اسم نصّي"}]
+                      </span>
+                    )}
+                    {l.statusField && (
+                      <>
+                        <span className="text-neutral-700">·</span>
+                        <span>حالة</span>
+                        <code className="text-blue-300 font-mono">{l.statusField}</code>
+                      </>
+                    )}
+                    {l.dueField && (
+                      <>
+                        <span className="text-neutral-700">·</span>
+                        <span>استحقاق</span>
+                        <code className="text-emerald-300 font-mono">{l.dueField}</code>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap text-[0.6rem] tabular-nums">
+                    <span>
+                      <span className="text-neutral-500">سجلّات مقروءة:</span>{" "}
+                      <span className="text-white font-bold">{l.recordsRead ?? 0}</span>
+                    </span>
+                    <span>
+                      <span className="text-neutral-500">حقل المسؤول مُعبّأ:</span>{" "}
+                      <span className={`font-bold ${noLinkValues ? "text-red-400" : "text-amber-300"}`}>
+                        {l.recordsWithLinkValue ?? 0}
+                      </span>
+                    </span>
+                    <span>
+                      <span className="text-neutral-500">تطابق مع عضو فريق:</span>{" "}
+                      <span className={`font-bold ${noMatches ? "text-red-400" : "text-emerald-300"}`}>
+                        {l.recordsMatchedToMember ?? 0}
+                      </span>
+                    </span>
+                    <span>
+                      <span className="text-neutral-500">أعضاء مذكورون:</span>{" "}
+                      <span className="text-white font-bold">{l.uniqueMembersTouched ?? 0}</span>
+                    </span>
+                  </div>
+                  {noMatches && (l.recordsRead ?? 0) > 0 && (
+                    <p className="mt-1.5 text-[0.6rem] text-amber-300/90 leading-relaxed">
+                      {noLinkValues
+                        ? "لا يوجد أيّ سجلّ في هذا الجدول يحوي قيمة في حقل المسؤول."
+                        : "السجلّات تحوي قيماً في حقل المسؤول لكنها لا تتطابق مع أعضاء جدول Team — تحقّق من أنّ القيم هي روابط فعليّة (Linked Record) أو Collaborator emails موجودة في Team."}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
             {diag.warnings.length > 0 && (
               <div className="mt-2 pt-2 border-t border-neutral-800 space-y-0.5">
                 {diag.warnings.map((w, i) => (
@@ -812,16 +881,18 @@ function StatTile({
     red: "from-red-500/15 to-red-500/5 text-red-300 border-red-500/20",
   }[tone];
   return (
-    <div className={`zto-stat-tile bg-gradient-to-br ${toneClass}`}>
+    <div
+      className={`zto-stat-tile bg-gradient-to-br ${toneClass} zto-fade-in transition-transform duration-200 hover:-translate-y-0.5`}
+    >
       <div className="flex items-center justify-between">
-        <span className="opacity-80">{icon}</span>
-        <span className="text-[0.55rem] uppercase tracking-wider opacity-70 font-bold">
+        <span className="opacity-90">{icon}</span>
+        <span className="text-[0.6rem] uppercase tracking-widest opacity-80 font-black">
           {label}
         </span>
       </div>
-      <div className="mt-1.5">
-        <p className="text-2xl font-black tabular-nums text-white leading-none">{value}</p>
-        {sub && <p className="text-[0.6rem] opacity-70 mt-0.5">{sub}</p>}
+      <div className="mt-2">
+        <p className="text-3xl font-black tabular-nums text-white leading-none tracking-tight">{value}</p>
+        {sub && <p className="text-[0.65rem] opacity-80 mt-1 font-bold">{sub}</p>}
       </div>
     </div>
   );
@@ -846,29 +917,29 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-black text-white">{m.name}</h3>
+            <h3 className="text-lg font-black text-white tracking-tight">{m.name}</h3>
             {prefs.showProfileMeta && (
-              <div className="flex items-center gap-3 flex-wrap text-[0.7rem] text-neutral-400 mt-1">
+              <div className="flex items-center gap-3 flex-wrap text-[0.7rem] text-neutral-300 mt-1.5 font-bold">
                 {m.role && (
-                  <span className="flex items-center gap-1">
-                    <Briefcase className="w-3 h-3" />
+                  <span className="flex items-center gap-1.5">
+                    <Briefcase className="w-3 h-3 text-amber-400" />
                     {m.role}
                   </span>
                 )}
                 {m.email && (
-                  <span className="flex items-center gap-1" dir="ltr">
-                    <Mail className="w-3 h-3" />
+                  <span className="flex items-center gap-1.5" dir="ltr">
+                    <Mail className="w-3 h-3 text-blue-400" />
                     {m.email}
                   </span>
                 )}
                 {m.department && (
-                  <span className="flex items-center gap-1">
-                    <Layers className="w-3 h-3" />
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-3 h-3 text-purple-400" />
                     {m.department}
                   </span>
                 )}
                 {!m.role && !m.email && !m.department && (
-                  <span className="text-neutral-600 flex items-center gap-1">
+                  <span className="text-neutral-600 flex items-center gap-1.5 font-normal">
                     <User className="w-3 h-3" />
                     بلا تفاصيل إضافية
                   </span>
@@ -881,8 +952,8 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
             <div className="flex items-center gap-3">
               <ProgressRing pct={completionPct} />
               <div className="text-[0.65rem] text-neutral-400">
-                <p className="font-bold text-white text-sm">{completionPct}%</p>
-                <p>مُنجَز من إجمالي العمل</p>
+                <p className="font-black text-white text-base tracking-tight">{completionPct}%</p>
+                <p className="font-bold">مُنجَز من إجمالي العمل</p>
               </div>
             </div>
           )}
@@ -892,8 +963,8 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
       {/* Per-table breakdown */}
       {prefs.showPerTable && (
       <div>
-        <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-          <Layers className="w-3.5 h-3.5" />
+        <h4 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+          <Layers className="w-3.5 h-3.5 text-amber-400" />
           توزيع العمل على الجداول
         </h4>
         {summary.perTable.length === 0 ? (
@@ -903,11 +974,15 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {summary.perTable.map((t) => (
-              <div key={t.tableId} className="zto-card p-4">
+            {summary.perTable.map((t, i) => (
+              <div
+                key={t.tableId}
+                className="zto-card p-4 transition-all duration-200 hover:border-amber-400/40 hover:-translate-y-0.5 zto-stagger-in"
+                style={{ animationDelay: `${i * 40}ms` }}
+              >
                 <div className="flex items-center justify-between mb-3">
-                  <p className="font-bold text-sm text-white truncate">{t.tableName}</p>
-                  <span className="zto-badge border border-neutral-700 text-neutral-300 text-[0.6rem]">
+                  <p className="font-black text-sm text-white truncate tracking-tight">{t.tableName}</p>
+                  <span className="zto-badge border border-neutral-700 text-neutral-200 text-[0.65rem] font-black">
                     {t.counts.total}
                   </span>
                 </div>
@@ -928,10 +1003,10 @@ function MemberDashboard({ summary, prefs }: { summary: PerMemberSummary; prefs:
                     {t.statusBreakdown.slice(0, 6).map((sb) => (
                       <span
                         key={sb.label}
-                        className="text-[0.6rem] bg-[#1a1a1a] border border-neutral-800 rounded-full px-2 py-0.5 text-neutral-300"
+                        className="text-[0.6rem] bg-[#1a1a1a] border border-neutral-800 rounded-full px-2 py-0.5 text-neutral-200 font-bold"
                       >
                         {sb.label}
-                        <span className="text-neutral-500 mr-1">{sb.count}</span>
+                        <span className="text-neutral-500 mr-1 font-mono">{sb.count}</span>
                       </span>
                     ))}
                   </div>
@@ -989,9 +1064,9 @@ function MiniStat({ label, value, tone }: { label: string; value: number; tone: 
     red: "text-red-300 bg-red-500/10 border-red-500/20",
   }[tone];
   return (
-    <div className={`rounded-lg border ${toneClass} py-1.5 px-2`}>
-      <p className="text-base font-black tabular-nums leading-none">{value}</p>
-      <p className="text-[0.55rem] uppercase tracking-wide mt-0.5 opacity-80">{label}</p>
+    <div className={`rounded-lg border ${toneClass} py-2 px-2 transition-transform duration-200 hover:scale-[1.03]`}>
+      <p className="text-lg font-black tabular-nums leading-none tracking-tight">{value}</p>
+      <p className="text-[0.6rem] uppercase tracking-widest mt-1 opacity-90 font-black">{label}</p>
     </div>
   );
 }
@@ -1046,49 +1121,52 @@ function ListCard({
   tone: "red" | "purple";
 }) {
   return (
-    <div className="zto-card p-4">
-      <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+    <div className="zto-card p-4 zto-fade-in">
+      <h4 className="text-[0.75rem] font-black text-white mb-3 flex items-center gap-2 tracking-tight">
         {icon}
         {title}
-        <span className={`mr-auto zto-badge text-[0.6rem] ${
-          tone === "red"
-            ? "border border-red-500/30 text-red-400"
-            : "border border-purple-500/30 text-purple-400"
-        }`}>
+        <span
+          className={`mr-auto zto-badge text-[0.65rem] font-black ${
+            tone === "red"
+              ? "border border-red-500/40 !text-red-300 bg-red-500/10"
+              : "border border-purple-500/40 !text-purple-300 bg-purple-500/10"
+          }`}
+        >
           {items.length}
         </span>
       </h4>
       {items.length === 0 ? (
         <div className="text-center py-6">
           <CheckCircle2 className="w-6 h-6 text-neutral-700 mx-auto mb-1.5" />
-          <p className="text-xs text-neutral-500">{empty}</p>
+          <p className="text-xs text-neutral-500 font-bold">{empty}</p>
         </div>
       ) : (
         <div className="space-y-1.5 max-h-72 overflow-y-auto">
-          {items.map((it) => (
+          {items.map((it, idx) => (
             <div
               key={it.recordId}
-              className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-800/40 transition-colors"
+              className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-800/50 transition-colors zto-stagger-in"
+              style={{ animationDelay: `${idx * 25}ms` }}
             >
               <span
                 className={`w-1 self-stretch rounded-full ${
-                  tone === "red" ? "bg-red-500/60" : "bg-purple-500/60"
+                  tone === "red" ? "bg-red-500/70" : "bg-purple-500/70"
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-white font-medium line-clamp-1">{it.title}</p>
-                <div className="flex items-center gap-1.5 text-[0.6rem] text-neutral-500 mt-0.5">
+                <p className="text-xs text-white font-bold line-clamp-1">{it.title}</p>
+                <div className="flex items-center gap-1.5 text-[0.6rem] text-neutral-400 mt-0.5 font-bold">
                   <span>{it.table}</span>
                   {it.status && (
                     <>
-                      <span>·</span>
+                      <span className="text-neutral-700">·</span>
                       <span>{it.status}</span>
                     </>
                   )}
                   {it.dueAt && (
                     <>
-                      <span>·</span>
-                      <span className={tone === "red" ? "text-red-400" : "text-purple-400"}>
+                      <span className="text-neutral-700">·</span>
+                      <span className={tone === "red" ? "text-red-300" : "text-purple-300"}>
                         {relativeDate(it.dueAt)}
                       </span>
                     </>

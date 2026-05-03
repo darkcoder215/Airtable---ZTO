@@ -1117,11 +1117,11 @@ export default function DataSourcesPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-lg font-black text-white flex items-center gap-2">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 tracking-tight">
             <Rss className="w-5 h-5 text-amber-400" />
             مصادر البيانات
           </h2>
-          <p className="text-neutral-500 text-sm mt-1">
+          <p className="text-neutral-400 text-[13px] font-bold mt-1">
             جمع وتحليل الأخبار والمحتوى من مصادر متعددة
           </p>
         </div>
@@ -1827,10 +1827,10 @@ export default function DataSourcesPage() {
                 return (
                   <article
                     key={article.id}
-                    className={`zto-card transition-colors overflow-hidden ${
+                    className={`zto-card overflow-hidden transition-all duration-200 ${
                       isOpen
-                        ? "md:col-span-2 xl:col-span-3 border-amber-400/40 bg-amber-400/[0.02]"
-                        : "hover:border-neutral-700"
+                        ? "md:col-span-2 xl:col-span-3 border-amber-400/40 bg-amber-400/[0.02] shadow-lg shadow-amber-400/[0.05]"
+                        : "hover:border-amber-400/30 hover:-translate-y-0.5"
                     }`}
                   >
                     {/* Compact header — always rendered, click anywhere to toggle */}

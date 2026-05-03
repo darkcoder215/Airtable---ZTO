@@ -305,8 +305,9 @@ export async function GET(request: NextRequest) {
     const teamLinks: TeamLinkX[] = [];
     const ASSIGNEE_NAME_HINTS = [
       /assignee/i, /owner/i, /assigned/i, /responsible/i, /lead\b/i,
-      /\bteam\b/i, /\bmember/i, /المسؤول/i, /المُسند/i, /مكلّف/i, /مكلف/i,
-      /مسند/i, /قائد/i, /صاحب/i,
+      /\bteam\b/i, /\bmember/i, /manager/i, /by\b/i, /handler/i,
+      /المسؤول/i, /المُسند/i, /مكلّف/i, /مكلف/i, /مسند/i,
+      /قائد/i, /صاحب/i, /مسؤول/i, /مدير/i, /موظف/i, /منفذ/i,
     ];
     for (const t of tables) {
       if (t.id === teamTable.id) continue;
@@ -353,16 +354,36 @@ export async function GET(request: NextRequest) {
     const now = Date.now();
     const SOON_MS = 7 * 24 * 60 * 60 * 1000;
     const warnings: string[] = [];
+    // Per-link-field stats so a "literally zeros" outcome is debuggable
+    // from the UI without tailing logs. We surface this under
+    // diagnostics.linkedTables[*].recordsRead/recordsLinked/membersMatched.
+    interface LinkStats {
+      recordsRead: number;
+      recordsWithLinkValue: number;
+      recordsMatchedToMember: number;
+      uniqueMembersTouched: number;
+    }
+    const linkStats = new Map<string, LinkStats>();
+    const linkKey = (tid: string, fieldName: string) => `${tid}::${fieldName}`;
 
     for (const link of teamLinks) {
+      const stats: LinkStats = {
+        recordsRead: 0,
+        recordsWithLinkValue: 0,
+        recordsMatchedToMember: 0,
+        uniqueMembersTouched: 0,
+      };
+      const touchedMembers = new Set<string>();
       let records: AirtableRecord[] = [];
       try {
         records = await loadAllRecords(DESTINATION_BASE_ID, link.table.id);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         warnings.push(`فشل قراءة جدول "${link.table.name}": ${msg}`);
+        linkStats.set(linkKey(link.table.id, link.linkField.name), stats);
         continue;
       }
+      stats.recordsRead = records.length;
 
       // Aggregator per (member → counts + statusBuckets) for this table.
       const perMemberCounts = new Map<string, BucketCounts>();
@@ -411,8 +432,13 @@ export async function GET(request: NextRequest) {
 
       for (const rec of records) {
         const v = rec.fields[link.linkField.name];
+        const hasValue =
+          v != null && (Array.isArray(v) ? v.length > 0 : v !== "" && (typeof v !== "object" || Object.keys(v).length > 0));
+        if (hasValue) stats.recordsWithLinkValue++;
         const linkedMembers = extractMemberIds(v, link.kind);
         if (linkedMembers.size === 0) continue;
+        stats.recordsMatchedToMember++;
+        for (const id of linkedMembers) touchedMembers.add(id);
         const status = statusOf(rec, link.statusField);
         const due = dueOf(rec, link.dueField);
         const dueMs = due ? Date.parse(due) : NaN;
@@ -491,6 +517,9 @@ export async function GET(request: NextRequest) {
           statusBreakdown: breakdown,
         });
       }
+
+      stats.uniqueMembersTouched = touchedMembers.size;
+      linkStats.set(linkKey(link.table.id, link.linkField.name), stats);
     }
 
     // Sort upcoming items chronologically per member.
@@ -529,14 +558,22 @@ export async function GET(request: NextRequest) {
       summaries,
       diagnostics: {
         teamTable: { id: teamTable.id, name: teamTable.name },
-        linkedTables: teamLinks.map((l) => ({
-          id: l.table.id,
-          name: l.table.name,
-          linkField: l.linkField.name,
-          linkKind: l.kind,
-          statusField: l.statusField?.name ?? null,
-          dueField: l.dueField?.name ?? null,
-        })),
+        linkedTables: teamLinks.map((l) => {
+          const s = linkStats.get(linkKey(l.table.id, l.linkField.name));
+          return {
+            id: l.table.id,
+            name: l.table.name,
+            linkField: l.linkField.name,
+            linkKind: l.kind,
+            statusField: l.statusField?.name ?? null,
+            dueField: l.dueField?.name ?? null,
+            // Per-link diagnostics so the UI can explain "why zero?"
+            recordsRead: s?.recordsRead ?? 0,
+            recordsWithLinkValue: s?.recordsWithLinkValue ?? 0,
+            recordsMatchedToMember: s?.recordsMatchedToMember ?? 0,
+            uniqueMembersTouched: s?.uniqueMembersTouched ?? 0,
+          };
+        }),
         warnings,
       },
     });
