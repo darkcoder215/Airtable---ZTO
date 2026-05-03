@@ -1654,6 +1654,26 @@ function AITemplateWizard({
   const [saving, setSaving] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const extrasInputRef = useRef<HTMLInputElement | null>(null);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Up to 2 accompanying images with admin notes (e.g. "this logo goes top
+  // right", "use this product photo as the focal point"). Sent to both
+  // Opus (analyze/revise) and NanoBanana (preview) so the design ends up
+  // with these images integrated in the right way.
+  interface ExtraImg { dataUrl: string; note: string }
+  const [extras, setExtras] = useState<ExtraImg[]>([]);
+
+  // Optional font file. We don't ship the file itself to the model — that
+  // wouldn't help, since neither Opus nor NanoBanana can install fonts.
+  // Instead we render a sample (Arabic + Latin glyphs) using FontFace +
+  // canvas, and forward that rendered image so Opus can describe the
+  // typography precisely enough for NanoBanana to imitate.
+  const [fontFamily, setFontFamily] = useState("");
+  const [fontSampleUrl, setFontSampleUrl] = useState<string | null>(null);
+  const [fontFileName, setFontFileName] = useState<string | null>(null);
+  const [fontError, setFontError] = useState<string | null>(null);
+  const [renderingFont, setRenderingFont] = useState(false);
 
   // History of revisions for transparency.
   const [revisions, setRevisions] = useState<
@@ -1687,6 +1707,132 @@ function AITemplateWizard({
     setExamples((cur) => cur.filter((_, idx) => idx !== i));
   };
 
+  const onAddExtras = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    const room = 2 - extras.length;
+    if (room <= 0) {
+      addToast("الحد الأقصى صورتان مرافقتان", "warning");
+      return;
+    }
+    const toAdd: ExtraImg[] = [];
+    for (const f of files.slice(0, room)) {
+      if (f.size > MAX_FILE_BYTES) {
+        addToast(`"${f.name}" أكبر من 6MB`, "error");
+        continue;
+      }
+      try {
+        toAdd.push({ dataUrl: await readAsDataUrl(f), note: "" });
+      } catch {
+        addToast(`فشل قراءة "${f.name}"`, "error");
+      }
+    }
+    if (toAdd.length) setExtras((cur) => [...cur, ...toAdd]);
+  };
+
+  const updateExtraNote = (i: number, note: string) => {
+    setExtras((cur) =>
+      cur.map((e, idx) => (idx === i ? { ...e, note: note.slice(0, 600) } : e))
+    );
+  };
+
+  const removeExtra = (i: number) => {
+    setExtras((cur) => cur.filter((_, idx) => idx !== i));
+  };
+
+  // Render a sample of the uploaded font onto a canvas (Arabic + Latin
+  // glyphs) and return a data URL. We deliberately do NOT ship the font
+  // file itself to the model — neither Opus nor NanoBanana can install
+  // fonts, so a rendered image is the only signal that's actually useful.
+  const onLoadFont = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) {
+      addToast("ملف الخط أكبر من 6MB", "error");
+      return;
+    }
+    setRenderingFont(true);
+    setFontError(null);
+    let face: FontFace | null = null;
+    const familyId = `wizard-font-${Date.now()}`;
+    try {
+      const buf = await file.arrayBuffer();
+      face = new FontFace(familyId, buf);
+      await face.load();
+      // Keep the loaded face attached so the canvas paints with it; we
+      // detach when the wizard closes (best effort).
+      (document as Document & { fonts: FontFaceSet }).fonts.add(face);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024;
+      canvas.height = 360;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("canvas غير مدعوم");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#0a0a0a";
+      ctx.textBaseline = "top";
+
+      ctx.font = `64px "${familyId}", system-ui, sans-serif`;
+      ctx.direction = "rtl";
+      ctx.textAlign = "right";
+      ctx.fillText("نموذج خط: استثمارات الشركات الناشئة", canvas.width - 24, 24);
+
+      ctx.font = `48px "${familyId}", system-ui, sans-serif`;
+      ctx.direction = "ltr";
+      ctx.textAlign = "left";
+      ctx.fillText("The quick brown fox jumps", 24, 120);
+      ctx.fillText("0123456789  AaBbGgQq  &@%", 24, 180);
+
+      ctx.font = `32px "${familyId}", system-ui, sans-serif`;
+      ctx.direction = "rtl";
+      ctx.textAlign = "right";
+      ctx.fillText("أبجد هوّز حطي كلمن سعفص قرشت", canvas.width - 24, 260);
+
+      const url = canvas.toDataURL("image/png");
+      setFontSampleUrl(url);
+      setFontFileName(file.name);
+      // Default the family name to the file's stem so the admin can edit
+      // it; it's just a text label that travels in the prompt.
+      if (!fontFamily.trim()) {
+        const stem = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ");
+        setFontFamily(stem);
+      }
+      addToast("تم تحميل الخط", "success");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "فشل تحميل الخط";
+      setFontError(msg);
+      addToast(`فشل تحميل الخط: ${msg}`, "error");
+      if (face) {
+        try {
+          (document as Document & { fonts: FontFaceSet }).fonts.delete(face);
+        } catch {
+          // swallow — cleanup best-effort
+        }
+      }
+    } finally {
+      setRenderingFont(false);
+    }
+  };
+
+  const clearFont = () => {
+    setFontSampleUrl(null);
+    setFontFileName(null);
+    setFontFamily("");
+    setFontError(null);
+  };
+
+  // Build the {extras, font} payload reused by every action below.
+  const aiPayload = (): { extras: ExtraImg[]; font: { sampleDataUrl?: string; family?: string } } => ({
+    extras,
+    font: {
+      sampleDataUrl: fontSampleUrl ?? undefined,
+      family: fontFamily.trim() || undefined,
+    },
+  });
+
   const callBuilder = async (body: Record<string, unknown>) => {
     const res = await fetch("/api/image-template-builder", {
       method: "POST",
@@ -1714,6 +1860,7 @@ function AITemplateWizard({
         action: "analyze",
         examples,
         brandNotes: brandNotes.trim() || undefined,
+        ...aiPayload(),
       });
       if (!ok) {
         const msg = (data.error as string) || "فشل التحليل";
@@ -1753,6 +1900,7 @@ function AITemplateWizard({
         examples: examples.slice(0, 1), // first example as style anchor
         aspectRatio,
         imageSize,
+        ...aiPayload(),
       });
       if (!ok) {
         const msg = (data.error as string) || "فشل توليد المعاينة";
@@ -1792,6 +1940,7 @@ function AITemplateWizard({
         previousWasf: wasf,
         previewImage: previewUrl,
         editPrompt,
+        ...aiPayload(),
       });
       if (!ok) {
         const msg = (data.error as string) || "فشل تحديث الوصف";
@@ -1961,6 +2110,132 @@ function AITemplateWizard({
               maxLength={2000}
             />
           </div>
+
+          {/* === Accompanying images (max 2) === */}
+          <div className="border-t border-neutral-800 pt-4">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <SubLabel className="!mb-0">صور مرافقة (اختياري — حتى صورتين)</SubLabel>
+              <span className="text-[0.55rem] text-neutral-500 font-mono">{extras.length}/2</span>
+            </div>
+            <p className="text-[0.6rem] text-neutral-500 leading-relaxed mb-2">
+              صورة شعار، منتج، أو شخصية تريد دمجها داخل التصميم. اكتب لكل صورة ملاحظة قصيرة عن مكانها أو معاملتها (مثل
+              «شعار في الزاوية اليمنى العليا»، «خلفية شفّافة»). تُرسَل مع الأمثلة إلى Opus 4.7 وإلى NanoBanana عند المعاينة.
+            </p>
+            <div className="space-y-2">
+              {extras.map((ex, i) => (
+                <div
+                  key={i}
+                  className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-2 flex items-start gap-2"
+                >
+                  <div className="relative w-16 h-16 rounded overflow-hidden border border-neutral-800 bg-[#1a1a1a] shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={ex.dataUrl} alt={`extra ${i + 1}`} className="w-full h-full object-cover" />
+                  </div>
+                  <textarea
+                    className="zto-input min-h-[64px] text-xs flex-1"
+                    placeholder="ماذا نفعل بهذه الصورة في التصميم؟"
+                    value={ex.note}
+                    onChange={(e) => updateExtraNote(i, e.target.value)}
+                    maxLength={600}
+                  />
+                  <button
+                    onClick={() => removeExtra(i)}
+                    className="text-neutral-500 hover:text-red-400 p-1 shrink-0"
+                    title="حذف"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              {extras.length < 2 && (
+                <button
+                  onClick={() => extrasInputRef.current?.click()}
+                  className="w-full py-2 rounded-lg border-2 border-dashed border-neutral-700 hover:border-purple-400 hover:text-purple-300 text-neutral-500 text-[0.65rem] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  إضافة صورة مرافقة
+                </button>
+              )}
+            </div>
+            <input
+              ref={extrasInputRef}
+              type="file"
+              accept={ACCEPT_MIME}
+              hidden
+              onChange={onAddExtras}
+            />
+          </div>
+
+          {/* === Font file (optional) === */}
+          <div className="border-t border-neutral-800 pt-4">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <SubLabel className="!mb-0">الخط (اختياري)</SubLabel>
+              {fontSampleUrl && (
+                <button
+                  onClick={clearFont}
+                  className="text-[0.6rem] text-red-400 hover:text-red-300 flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> إزالة الخط
+                </button>
+              )}
+            </div>
+            <p className="text-[0.6rem] text-neutral-500 leading-relaxed mb-2">
+              ارفع ملف
+              <code className="text-amber-400 mx-1 font-mono">.ttf</code>
+              أو
+              <code className="text-amber-400 mx-1 font-mono">.otf</code>
+              أو
+              <code className="text-amber-400 mx-1 font-mono">.woff[2]</code>.
+              نرسم منه عيّنة عربية + لاتينية على الـcanvas في متصفّحك ونرسلها إلى Opus 4.7 ليصف أسلوبه بدقّة كافية ليُحاكيها NanoBanana في المعاينة (نموذج التوليد لا يستطيع تركيب خط مخصّص).
+            </p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-2">
+                <div>
+                  <button
+                    onClick={() => fontInputRef.current?.click()}
+                    disabled={renderingFont}
+                    className="w-full h-[42px] rounded-lg border-2 border-dashed border-neutral-700 hover:border-purple-400 hover:text-purple-300 text-neutral-500 text-[0.65rem] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    {renderingFont ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    {fontFileName ? "استبدال الخط" : "رفع ملف خط"}
+                  </button>
+                  {fontFileName && (
+                    <p className="text-[0.55rem] text-neutral-500 mt-1 truncate font-mono" dir="ltr">
+                      {fontFileName}
+                    </p>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  className="zto-input text-xs"
+                  placeholder="اسم عائلة الخط (يساعد النموذج، اختياري)"
+                  value={fontFamily}
+                  onChange={(e) => setFontFamily(e.target.value.slice(0, 200))}
+                />
+              </div>
+              <input
+                ref={fontInputRef}
+                type="file"
+                accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+                hidden
+                onChange={onLoadFont}
+              />
+              {fontError && (
+                <p className="text-[0.6rem] text-red-400">{fontError}</p>
+              )}
+              {fontSampleUrl && (
+                <div className="rounded-lg overflow-hidden border border-neutral-800 bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={fontSampleUrl} alt="font sample" className="w-full h-auto" />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <p className="text-[0.65rem] text-neutral-500">
               {examples.length} / 6 صور — الحد الأدنى 2.

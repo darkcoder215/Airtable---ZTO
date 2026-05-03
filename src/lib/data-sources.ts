@@ -268,7 +268,11 @@ export interface FetchedArticle {
   description: string;
   url: string;
   author: string;
-  publishedAt: string;
+  // null when the fetched item had no date or its date was unparseable /
+  // future-skewed. Stored as null in scraper_articles.published_at so the
+  // dedup pass falls back to the URL set instead of treating the item as
+  // "newer than the cutoff" on every tick.
+  publishedAt: string | null;
   fetchedAt: string;
   categories: string[];
   imageUrl?: string;
@@ -347,7 +351,7 @@ function mapArticle(r: ArticleRow, sourceName?: string): FetchedArticle {
     description: r.description ?? "",
     url: r.url,
     author: r.author ?? "",
-    publishedAt: r.published_at ?? r.fetched_at,
+    publishedAt: r.published_at,
     fetchedAt: r.fetched_at,
     categories: Array.isArray(raw.categories)
       ? (raw.categories as unknown[]).filter((c): c is string => typeof c === "string")
@@ -374,6 +378,65 @@ function mapFilterRun(r: FilterRunRow): FilterResult {
       : [],
     rawResponse: r.raw_response ?? undefined,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Date normalization
+//
+// Every fetcher feeds raw publisher dates through `parseSourceDate`. The
+// helper tries five strategies in order and returns either a canonical ISO
+// string or null. Returning null (instead of falling back to "now()") is a
+// deliberate choice — falling back to now() makes a broken item look "newer
+// than the cutoff" on every single tick, so it would get re-processed
+// forever. With null, the caller falls through to the known-URL safety net
+// instead.
+//
+// We also reject future-dated items beyond a 5-minute skew window so a
+// single misconfigured publisher with a wrong clock can't poison the cutoff
+// and silently hide every legitimate post that follows.
+//
+// Observed real-world inputs:
+//   - RSS: RFC 822 ("Mon, 28 Apr 2025 14:30:00 +0000"), ISO 8601, dc:date,
+//     occasional non-standard Arabic strings (those return null).
+//   - X / Twitter (Apify): ASCTIME-ish ("Sat May 02 12:22:51 +0000 2026")
+//     — Date.parse handles it natively.
+//   - LinkedIn (Apify): postedAtISO (clean ISO with ms) + postedAtTimestamp
+//     (epoch ms) — both clean.
+// ---------------------------------------------------------------------------
+
+const FUTURE_SKEW_MS = 5 * 60 * 1000; // accept up to 5 min into the future
+
+export function parseSourceDate(raw: unknown): string | null {
+  // Numeric epoch (ms or seconds) — handle before string coercion so
+  // "1777748436506" still wins as an epoch.
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return clampAndStringify(raw < 1e12 ? raw * 1000 : raw);
+  }
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Numeric string — same epoch handling.
+  if (/^-?\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n)) {
+      return clampAndStringify(n < 1e12 ? n * 1000 : n);
+    }
+  }
+
+  // Date.parse covers ISO 8601, RFC 822/2822, and the ASCTIME variant
+  // Twitter/Apify uses ("Sat May 02 12:22:51 +0000 2026"). Anything it
+  // accepts, we accept — reject the rest.
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return clampAndStringify(parsed);
+}
+
+function clampAndStringify(ms: number): string | null {
+  if (!Number.isFinite(ms)) return null;
+  if (ms <= 0) return null; // pre-1970 is almost always a parser bug
+  if (ms > Date.now() + FUTURE_SKEW_MS) return null;
+  return new Date(ms).toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,12 +1287,7 @@ export async function fetchRSSFeed(
         extractTag(item, "updated") ||
         extractTag(item, "dc:date") ||
         "";
-      let publishedAt: string;
-      try {
-        publishedAt = pubDateRaw ? new Date(pubDateRaw).toISOString() : now;
-      } catch {
-        publishedAt = now;
-      }
+      const publishedAt = parseSourceDate(pubDateRaw);
 
       articles.push({
         id: `transient-${Math.random().toString(36).slice(2, 10)}`,
@@ -1330,7 +1388,7 @@ export async function fetchApifyTwitter(
         description: text,
         url: tweet.twitterUrl || tweet.url || profileUrl,
         author: authorName,
-        publishedAt: tweet.createdAt ? new Date(tweet.createdAt).toISOString() : now,
+        publishedAt: parseSourceDate(tweet.createdAt),
         fetchedAt: now,
         categories: ["twitter"],
         imageUrl: firstMedia ?? tweet.author?.profilePicture,
@@ -1499,14 +1557,9 @@ export async function fetchApifyLinkedIn(
           ? `${authorName}: ${titleSnippet}${text.length > 80 ? "..." : ""}`
           : `${authorName} — ${post.type ?? "post"}`;
         const url = post.url || post.authorProfileUrl || safeUrl;
-        let publishedAt = now;
-        if (post.postedAtISO) {
-          const d = new Date(post.postedAtISO);
-          if (!isNaN(d.getTime())) publishedAt = d.toISOString();
-        } else if (typeof post.postedAtTimestamp === "number") {
-          const d = new Date(post.postedAtTimestamp);
-          if (!isNaN(d.getTime())) publishedAt = d.toISOString();
-        }
+        const publishedAt =
+          parseSourceDate(post.postedAtISO) ??
+          parseSourceDate(post.postedAtTimestamp);
         return {
           id: `transient-${Math.random().toString(36).slice(2, 10)}`,
           sourceId,
@@ -1570,7 +1623,7 @@ async function fetchApifyGeneric(
       description: String(item.description || item.fullText || item.text || item.content || ""),
       url: String(item.url || item.link || item.twitterUrl || ""),
       author: String(item.author || item.userName || item.authorName || sourceName),
-      publishedAt: item.createdAt ? new Date(String(item.createdAt)).toISOString() : now,
+      publishedAt: parseSourceDate(item.createdAt),
       fetchedAt: now,
       categories: ["apify"],
       isInvestmentRelated: false,
@@ -2001,24 +2054,28 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     return result;
   }
 
-  // Date-based dedup: only keep items whose publishedAt is strictly newer
-  // than the latest publishedAt we already have for this source. Articles
-  // with no usable publishedAt fall through to the URL set as a safety net.
-  // The DB-level UNIQUE(source_id, url) + upsert in persistArticles still
-  // catches any edge case where two ticks race.
+  // Date-based dedup with a 30-minute safety overlap. Items whose
+  // publishedAt is newer than (cutoff − 30 min) survive — RSS feeds
+  // routinely publish out of order (a slow editorial workflow lands an
+  // "older" piece a few minutes after a "newer" one), and the 30-min
+  // window costs nothing because the known-URL set + DB-level
+  // UNIQUE(source_id, url) catch the actual duplicates inside that
+  // window. Items with no parseable date (publishedAt === null) fall
+  // through to the known-URL check unconditionally so a feed that
+  // suddenly drops dates doesn't flood Airtable on every tick.
   const cutoff = await getLatestPublishedAt(source.id);
-  const known = cutoff == null ? await getKnownUrls(source.id) : null;
+  const known = await getKnownUrls(source.id);
+  const overlap = 30 * 60 * 1000; // 30 min
   const fresh = result.articles.filter((a) => {
     if (!a.url) return false;
-    if (cutoff != null) {
-      const t = Date.parse(a.publishedAt ?? "");
-      if (Number.isFinite(t)) return t > cutoff;
-      // Unknown date with a known cutoff → fall back to url check so we
-      // don't spam Airtable on every fetch with the same undated item.
-      return !known?.has(a.url);
+    if (known.has(a.url)) return false; // saved before — skip outright
+    if (cutoff != null && a.publishedAt) {
+      const t = Date.parse(a.publishedAt);
+      if (Number.isFinite(t)) return t >= cutoff - overlap;
     }
-    // First-ever fetch for this source: nothing to compare against.
-    return !known || !known.has(a.url);
+    // No cutoff yet, or unparseable / null date: known-URL check above
+    // already filtered, so this item is genuinely new.
+    return true;
   });
   fresh.forEach((a) => (a.sourceName = source.name));
 
