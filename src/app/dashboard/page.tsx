@@ -2095,7 +2095,49 @@ export default function DashboardPage() {
       )}
 
       {/* Record-detail drawer — opened by clicking a Kanban card */}
-      {detailRecord && selectedTable && (
+      {detailRecord && selectedTable && (() => {
+        // Collect every image URL across attachment / url-image / textfield
+        // sources. We skip the gallery section entirely when this is empty
+        // so non-visual records don't waste vertical space, and we omit
+        // the image-bearing fields from the field list since they're
+        // already rendered up top.
+        type Img = { url: string; filename?: string; fieldName: string };
+        const images: Img[] = [];
+        const imageFieldIds = new Set<string>();
+        const isImageUrl = (s: string) =>
+          /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(s) ||
+          /pbs\.twimg\.com|licdn\.com|googleusercontent\.com|imgur\.com/i.test(s);
+        for (const f of visibleFields) {
+          const v = detailRecord.fields[f.name];
+          if (f.type === "multipleAttachments" && Array.isArray(v)) {
+            const list = v as Array<{ url?: string; filename?: string; type?: string }>;
+            const pictures = list.filter((a) =>
+              a?.url && (a.type?.startsWith("image/") || isImageUrl(a.url))
+            );
+            if (pictures.length > 0) {
+              imageFieldIds.add(f.id);
+              for (const a of pictures) {
+                images.push({ url: a.url!, filename: a.filename, fieldName: f.name });
+              }
+            }
+          } else if ((f.type === "url" || f.type === "singleLineText") && typeof v === "string" && isImageUrl(v)) {
+            imageFieldIds.add(f.id);
+            images.push({ url: v, fieldName: f.name });
+          }
+        }
+        const hasImages = images.length > 0;
+        // Field list excludes the image-bearing fields (already shown).
+        const nonImageFields = visibleFields.filter((f) => !imageFieldIds.has(f.id));
+        const populated = nonImageFields.filter((f) => {
+          const v = detailRecord.fields[f.name];
+          return !(v == null || v === "" || (Array.isArray(v) && v.length === 0));
+        });
+        const empty = nonImageFields.filter((f) => !populated.includes(f));
+        const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
+        const primaryV = primary ? detailRecord.fields[primary.name] : null;
+        const recordTitle = renderCellPreview(primaryV) || detailRecord.id;
+
+        return (
         <div
           className="fixed inset-0 z-50 zto-fade-in"
           dir="rtl"
@@ -2107,72 +2149,122 @@ export default function DashboardPage() {
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={() => setDetailRecordId(null)}
           />
-          {/* Side panel — slides in from the leading edge in RTL */}
+          {/* Side panel — slides in from the leading edge in RTL.
+              Wider (840px) so the 2-col fields/comments layout breathes
+              on desktop; full width on mobile/tablet. */}
           <aside
-            className="absolute inset-y-0 left-0 w-full md:w-[640px] bg-[#0a0a0a] border-l border-neutral-800 shadow-2xl shadow-black/60 flex flex-col zto-slide-up"
+            className="absolute inset-y-0 left-0 w-full lg:w-[860px] xl:w-[960px] bg-[#0a0a0a] border-l border-neutral-800 shadow-2xl shadow-black/60 flex flex-col zto-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Sticky header */}
-            <header className="sticky top-0 z-10 px-5 py-4 bg-[#0a0a0a]/95 backdrop-blur border-b border-neutral-800 flex items-start gap-3">
+            <header className="sticky top-0 z-10 px-6 py-4 bg-[#0a0a0a]/95 backdrop-blur border-b border-neutral-800 flex items-start gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-[0.6rem] text-amber-400 font-black uppercase tracking-widest mb-1">
+                <p className="text-[0.6rem] text-amber-400 font-black uppercase tracking-widest mb-1.5">
                   {selectedTable.name}
                 </p>
-                <h2 className="text-lg font-black text-white tracking-tight break-words leading-snug">
-                  {(() => {
-                    const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
-                    const v = primary ? detailRecord.fields[primary.name] : null;
-                    return renderCellPreview(v) || detailRecord.id;
-                  })()}
+                <h2 className="text-xl font-black text-white tracking-tight break-words leading-snug">
+                  {recordTitle}
                 </h2>
-                <p className="text-[0.6rem] text-neutral-600 font-mono mt-1">{detailRecord.id}</p>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span className="text-[0.55rem] text-neutral-600 font-mono">{detailRecord.id}</span>
+                  {hasImages && (
+                    <span className="zto-badge text-[0.55rem] !py-0.5 border border-amber-400/30 !text-amber-300">
+                      {images.length} صورة
+                    </span>
+                  )}
+                  {comments.length > 0 && (
+                    <span className="zto-badge text-[0.55rem] !py-0.5 border border-blue-400/30 !text-blue-300">
+                      {comments.length} تعليق
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setDetailRecordId(null)}
-                className="text-neutral-500 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors shrink-0"
+                className="text-neutral-500 hover:text-white p-1.5 rounded-md hover:bg-neutral-800 transition-colors shrink-0"
                 title="إغلاق (Esc)"
               >
                 <X className="w-4 h-4" />
               </button>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-6">
-              {/* Fields — every visible field, organised in a definition list.
-                  Empty fields are dimmed so the eye skips them but the
-                  schema is still legible. */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Hero gallery — only rendered when at least one image
+                  field has a value. First image is large; remaining
+                  thumbs sit in a strip underneath. Click any thumb to
+                  promote it to the hero slot. */}
+              {hasImages && (
+                <section className="zto-fade-in">
+                  <DrawerImageGallery images={images} />
+                </section>
+              )}
+
+              {/* Fields — populated first (visible, normal), empty ones
+                  collapsed inside an inline disclosure so they don't
+                  visually crowd the populated set. */}
               <section>
                 <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <span className="w-1 h-3 rounded-full bg-amber-400" />
                   الحقول
+                  <span className="text-[0.55rem] text-neutral-600 font-mono mr-1">
+                    {populated.length}/{nonImageFields.length}
+                  </span>
                 </h3>
-                <dl className="space-y-3">
-                  {visibleFields.map((field) => {
-                    const Icon = getFieldIcon(field.type);
-                    const typeColor = getFieldTypeColor(field.type);
-                    const v = detailRecord.fields[field.name];
-                    const empty = v == null || v === "" || (Array.isArray(v) && v.length === 0);
-                    return (
-                      <div
-                        key={field.id}
-                        className={`bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 transition-colors hover:border-neutral-700 ${
-                          empty ? "opacity-50" : ""
-                        }`}
-                      >
-                        <dt className="flex items-center gap-1.5 text-[0.6rem] uppercase tracking-widest text-neutral-400 font-black mb-1.5">
-                          <Icon className={`w-3 h-3 ${typeColor}`} />
-                          {field.name}
-                        </dt>
-                        <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
-                          {empty ? (
-                            <span className="text-neutral-600 font-normal italic">— فارغ —</span>
-                          ) : (
-                            renderFieldValue(v, field)
-                          )}
-                        </dd>
-                      </div>
-                    );
-                  })}
-                </dl>
+                {populated.length === 0 ? (
+                  <p className="text-[0.7rem] text-neutral-500 italic font-bold">— لا حقول مُعبَّأة —</p>
+                ) : (
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {populated.map((field) => {
+                      const Icon = getFieldIcon(field.type);
+                      const typeColor = getFieldTypeColor(field.type);
+                      const v = detailRecord.fields[field.name];
+                      // Long-text and multi-line fields get the full row.
+                      const wide =
+                        field.type === "multilineText" ||
+                        (typeof v === "string" && v.length > 120);
+                      return (
+                        <div
+                          key={field.id}
+                          className={`bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3.5 transition-colors hover:border-neutral-700 ${
+                            wide ? "md:col-span-2" : ""
+                          }`}
+                        >
+                          <dt className="flex items-center gap-1.5 text-[0.55rem] uppercase tracking-widest text-neutral-500 font-black mb-2">
+                            <Icon className={`w-3 h-3 ${typeColor}`} />
+                            {field.name}
+                          </dt>
+                          <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
+                            {renderFieldValue(v, field)}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                )}
+
+                {empty.length > 0 && (
+                  <details className="mt-3 group">
+                    <summary className="cursor-pointer text-[0.65rem] text-neutral-500 hover:text-neutral-300 font-bold flex items-center gap-1.5 transition-colors">
+                      <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
+                      حقول فارغة
+                      <span className="text-neutral-700 font-mono">({empty.length})</span>
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {empty.map((f) => {
+                        const Icon = getFieldIcon(f.type);
+                        return (
+                          <span
+                            key={f.id}
+                            className="inline-flex items-center gap-1 text-[0.6rem] bg-[#0d0d0d] border border-neutral-800 rounded px-2 py-1 text-neutral-500 font-bold"
+                          >
+                            <Icon className="w-2.5 h-2.5" />
+                            {f.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
               </section>
 
               {/* Comments — Airtable-native record comments */}
@@ -2285,6 +2377,91 @@ export default function DashboardPage() {
               </section>
             </div>
           </aside>
+        </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+/* ───────── Drawer image gallery ─────────
+   Hero + thumbnail strip rendered at the top of the record-detail
+   drawer. Promoted image fills a 16:9 frame with object-contain so
+   logos / portraits / wide hero shots all display fully. Thumbs
+   underneath let the admin flip between every image attached to
+   the record. Self-contained — needs no parent state.
+*/
+function DrawerImageGallery({
+  images,
+}: {
+  images: { url: string; filename?: string; fieldName: string }[];
+}) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const active = images[activeIdx] ?? images[0];
+  if (!active) return null;
+  return (
+    <div>
+      <div className="bg-[#0d0d0d] border border-neutral-800 rounded-lg overflow-hidden">
+        <div className="aspect-video bg-black flex items-center justify-center max-h-[420px]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={active.url}
+            alt={active.filename ?? active.fieldName}
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-contain"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.opacity = "0.4";
+            }}
+          />
+        </div>
+        <div className="px-3 py-2 border-t border-neutral-800 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-[0.6rem] text-amber-400 font-black uppercase tracking-widest shrink-0">
+              {active.fieldName}
+            </p>
+            {active.filename && (
+              <p className="text-[0.6rem] text-neutral-500 font-mono truncate" dir="ltr">
+                {active.filename}
+              </p>
+            )}
+          </div>
+          <a
+            href={active.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[0.6rem] font-bold text-neutral-400 hover:text-amber-300 inline-flex items-center gap-1"
+          >
+            <ExternalLink className="w-3 h-3" />
+            فتح بحجم كامل
+          </a>
+        </div>
+      </div>
+      {images.length > 1 && (
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+          {images.map((img, i) => {
+            const isActive = i === activeIdx;
+            return (
+              <button
+                key={`${img.url}-${i}`}
+                onClick={() => setActiveIdx(i)}
+                className={`relative w-14 h-14 rounded border overflow-hidden transition-all ${
+                  isActive
+                    ? "border-amber-400 ring-2 ring-amber-400/30"
+                    : "border-neutral-800 hover:border-neutral-600"
+                }`}
+                title={img.filename ?? img.fieldName}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img.url}
+                  alt=""
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

@@ -29,6 +29,8 @@ import {
   Verified,
   BarChart3,
   Smile,
+  Maximize2,
+  ChevronDown,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import PageGuide from "@/components/PageGuide";
@@ -139,6 +141,13 @@ export default function ImageGeneratorPage() {
 
   const [refineText, setRefineText] = useState("");
   const [previewTab, setPreviewTab] = useState<"x" | "linkedin-feed" | "linkedin-company">("linkedin-feed");
+  // Platform preview defaults to collapsed — it eats real estate when
+  // there's nothing to show yet, and most generations finish without
+  // the user ever needing it. Click the section header to expand.
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  // Result image fullscreen toggle — when an image exists, the user
+  // can promote it from the inline 240px frame to a tall ~640px frame.
+  const [resultExpanded, setResultExpanded] = useState(false);
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const refInputRef = useRef<HTMLInputElement | null>(null);
@@ -723,36 +732,58 @@ export default function ImageGeneratorPage() {
 
           {/* Output column */}
           <div className="space-y-4">
-            {/* Result */}
+            {/* Result — compact frame by default. The user can expand
+                to a tall preview, and the platform preview below is
+                collapsed until they want to inspect a feed mockup. */}
             <section className="zto-card zto-section">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <ImageIcon className="w-4 h-4 text-amber-400" />
                   <h3 className="text-sm font-bold text-white">النتيجة</h3>
                   {generatedHistory.length > 1 && (
-                    <span className="text-[0.6rem] text-neutral-500">
+                    <span className="text-[0.6rem] text-neutral-500 font-mono">
                       نسخة {generatedHistory.filter((t) => t.role === "assistant").length}
                     </span>
                   )}
                 </div>
-                {generatedUrl && (
-                  <button onClick={onDownload} className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400">
-                    <Download className="w-3.5 h-3.5" />
-                    تنزيل
-                  </button>
-                )}
+                <div className="flex items-center gap-1">
+                  {generatedUrl && (
+                    <>
+                      <button
+                        onClick={() => setResultExpanded((v) => !v)}
+                        className="zto-btn zto-btn-ghost zto-btn-sm"
+                        title={resultExpanded ? "تصغير العرض" : "توسيع العرض"}
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        {resultExpanded ? "تصغير" : "توسيع"}
+                      </button>
+                      <button onClick={onDownload} className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400">
+                        <Download className="w-3.5 h-3.5" />
+                        تنزيل
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="relative bg-[#0d0d0d] border border-neutral-800 rounded-xl overflow-hidden min-h-[280px] flex items-center justify-center">
+              <div
+                className={`relative bg-[#0d0d0d] border border-neutral-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-200 ${
+                  resultExpanded ? "max-h-[640px]" : "max-h-[260px]"
+                } ${generatedUrl ? "" : "min-h-[180px]"}`}
+              >
                 {generating && !generatedUrl && <GeneratingState />}
                 {!generating && !generatedUrl && (
-                  <div className="text-center py-12">
-                    <ImageIcon className="w-10 h-10 text-neutral-700 mx-auto" />
-                    <p className="text-xs text-neutral-500 mt-3">سيظهر التوليد هنا</p>
+                  <div className="text-center py-8">
+                    <ImageIcon className="w-8 h-8 text-neutral-700 mx-auto" />
+                    <p className="text-[0.7rem] text-neutral-500 mt-2 font-bold">سيظهر التوليد هنا</p>
                   </div>
                 )}
                 {generatedUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={generatedUrl} alt="generated" className="w-full block" />
+                  <img
+                    src={generatedUrl}
+                    alt="generated"
+                    className={`block ${resultExpanded ? "max-h-[640px] w-auto h-auto" : "max-h-[260px] w-auto h-auto"}`}
+                  />
                 )}
                 {generating && generatedUrl && (
                   <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center">
@@ -784,36 +815,56 @@ export default function ImageGeneratorPage() {
               )}
             </section>
 
-            {/* Realistic preview */}
-            <section className="zto-card zto-section">
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
+            {/* Realistic preview — collapsed by default. Header alone is
+                a button toggle; expanded body holds the platform tabs +
+                surface mockup. Saves a chunk of vertical space when the
+                admin only needs the raw image. */}
+            <section className="zto-card overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setPreviewExpanded((v) => !v)}
+                className="w-full flex items-center gap-2 px-5 py-4 text-right hover:bg-white/[0.02] transition-colors"
+                aria-expanded={previewExpanded}
+              >
                 <Eye className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold text-white">معاينة منصّات</h3>
-                <div className="flex bg-[#1a1a1a] border border-neutral-800 rounded-lg p-0.5 mr-auto">
-                  {([
-                    ["x", "X"],
-                    ["linkedin-feed", "LinkedIn Feed"],
-                    ["linkedin-company", "LinkedIn Company"],
-                  ] as const).map(([k, l]) => (
-                    <button
-                      key={k}
-                      onClick={() => setPreviewTab(k)}
-                      className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                        previewTab === k ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
-                      }`}
-                    >
-                      {l}
-                    </button>
-                  ))}
+                <h3 className="text-sm font-bold text-white">معاينة على المنصّات</h3>
+                <p className="text-[0.6rem] text-neutral-500 font-bold mr-auto truncate">
+                  {previewExpanded ? "اضغط لإخفاء المعاينة" : "اضغط لرؤية كيف يظهر المنشور على X و LinkedIn"}
+                </p>
+                <ChevronDown
+                  className={`w-4 h-4 text-neutral-500 shrink-0 transition-transform ${
+                    previewExpanded ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {previewExpanded && (
+                <div className="border-t border-neutral-800 p-5 space-y-3 zto-fade-in">
+                  <div className="flex bg-[#1a1a1a] border border-neutral-800 rounded-lg p-0.5 w-fit">
+                    {([
+                      ["x", "X"],
+                      ["linkedin-feed", "LinkedIn Feed"],
+                      ["linkedin-company", "LinkedIn Company"],
+                    ] as const).map(([k, l]) => (
+                      <button
+                        key={k}
+                        onClick={() => setPreviewTab(k)}
+                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                          previewTab === k ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                  <PreviewSurface
+                    tab={previewTab}
+                    logoUrl={effectiveLogoUrl}
+                    brandName={effectiveLogoName}
+                    postText={postText}
+                    generatedUrl={generatedUrl}
+                  />
                 </div>
-              </div>
-              <PreviewSurface
-                tab={previewTab}
-                logoUrl={effectiveLogoUrl}
-                brandName={effectiveLogoName}
-                postText={postText}
-                generatedUrl={generatedUrl}
-              />
+              )}
             </section>
           </div>
         </div>
