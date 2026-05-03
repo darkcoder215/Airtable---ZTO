@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listBases, listTables, listRecords, createRecord, updateRecord, deleteRecord, getRecord, resolveLinkedRecordNames } from "@/lib/airtable";
+import { listBases, listTables, listRecords, createRecord, updateRecord, deleteRecord, getRecord, resolveLinkedRecordNames, listComments, createComment, deleteComment } from "@/lib/airtable";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { checkPermission, getFieldRestrictions } from "@/lib/access-control";
 import { logger } from "@/lib/logger";
@@ -110,6 +110,26 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ record });
       }
 
+      case "comments": {
+        const baseId = searchParams.get("baseId");
+        const tableId = searchParams.get("tableId");
+        const recordId = searchParams.get("recordId");
+        const offset = searchParams.get("offset") ?? undefined;
+        if (!baseId || !tableId || !recordId) {
+          return NextResponse.json({ error: "معرف القاعدة والجدول والسجل مطلوبان" }, { status: 400 });
+        }
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canView"))) {
+          return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
+        }
+        try {
+          const result = await listComments(baseId, tableId, recordId, { pageSize: 100, offset });
+          return NextResponse.json(result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "فشل جلب التعليقات";
+          return NextResponse.json({ error: msg }, { status: 502 });
+        }
+      }
+
       default:
         return NextResponse.json({ error: "إجراء غير صالح" }, { status: 400 });
     }
@@ -166,6 +186,56 @@ export async function POST(request: NextRequest) {
         await deleteRecord(baseId, tableId, recordId);
         logger.info(`Record ${recordId} deleted by ${user.name}`, "API", { baseId, tableId }, user.id);
         return NextResponse.json({ success: true });
+      }
+
+      case "add-comment": {
+        if (!recordId) {
+          return NextResponse.json({ error: "معرف السجل مطلوب" }, { status: 400 });
+        }
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canView"))) {
+          return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
+        }
+        const text = typeof body.text === "string" ? body.text : "";
+        const parentCommentId = typeof body.parentCommentId === "string" ? body.parentCommentId : undefined;
+        try {
+          const comment = await createComment(baseId, tableId, recordId, text, parentCommentId);
+          logger.info(
+            `Comment added on record ${recordId} by ${user.name}`,
+            "API",
+            { baseId, tableId, recordId, commentId: comment.id, length: text.length },
+            user.id
+          );
+          return NextResponse.json({ comment });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "فشل إضافة التعليق";
+          return NextResponse.json({ error: msg }, { status: 502 });
+        }
+      }
+
+      case "delete-comment": {
+        if (!recordId) {
+          return NextResponse.json({ error: "معرف السجل مطلوب" }, { status: 400 });
+        }
+        const commentId = typeof body.commentId === "string" ? body.commentId : "";
+        if (!commentId) {
+          return NextResponse.json({ error: "معرف التعليق مطلوب" }, { status: 400 });
+        }
+        if (!(await checkPermission(user.id, user.role, baseId, tableId, "canEdit"))) {
+          return NextResponse.json({ error: "لا تملك صلاحية الحذف" }, { status: 403 });
+        }
+        try {
+          await deleteComment(baseId, tableId, recordId, commentId);
+          logger.info(
+            `Comment ${commentId} deleted from record ${recordId} by ${user.name}`,
+            "API",
+            { baseId, tableId, recordId, commentId },
+            user.id
+          );
+          return NextResponse.json({ success: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "فشل حذف التعليق";
+          return NextResponse.json({ error: msg }, { status: 502 });
+        }
       }
 
       default:

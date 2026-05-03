@@ -413,6 +413,163 @@ export async function getRecord(
   }
 }
 
+// ============ Comments ============
+//
+// Airtable's record-comments API:
+//   GET    /v0/{baseId}/{tableId}/{recordId}/comments  → list (offset paging)
+//   POST   /v0/{baseId}/{tableId}/{recordId}/comments  → { text: "..." }
+//   DELETE /v0/{baseId}/{tableId}/{recordId}/comments/{commentId}
+//
+// Requires the PAT to have either `data.recordComments:read` or
+// `data.recordComments:write`. Older PATs without those scopes will see a
+// 403 — we surface that as a clear Arabic message instead of generic 403.
+
+export interface AirtableComment {
+  id: string;
+  text: string;
+  createdTime: string;
+  lastUpdatedTime?: string;
+  author?: { id: string; email?: string; name?: string };
+  parentCommentId?: string | null;
+  reactions?: Array<{
+    emoji: { unicodeCharacter?: string; skinToneModifier?: string };
+    reactingUser?: { userId?: string };
+  }>;
+  mentioned?: Record<string, unknown>;
+}
+
+interface CommentsListResponse {
+  comments: AirtableComment[];
+  offset?: string;
+}
+
+function commentsScopeError(rawText: string): string | null {
+  // Airtable returns 403 with "INVALID_SCOPE" or similar when the PAT
+  // lacks comment permissions. Map that to a friendly message admins can
+  // act on (regenerate the PAT with the right scope).
+  if (/INVALID_PERMISSIONS|INVALID_SCOPE|NOT_AUTHORIZED|recordComments/i.test(rawText)) {
+    return "صلاحية التعليقات غير مفعّلة على الـPAT. أعد توليد الرمز مع scope = data.recordComments:read وdata.recordComments:write.";
+  }
+  return null;
+}
+
+export async function listComments(
+  baseId: string,
+  tableId: string,
+  recordId: string,
+  opts?: { pageSize?: number; offset?: string }
+): Promise<CommentsListResponse> {
+  ensurePAT();
+  validateId(baseId, "base");
+  validateId(recordId, "record");
+
+  const params = new URLSearchParams();
+  if (opts?.pageSize) params.set("pageSize", String(Math.max(1, Math.min(100, opts.pageSize))));
+  if (opts?.offset) params.set("offset", opts.offset);
+  const url = `https://api.airtable.com/v0/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}/${encodeURIComponent(recordId)}/comments${params.size ? `?${params}` : ""}`;
+
+  try {
+    const response = await fetchWithRetry(url, {
+      headers: { Authorization: `Bearer ${PAT}` },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      const friendly = commentsScopeError(body);
+      logger.warn(
+        `listComments ${response.status}`,
+        "Airtable",
+        { recordId, body: body.slice(0, 200) }
+      );
+      throw new Error(friendly ?? getArabicError(response.status, body));
+    }
+    return (await response.json()) as CommentsListResponse;
+  } catch (error) {
+    if (error instanceof TypeError && (error as TypeError).message.includes("fetch")) {
+      throw new Error("فشل الاتصال بـ Airtable لجلب التعليقات.");
+    }
+    throw error;
+  }
+}
+
+export async function createComment(
+  baseId: string,
+  tableId: string,
+  recordId: string,
+  text: string,
+  parentCommentId?: string
+): Promise<AirtableComment> {
+  ensurePAT();
+  validateId(baseId, "base");
+  validateId(recordId, "record");
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("نص التعليق فارغ");
+  if (trimmed.length > 10_000) throw new Error("التعليق طويل جداً");
+
+  const url = `https://api.airtable.com/v0/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}/${encodeURIComponent(recordId)}/comments`;
+  const payload: Record<string, unknown> = { text: trimmed };
+  if (parentCommentId) payload.parentCommentId = parentCommentId;
+
+  try {
+    const response = await fetchWithRetry(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PAT}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      const friendly = commentsScopeError(body);
+      logger.error(
+        `createComment ${response.status}`,
+        "Airtable",
+        { recordId, body: body.slice(0, 200) }
+      );
+      throw new Error(friendly ?? getArabicError(response.status, body));
+    }
+    return (await response.json()) as AirtableComment;
+  } catch (error) {
+    if (error instanceof TypeError && (error as TypeError).message.includes("fetch")) {
+      throw new Error("فشل الاتصال بـ Airtable لإضافة التعليق.");
+    }
+    throw error;
+  }
+}
+
+export async function deleteComment(
+  baseId: string,
+  tableId: string,
+  recordId: string,
+  commentId: string
+): Promise<void> {
+  ensurePAT();
+  validateId(baseId, "base");
+  validateId(recordId, "record");
+  if (!/^com[A-Za-z0-9]{14}$/.test(commentId) && !commentId.startsWith("com")) {
+    throw new Error("معرّف التعليق غير صالح");
+  }
+
+  const url = `https://api.airtable.com/v0/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}/${encodeURIComponent(recordId)}/comments/${encodeURIComponent(commentId)}`;
+
+  try {
+    const response = await fetchWithRetry(url, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${PAT}` },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      const friendly = commentsScopeError(body);
+      throw new Error(friendly ?? getArabicError(response.status, body));
+    }
+  } catch (error) {
+    if (error instanceof TypeError && (error as TypeError).message.includes("fetch")) {
+      throw new Error("فشل الاتصال بـ Airtable لحذف التعليق.");
+    }
+    throw error;
+  }
+}
+
 // Resolve linked record IDs to display names
 export async function resolveLinkedRecordNames(
   baseId: string,

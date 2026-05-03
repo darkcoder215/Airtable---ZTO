@@ -362,6 +362,137 @@ export default function DashboardPage() {
   const [view, setView] = useState<"grid" | "kanban">("grid");
   const [kanbanGroupField, setKanbanGroupField] = useState<string | null>(null);
   const [kanbanMoving, setKanbanMoving] = useState<string | null>(null);
+
+  /* Record-detail drawer (opened by clicking a Kanban card or the
+     "expand row" arrow in grid view). Pulls full record + comments from
+     Airtable and renders all fields + a threaded comments timeline plus a
+     compose box. */
+  interface RecordComment {
+    id: string;
+    text: string;
+    createdTime: string;
+    lastUpdatedTime?: string;
+    author?: { id: string; email?: string; name?: string };
+    parentCommentId?: string | null;
+  }
+  const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
+  const [comments, setComments] = useState<RecordComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [newComment, setNewComment] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+
+  const detailRecord = detailRecordId
+    ? records.find((r) => r.id === detailRecordId) ?? null
+    : null;
+
+  const loadComments = async (recId: string) => {
+    if (!selectedBase || !selectedTable) return;
+    setCommentsLoading(true);
+    setCommentsError(null);
+    try {
+      const params = new URLSearchParams({
+        action: "comments",
+        baseId: selectedBase.id,
+        tableId: selectedTable.id,
+        recordId: recId,
+      });
+      const res = await fetch(`/api/airtable?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل جلب التعليقات");
+      setComments(Array.isArray(data.comments) ? data.comments : []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "فشل جلب التعليقات";
+      setCommentsError(msg);
+      setComments([]);
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!detailRecordId) {
+      setComments([]);
+      setCommentsError(null);
+      setNewComment("");
+      return;
+    }
+    void loadComments(detailRecordId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailRecordId]);
+
+  const submitComment = async () => {
+    if (!detailRecordId || !selectedBase || !selectedTable) return;
+    const text = newComment.trim();
+    if (!text) return;
+    setPostingComment(true);
+    try {
+      const res = await fetch("/api/airtable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add-comment",
+          baseId: selectedBase.id,
+          tableId: selectedTable.id,
+          recordId: detailRecordId,
+          text,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || "فشل إضافة التعليق", "error");
+        return;
+      }
+      // Optimistic-feeling: prepend the returned comment so the user sees
+      // their addition without waiting for a refetch.
+      if (data.comment) {
+        setComments((cur) => [data.comment, ...cur]);
+      }
+      setNewComment("");
+      addToast("تمّ إضافة التعليق", "success");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "خطأ في الشبكة", "error");
+    } finally {
+      setPostingComment(false);
+    }
+  };
+
+  const deleteCommentOnRecord = async (commentId: string) => {
+    if (!detailRecordId || !selectedBase || !selectedTable) return;
+    if (!confirm("حذف التعليق؟")) return;
+    try {
+      const res = await fetch("/api/airtable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete-comment",
+          baseId: selectedBase.id,
+          tableId: selectedTable.id,
+          recordId: detailRecordId,
+          commentId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || "فشل الحذف", "error");
+        return;
+      }
+      setComments((cur) => cur.filter((c) => c.id !== commentId));
+      addToast("تمّ الحذف", "success");
+    } catch {
+      addToast("خطأ في الشبكة", "error");
+    }
+  };
+
+  // ESC closes the drawer; arrow/swipe behaviours can come later.
+  useEffect(() => {
+    if (!detailRecordId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDetailRecordId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailRecordId]);
   const [kanbanDensity, setKanbanDensity] = useState<"compact" | "normal" | "comfy">("normal");
   // Per-column persisted width. Key = `${baseId}:${tableId}:${groupField}:${columnKey}`.
   const [kanbanColWidth, setKanbanColWidth] = useState<Record<string, number>>({});
@@ -1544,6 +1675,14 @@ export default function DashboardPage() {
                         <td className={`px-3 ${rowPadding} align-top`}>
                           <div className="flex items-center gap-1">
                             <button
+                              onClick={() => setDetailRecordId(record.id)}
+                              className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity hover:!text-amber-400"
+                              style={{ padding: "4px 8px" }}
+                              title="فتح بطاقة التفاصيل + التعليقات"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               onClick={() => toggleRowExpand(record.id)}
                               className="zto-btn zto-btn-ghost zto-btn-sm text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity"
                               style={{ padding: "4px 8px" }}
@@ -1791,12 +1930,20 @@ export default function DashboardPage() {
                             draggable={canEdit && !isMoving}
                             onDragStart={(e) => onCardDragStart(e, rec.id)}
                             onDragEnd={onCardDragEnd}
-                            className={`bg-[#1a1a1a] border rounded-lg ${densityCard} hover:border-neutral-700 transition-all group relative ${
+                            onClick={(e) => {
+                              // Don't open the drawer if the click came
+                              // from one of the inline controls (the
+                              // status select, the grip, etc.).
+                              const target = e.target as HTMLElement;
+                              if (target.closest("select, button, .zto-select-wrap, [data-no-open]")) return;
+                              setDetailRecordId(rec.id);
+                            }}
+                            className={`bg-[#1a1a1a] border rounded-lg ${densityCard} hover:border-amber-400/40 hover:-translate-y-0.5 transition-all duration-150 group relative ${
                               isDragging ? "opacity-40 scale-95" : ""
                             } ${isMoving ? "opacity-60" : ""} ${
-                              canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                              canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                             }`}
-                            title={canEdit ? "اسحب لتغيير الحالة" : undefined}
+                            title={canEdit ? "انقر للتفاصيل، اسحب لتغيير الحالة" : "انقر للتفاصيل"}
                           >
                             {canEdit && (
                               <GripVertical className="w-3.5 h-3.5 text-neutral-600 absolute top-2 left-2 opacity-0 group-hover:opacity-100 pointer-events-none" />
@@ -1944,6 +2091,200 @@ export default function DashboardPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Record-detail drawer — opened by clicking a Kanban card */}
+      {detailRecord && selectedTable && (
+        <div
+          className="fixed inset-0 z-50 zto-fade-in"
+          dir="rtl"
+          role="dialog"
+          aria-modal="true"
+        >
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setDetailRecordId(null)}
+          />
+          {/* Side panel — slides in from the leading edge in RTL */}
+          <aside
+            className="absolute inset-y-0 left-0 w-full md:w-[640px] bg-[#0a0a0a] border-l border-neutral-800 shadow-2xl shadow-black/60 flex flex-col zto-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky header */}
+            <header className="sticky top-0 z-10 px-5 py-4 bg-[#0a0a0a]/95 backdrop-blur border-b border-neutral-800 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[0.6rem] text-amber-400 font-black uppercase tracking-widest mb-1">
+                  {selectedTable.name}
+                </p>
+                <h2 className="text-lg font-black text-white tracking-tight break-words leading-snug">
+                  {(() => {
+                    const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
+                    const v = primary ? detailRecord.fields[primary.name] : null;
+                    return renderCellPreview(v) || detailRecord.id;
+                  })()}
+                </h2>
+                <p className="text-[0.6rem] text-neutral-600 font-mono mt-1">{detailRecord.id}</p>
+              </div>
+              <button
+                onClick={() => setDetailRecordId(null)}
+                className="text-neutral-500 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors shrink-0"
+                title="إغلاق (Esc)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              {/* Fields — every visible field, organised in a definition list.
+                  Empty fields are dimmed so the eye skips them but the
+                  schema is still legible. */}
+              <section>
+                <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <span className="w-1 h-3 rounded-full bg-amber-400" />
+                  الحقول
+                </h3>
+                <dl className="space-y-3">
+                  {visibleFields.map((field) => {
+                    const Icon = getFieldIcon(field.type);
+                    const typeColor = getFieldTypeColor(field.type);
+                    const v = detailRecord.fields[field.name];
+                    const empty = v == null || v === "" || (Array.isArray(v) && v.length === 0);
+                    return (
+                      <div
+                        key={field.id}
+                        className={`bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 transition-colors hover:border-neutral-700 ${
+                          empty ? "opacity-50" : ""
+                        }`}
+                      >
+                        <dt className="flex items-center gap-1.5 text-[0.6rem] uppercase tracking-widest text-neutral-400 font-black mb-1.5">
+                          <Icon className={`w-3 h-3 ${typeColor}`} />
+                          {field.name}
+                        </dt>
+                        <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
+                          {empty ? (
+                            <span className="text-neutral-600 font-normal italic">— فارغ —</span>
+                          ) : (
+                            renderFieldValue(v, field)
+                          )}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+
+              {/* Comments — Airtable-native record comments */}
+              <section>
+                <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <span className="w-1 h-3 rounded-full bg-blue-400" />
+                  التعليقات
+                  {comments.length > 0 && (
+                    <span className="text-[0.65rem] tabular-nums bg-blue-400/15 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5 font-black">
+                      {comments.length}
+                    </span>
+                  )}
+                </h3>
+
+                {/* Compose box */}
+                <div className="mb-4 bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 transition-colors focus-within:border-amber-400/40">
+                  <textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Cmd/Ctrl + Enter submits — keeps multi-line
+                      // editing intuitive while still allowing quick send.
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        void submitComment();
+                      }
+                    }}
+                    placeholder="أضف تعليقاً... (⌘/Ctrl + Enter للإرسال)"
+                    className="w-full bg-transparent text-[13px] text-white font-bold placeholder:text-neutral-600 placeholder:font-normal outline-none resize-y min-h-[64px]"
+                    maxLength={10000}
+                  />
+                  <div className="flex items-center justify-between gap-2 mt-2">
+                    <span className="text-[0.55rem] text-neutral-600 font-mono tabular-nums">
+                      {newComment.length}/10000
+                    </span>
+                    <button
+                      onClick={submitComment}
+                      disabled={postingComment || !newComment.trim()}
+                      className="zto-btn zto-btn-gold zto-btn-sm"
+                    >
+                      {postingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      نشر
+                    </button>
+                  </div>
+                </div>
+
+                {/* Timeline */}
+                {commentsLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+                  </div>
+                ) : commentsError ? (
+                  <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-[0.7rem] text-red-300 font-bold">
+                    ⚠ {commentsError}
+                  </div>
+                ) : comments.length === 0 ? (
+                  <p className="text-center py-6 text-[0.7rem] text-neutral-500 font-bold">
+                    لا تعليقات بعد — كن أوّل من يعلّق.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {comments.map((c, idx) => {
+                      const authorName = c.author?.name || c.author?.email || "—";
+                      const initial = authorName.trim().slice(0, 1).toUpperCase();
+                      const date = new Date(c.createdTime);
+                      const dateStr = isNaN(date.getTime())
+                        ? c.createdTime
+                        : date.toLocaleString("ar-SA", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          });
+                      return (
+                        <li
+                          key={c.id}
+                          className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 hover:border-neutral-700 transition-colors zto-stagger-in"
+                          style={{ animationDelay: `${idx * 30}ms` }}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400/40 to-purple-500/40 border border-neutral-700 flex items-center justify-center text-[0.65rem] font-black text-white shrink-0">
+                              {initial || "؟"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="text-[0.7rem] font-black text-white truncate">
+                                  {authorName}
+                                </p>
+                                <span className="text-[0.55rem] text-neutral-500 font-mono">{dateStr}</span>
+                                {canEdit && (
+                                  <button
+                                    onClick={() => deleteCommentOnRecord(c.id)}
+                                    className="mr-auto text-neutral-600 hover:text-red-400 transition-colors"
+                                    title="حذف"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[13px] text-neutral-200 font-bold whitespace-pre-line break-words leading-relaxed">
+                                {c.text}
+                              </p>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </aside>
         </div>
       )}
     </div>
