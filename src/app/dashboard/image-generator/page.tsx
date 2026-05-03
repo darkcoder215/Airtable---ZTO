@@ -172,9 +172,15 @@ export default function ImageGeneratorPage() {
   // there's nothing to show yet, and most generations finish without
   // the user ever needing it. Click the section header to expand.
   const [previewExpanded, setPreviewExpanded] = useState(false);
-  // Result image fullscreen toggle — when an image exists, the user
-  // can promote it from the inline 240px frame to a tall ~640px frame.
-  const [resultExpanded, setResultExpanded] = useState(false);
+  // Multi-step size controls: 4 positions (S / M / L / XL) for both
+  // the raw result frame and the platform mockup. We persist via
+  // component state only — no need to localStorage these since they
+  // reset cleanly on reset() and most users land on M anyway.
+  type FrameSize = "sm" | "md" | "lg" | "xl";
+  const [resultSize, setResultSize] = useState<FrameSize>("md");
+  const [previewSize, setPreviewSize] = useState<FrameSize>("md");
+  // Map a size key to the actual max-height used on the container.
+  const SIZE_PX: Record<FrameSize, number> = { sm: 200, md: 320, lg: 520, xl: 780 };
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const refInputRef = useRef<HTMLInputElement | null>(null);
@@ -896,12 +902,85 @@ export default function ImageGeneratorPage() {
               )}
             </section>
 
+            {/* Pre-flight checklist — visible state of every requirement
+                so the admin sees exactly why the Generate button is
+                disabled (and which items are still optional). Empty
+                state collapses to a single green pill. */}
+            {(() => {
+              const hasAnchor = !!effectiveLogoUrl || !!selectedTemplateId || !!referenceUploadDataUrl;
+              const hasText = !!postText.trim();
+              const ready = hasAnchor && hasText;
+              const Item = ({ ok, label, hint }: { ok: boolean; label: string; hint?: string }) => (
+                <div
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[0.7rem] font-bold ${
+                    ok
+                      ? "bg-emerald-500/5 border-emerald-500/30 text-emerald-300"
+                      : "bg-amber-500/5 border-amber-500/30 text-amber-300"
+                  }`}
+                >
+                  {ok ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span className="flex-1">{label}</span>
+                  {hint && !ok && (
+                    <span className="text-[0.6rem] opacity-80">{hint}</span>
+                  )}
+                </div>
+              );
+              return (
+                <section
+                  className={`zto-card p-3 transition-colors ${
+                    ready ? "border-emerald-500/30 bg-emerald-500/[0.03]" : "border-neutral-800"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-[0.65rem] uppercase tracking-widest font-black text-neutral-300">
+                      جاهزية التوليد
+                    </p>
+                    {ready ? (
+                      <span className="text-[0.6rem] text-emerald-300 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        كل المتطلبات مكتملة
+                      </span>
+                    ) : (
+                      <span className="text-[0.6rem] text-amber-300 font-bold">
+                        ينقص {[!hasAnchor, !hasText].filter(Boolean).length} من المتطلبات
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Item
+                      ok={hasAnchor}
+                      label="شعار أو قالب"
+                      hint="اختر واحداً منهما"
+                    />
+                    <Item ok={hasText} label="نص المنشور" hint="مطلوب" />
+                  </div>
+                  <p className="text-[0.55rem] text-neutral-500 font-bold mt-2 leading-relaxed">
+                    اختياري:
+                    <span className="text-neutral-400 mx-1">ملاحظة الشعار · صور مرافقة · تخصيصات · نسبة أبعاد · جودة</span>
+                  </p>
+                </section>
+              );
+            })()}
+
             <button
               onClick={onGenerate}
               disabled={
                 generating ||
                 (!effectiveLogoUrl && !selectedTemplateId && !referenceUploadDataUrl) ||
                 !postText.trim()
+              }
+              title={
+                generating
+                  ? "جاري التوليد..."
+                  : !postText.trim()
+                    ? "أدخل نص المنشور أوّلاً"
+                    : !effectiveLogoUrl && !selectedTemplateId && !referenceUploadDataUrl
+                      ? "اختر شعاراً أو قالباً"
+                      : "توليد الصورة"
               }
               className="zto-btn zto-btn-gold w-full !h-12 text-sm"
             >
@@ -936,17 +1015,10 @@ export default function ImageGeneratorPage() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2 flex-wrap">
                   {generatedUrl && (
                     <>
-                      <button
-                        onClick={() => setResultExpanded((v) => !v)}
-                        className="zto-btn zto-btn-ghost zto-btn-sm"
-                        title={resultExpanded ? "تصغير العرض" : "توسيع العرض"}
-                      >
-                        <Maximize2 className="w-3.5 h-3.5" />
-                        {resultExpanded ? "تصغير" : "توسيع"}
-                      </button>
+                      <FrameSizePill value={resultSize} onChange={setResultSize} />
                       <button onClick={onDownload} className="zto-btn zto-btn-ghost zto-btn-sm text-amber-400">
                         <Download className="w-3.5 h-3.5" />
                         تنزيل
@@ -956,9 +1028,11 @@ export default function ImageGeneratorPage() {
                 </div>
               </div>
               <div
-                className={`relative bg-[#0d0d0d] border border-neutral-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-200 ${
-                  resultExpanded ? "max-h-[640px]" : "max-h-[260px]"
-                } ${generatedUrl ? "" : "min-h-[180px]"}`}
+                className="relative bg-[#0d0d0d] border border-neutral-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-200"
+                style={{
+                  maxHeight: generatedUrl ? `${SIZE_PX[resultSize]}px` : undefined,
+                  minHeight: generatedUrl ? undefined : "180px",
+                }}
               >
                 {generating && !generatedUrl && <GeneratingState />}
                 {!generating && !generatedUrl && (
@@ -972,7 +1046,8 @@ export default function ImageGeneratorPage() {
                   <img
                     src={generatedUrl}
                     alt="generated"
-                    className={`block ${resultExpanded ? "max-h-[640px] w-auto h-auto" : "max-h-[260px] w-auto h-auto"}`}
+                    className="block w-auto h-auto"
+                    style={{ maxHeight: `${SIZE_PX[resultSize]}px` }}
                   />
                 )}
                 {generating && generatedUrl && (
@@ -1029,23 +1104,30 @@ export default function ImageGeneratorPage() {
               </button>
               {previewExpanded && (
                 <div className="border-t border-neutral-800 p-5 space-y-3 zto-fade-in">
-                  <div className="flex bg-[#1a1a1a] border border-neutral-800 rounded-lg p-0.5 w-fit">
-                    {([
-                      ["x", "X"],
-                      ["linkedin-feed", "LinkedIn Feed"],
-                      ["linkedin-company", "LinkedIn Company"],
-                    ] as const).map(([k, l]) => (
-                      <button
-                        key={k}
-                        onClick={() => setPreviewTab(k)}
-                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                          previewTab === k ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
-                        }`}
-                      >
-                        {l}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex bg-[#1a1a1a] border border-neutral-800 rounded-lg p-0.5">
+                      {([
+                        ["x", "X"],
+                        ["linkedin-feed", "LinkedIn Feed"],
+                        ["linkedin-company", "LinkedIn Company"],
+                      ] as const).map(([k, l]) => (
+                        <button
+                          key={k}
+                          onClick={() => setPreviewTab(k)}
+                          className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                            previewTab === k ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                          }`}
+                        >
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    <FrameSizePill value={previewSize} onChange={setPreviewSize} className="mr-auto" />
                   </div>
+                  <div
+                    className="overflow-y-auto rounded-lg"
+                    style={{ maxHeight: `${SIZE_PX[previewSize]}px` }}
+                  >
                   <PreviewSurface
                     tab={previewTab}
                     logoUrl={effectiveLogoUrl}
@@ -1053,6 +1135,7 @@ export default function ImageGeneratorPage() {
                     postText={postText}
                     generatedUrl={generatedUrl}
                   />
+                  </div>
                 </div>
               )}
             </section>
@@ -3157,6 +3240,56 @@ function AITemplateWizard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─────────────── Frame size pill ───────────────
+   Four-position segmented control used in two places: the result
+   frame header and inside the platform-preview body. The labels
+   stay short (S/M/L/XL) so the pill fits beside other controls
+   even on narrow toolbars. */
+function FrameSizePill({
+  value,
+  onChange,
+  className,
+}: {
+  value: "sm" | "md" | "lg" | "xl";
+  onChange: (v: "sm" | "md" | "lg" | "xl") => void;
+  className?: string;
+}) {
+  const opts: Array<{ key: "sm" | "md" | "lg" | "xl"; label: string; hint: string }> = [
+    { key: "sm", label: "S",  hint: "صغير"   },
+    { key: "md", label: "M",  hint: "متوسّط" },
+    { key: "lg", label: "L",  hint: "كبير"   },
+    { key: "xl", label: "XL", hint: "موسّع"  },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="حجم العرض"
+      className={`inline-flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg p-0.5 ${className ?? ""}`}
+    >
+      {opts.map((o) => {
+        const active = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.key)}
+            title={o.hint}
+            className={`min-w-[28px] px-2 py-1 rounded-md text-[10px] font-black transition-all ${
+              active
+                ? "bg-white text-black"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
