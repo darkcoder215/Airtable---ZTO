@@ -864,7 +864,8 @@ button.zto-card:hover {
   text-transform: uppercase;
   border-radius: 2px;
 }
-[data-theme="signal"] .zto-btn-gold:hover:not, [data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
+[data-theme="signal"] .zto-btn-gold:hover:not(:disabled),
+[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
   background: var(--signal-bright);
   border-color: var(--signal-bright);
   box-shadow: 0 0 0 3px var(--signal-glow);
