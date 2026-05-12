@@ -49,6 +49,7 @@ import {
   ArrowDown,
 } from "lucide-react";
 import Link from "next/link";
+import PageGuide from "@/components/PageGuide";
 
 /* ────────── Types ────────── */
 
@@ -1158,6 +1159,52 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-0 max-w-full">
+      {/* Welcome guide — tailored copy for content_writer accounts so
+          they understand the per-table allowlist and where to find the
+          writing utilities. Defaults to open on their first visit. */}
+      {user?.role === "content_writer" && (
+        <div className="mb-4">
+          <PageGuide
+            pageName="مساحة العمل"
+            accent="purple"
+            defaultOpen
+            storageKey="dashboard-writer"
+            intro={
+              <>
+                مرحباً بك في مساحة عملك. هنا تجد فقط الجداول التي خصّصها لك المدير من قاعدة بيانات Airtable —
+                أيّ جدول لا تراه هنا هو خارج صلاحيتك. كل ما تكتبه أو تعدّله يُحفظ مباشرةً في Airtable ويظهر لباقي الفريق فوراً.
+              </>
+            }
+            tips={[
+              {
+                title: "تنقّل بين الجداول",
+                body: <>تبويبات أعلى الجدول تعرض كل الجداول المُتاحة لك. اضغط أيّ تبويب لفتح سجلاته.</>,
+              },
+              {
+                title: "افتح أيّ سجلّ بالتفصيل",
+                body: <>اضغط أيقونة العين بجانب أيّ سجل لعرض كل الحقول وتحريرها بسهولة، أو استخدم زرّ التحرير المباشر داخل الخلية.</>,
+              },
+              {
+                title: "أدوات الكتابة جاهزة",
+                body: <>من القائمة الجانبية اختر <span className="text-amber-300 font-bold">«وكلاء الكتابة»</span> لاستخدام مساعدي الذكاء الاصطناعي، و<span className="text-amber-300 font-bold">«مولّد الصور»</span> لتوليد صور مرافقة للمقالات.</>,
+              },
+              {
+                title: "تابع مهامك من «المهام»",
+                body: <>أيّ مهمّة يكلّفك بها المدير تظهر في تبويب <span className="text-amber-300 font-bold">«المهام»</span> مع جرس إشعار أعلى الصفحة. عدّل الحالة هناك حتى نعرف أين وصلت.</>,
+              },
+              {
+                title: "البحث والفلترة",
+                body: <>استخدم خانة البحث أعلى الجدول لإيجاد سجل بسرعة، وفلتر العمود لاستهداف حقول معيّنة.</>,
+              },
+              {
+                title: "لا تقلق من الحذف",
+                body: <>صلاحيتك تشمل التحرير والإضافة فقط. الحذف محجوب لحمايتك من الأخطاء — لو احتجت حذف سجل، تواصل مع المدير.</>,
+              },
+            ]}
+          />
+        </div>
+      )}
+
       {/* ── Header ── */}
       {selectedBase && (
         <div className="flex items-center gap-3 mb-1">
