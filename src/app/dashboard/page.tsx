@@ -976,7 +976,8 @@ export default function DashboardPage() {
 
   const renderFieldValue = (
     value: unknown,
-    field: Field
+    field: Field,
+    opts?: { full?: boolean }
   ): React.ReactNode => {
     if (value === null || value === undefined || value === "") {
       return <span className="text-neutral-600">—</span>;
@@ -1083,6 +1084,15 @@ export default function DashboardPage() {
     }
 
     const strVal = String(value);
+    // Expanded-card path (opts.full): hand the full string to the
+    // ExpandableText component which auto-collapses very long values
+    // behind a «اقرأ المزيد» button while staying selectable. Grid view
+    // (default) preserves the legacy 80-char preview with a title
+    // tooltip — the grid cell layer handles its own clamp so the
+    // string returned here doesn't fight CSS.
+    if (opts?.full) {
+      return <ExpandableText text={strVal} />;
+    }
     if (strVal.length > 80) {
       return (
         <span title={strVal} className="text-neutral-200">
@@ -2732,7 +2742,7 @@ export default function DashboardPage() {
                             {field.name}
                           </dt>
                           <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
-                            {renderFieldValue(v, field)}
+                            {renderFieldValue(v, field, { full: true })}
                           </dd>
                         </div>
                       );
@@ -2977,6 +2987,39 @@ export default function DashboardPage() {
    underneath let the admin flip between every image attached to
    the record. Self-contained — needs no parent state.
 */
+/* ─────────────── ExpandableText ───────────────
+   Renders a string fully in the expanded record card. Strings up to
+   ~600 chars display as-is so the reader doesn't need a click; longer
+   ones collapse behind a clamp + "اقرأ المزيد" button so the card
+   doesn't grow into a wall of text. Text stays selectable in both
+   states — copying a paragraph still works. */
+const EXPANDABLE_THRESHOLD = 600;
+function ExpandableText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const isLong = text.length > EXPANDABLE_THRESHOLD;
+  if (!isLong) {
+    return <span className="text-neutral-200 whitespace-pre-wrap">{text}</span>;
+  }
+  return (
+    <div className="space-y-1.5">
+      <div
+        className={`text-neutral-200 whitespace-pre-wrap ${
+          open ? "" : "max-h-[8.4em] overflow-hidden relative"
+        }`}
+      >
+        {open ? text : text.slice(0, EXPANDABLE_THRESHOLD).trimEnd() + "…"}
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[0.65rem] font-bold text-amber-300 hover:text-amber-200 transition-colors"
+      >
+        {open ? "طيّ" : `اقرأ المزيد · ${text.length.toLocaleString("ar")} حرف`}
+      </button>
+    </div>
+  );
+}
+
 function DrawerImageGallery({
   images,
 }: {

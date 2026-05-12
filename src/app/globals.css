@@ -119,6 +119,24 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
 
 .zto-select-wrap { position: relative; }
 .zto-select-wrap select { padding-left: 36px; appearance: none; cursor: pointer; }
+
+/* Native <option> elements don't inherit the parent <select>'s color/bg
+   reliably across browsers (especially Chromium on Linux/macOS, where
+   options keep the system white background). Without this rule the
+   editorial-dark dropdown opens to invisible white-on-white items. */
+.zto-input option,
+.zto-select-wrap select option,
+select option {
+  background-color: var(--surface-card);
+  color: var(--text-strong);
+}
+.zto-input optgroup,
+.zto-select-wrap select optgroup,
+select optgroup {
+  background-color: var(--surface-elevated);
+  color: var(--text-base);
+  font-weight: 700;
+}
 .zto-select-wrap::after {
   content: ""; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   width: 0; height: 0;
