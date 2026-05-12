@@ -47,6 +47,9 @@ export interface SafeUser {
   // Airtable table IDs the user is allowed to see. NULL = no
   // restriction (the role tier already grants full access).
   allowedTableIds: string[] | null;
+  // True when the Tasks tab + bell are visible for this user. Default
+  // true for content_writer; admin can flip per user from access-control.
+  tasksEnabled: boolean;
 }
 
 const SCRYPT_N = 16384; // 2^14 — ~50ms on a typical Vercel serverless cold start
@@ -184,6 +187,7 @@ function mapUser(r: AppUserRow): SafeUser {
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
     allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
+    tasksEnabled: r.tasks_enabled === true || (r.tasks_enabled == null && r.role === "content_writer"),
   };
 }
 

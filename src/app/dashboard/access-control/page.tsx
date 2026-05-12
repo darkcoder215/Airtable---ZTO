@@ -42,6 +42,8 @@ interface AppUser {
   // Per-user Airtable table allowlist — only meaningful when role
   // is content_writer. NULL = inherit-from-role (full access).
   allowedTableIds: string[] | null;
+  // True when the Tasks tab + bell are visible for this user.
+  tasksEnabled: boolean;
 }
 
 const ROLE_META: Record<Role, { label: string; description: string; color: string; bg: string; icon: typeof Shield }> = {
@@ -97,6 +99,8 @@ interface FormState {
   // List of Airtable table IDs the user is allowed to see.
   // Only meaningful when role === "content_writer".
   allowedTableIds: string[];
+  // Enables the Tasks tab + the topbar bell.
+  tasksEnabled: boolean;
 }
 
 const blankForm = (): FormState => ({
@@ -107,6 +111,7 @@ const blankForm = (): FormState => ({
   password: "",
   isActive: true,
   allowedTableIds: [],
+  tasksEnabled: false,
 });
 
 function formatDate(s: string | null): string {
@@ -170,6 +175,7 @@ export default function AccessControlPage() {
       password: "",
       isActive: u.isActive,
       allowedTableIds: Array.isArray(u.allowedTableIds) ? u.allowedTableIds : [],
+      tasksEnabled: u.tasksEnabled === true,
     });
     setError(null);
     setShowForm(true);
@@ -203,6 +209,7 @@ export default function AccessControlPage() {
       } else if (form.id) {
         payload.allowedTableIds = null;
       }
+      payload.tasksEnabled = form.tasksEnabled;
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -601,24 +608,51 @@ export default function AccessControlPage() {
                 />
               )}
 
-              <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-white">حالة الحساب</p>
-                  <p className="text-[0.65rem] text-neutral-500">
-                    {form.isActive ? "المستخدم يستطيع تسجيل الدخول الآن" : "تسجيل الدخول معطّل لهذا المستخدم"}
-                  </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">حالة الحساب</p>
+                    <p className="text-[0.65rem] text-neutral-500 truncate">
+                      {form.isActive ? "المستخدم يستطيع تسجيل الدخول الآن" : "تسجيل الدخول معطّل لهذا المستخدم"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
+                    className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
+                      form.isActive
+                        ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+                        : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                    }`}
+                  >
+                    {form.isActive ? "مفعّل" : "معطّل"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                  className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors ${
-                    form.isActive
-                      ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
-                      : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
-                  }`}
-                >
-                  {form.isActive ? "مفعّل" : "معطّل"}
-                </button>
+
+                {/* Tasks tab toggle — defaults to true for content_writer
+                    when creating, but the admin can flip it for any role.
+                    Surfaces the bell + the /dashboard/tasks page. */}
+                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">تبويب «المهام»</p>
+                    <p className="text-[0.65rem] text-neutral-500 truncate">
+                      {form.tasksEnabled
+                        ? "يرى تبويب المهام + جرس الإشعارات"
+                        : "تبويب المهام مخفي لهذا الحساب"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, tasksEnabled: !p.tasksEnabled }))}
+                    className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
+                      form.tasksEnabled
+                        ? "border-amber-400/40 text-amber-300 bg-amber-400/10"
+                        : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                    }`}
+                  >
+                    {form.tasksEnabled ? "ظاهر" : "مخفي"}
+                  </button>
+                </div>
               </div>
 
               {error && (

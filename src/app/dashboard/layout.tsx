@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss, Building2, BarChart3, Wand2, Users, ChevronsRight, ChevronsLeft, PenTool } from "lucide-react";
+import { Database, Shield, Bot, ScrollText, LogOut, Menu, X, Loader2, User, Rss, Building2, BarChart3, Wand2, Users, ChevronsRight, ChevronsLeft, PenTool, Bell, ListChecks } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { TaskBell } from "@/components/TaskBell";
 
 type NavRole = "admin" | "editor" | "content_writer" | "viewer";
 
@@ -17,6 +18,9 @@ interface NavItem {
   // content_writer is intentionally locked down — see the explicit
   // allowlist below.
   roles?: NavRole[];
+  // When true, the entry is gated by the per-user `tasksEnabled` flag
+  // in addition to the role check. Admins always pass this gate.
+  requireTasksEnabled?: boolean;
 }
 
 // The full nav list. The render path below filters by role:
@@ -31,6 +35,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard/analytics",        label: "التحليلات",           icon: BarChart3 },
   { href: "/dashboard/access-control",   label: "الصلاحيات",           icon: Shield,      roles: ["admin"] },
   { href: "/dashboard/views",            label: "لوحات الفريق",        icon: Users },
+  { href: "/dashboard/tasks",            label: "المهام",              icon: ListChecks,  roles: ["admin", "editor", "content_writer", "viewer"], requireTasksEnabled: true },
   { href: "/dashboard/agents",           label: "وكلاء الكتابة",       icon: Bot,         roles: ["admin", "editor", "content_writer"] },
   { href: "/dashboard/image-generator",  label: "مولّد الصور",         icon: Wand2,       roles: ["admin", "editor", "content_writer"] },
   { href: "/dashboard/logs",             label: "السجلات",             icon: ScrollText,  roles: ["admin"] },
@@ -88,7 +93,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // back to /dashboard without flashing the page they shouldn't see.
   useEffect(() => {
     if (!user || user.role !== "content_writer") return;
-    const allowed = NAV.filter((n) => n.roles?.includes("content_writer")).map((n) => n.href);
+    const allowed = NAV
+      .filter((n) => n.roles?.includes("content_writer"))
+      .filter((n) => !n.requireTasksEnabled || user.tasksEnabled === true)
+      .map((n) => n.href);
     const ok = allowed.some((href) => pathname === href || pathname.startsWith(`${href}/`));
     if (!ok && pathname !== "/dashboard") {
       window.location.href = "/dashboard";
@@ -105,8 +113,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const role = (user.role as NavRole) ?? "viewer";
   const navItems = NAV.filter((n) => {
-    if (!n.roles) return role !== "content_writer";
-    return n.roles.includes(role);
+    if (n.roles && !n.roles.includes(role)) return false;
+    if (!n.roles && role === "content_writer") return false;
+    // Per-user gate: Tasks tab only renders when the admin enabled it
+    // (admins always see it so they can manage assignments).
+    if (n.requireTasksEnabled && role !== "admin" && user.tasksEnabled !== true) {
+      return false;
+    }
+    return true;
   });
   const roleName = ROLE_LABEL[role] ?? role;
   const RoleIcon = ROLE_ICON[role] ?? User;
@@ -200,6 +214,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {collapsed ? <ChevronsLeft className="w-4 h-4" /> : <ChevronsRight className="w-4 h-4" />}
           </button>
           <div className="flex-1" />
+          <TaskBell enabled={role === "admin" || user.tasksEnabled === true} />
           <ThemeToggle />
           <span className="zto-badge zto-badge-gold">{roleName}</span>
           <span className="text-[13px] text-neutral-400 font-bold hidden sm:inline">{user.name}</span>

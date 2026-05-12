@@ -169,6 +169,7 @@ export type Database = {
           last_login_at: string | null
           created_by: string | null
           allowed_table_ids: string[] | null
+          tasks_enabled: boolean
         }
         Insert: {
           id?: string
@@ -183,6 +184,7 @@ export type Database = {
           last_login_at?: string | null
           created_by?: string | null
           allowed_table_ids?: string[] | null
+          tasks_enabled?: boolean
         }
         Update: {
           id?: string
@@ -197,6 +199,55 @@ export type Database = {
           last_login_at?: string | null
           created_by?: string | null
           allowed_table_ids?: string[] | null
+          tasks_enabled?: boolean
+        }
+        Relationships: []
+      }
+      app_tasks: {
+        Row: {
+          id: string
+          assigned_to: string
+          assigned_by: string | null
+          title: string
+          description: string | null
+          status: "pending" | "in_progress" | "done" | "cancelled"
+          priority: "low" | "normal" | "high" | "urgent"
+          due_at: string | null
+          read_at: string | null
+          completed_at: string | null
+          meta: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          assigned_to: string
+          assigned_by?: string | null
+          title: string
+          description?: string | null
+          status?: "pending" | "in_progress" | "done" | "cancelled"
+          priority?: "low" | "normal" | "high" | "urgent"
+          due_at?: string | null
+          read_at?: string | null
+          completed_at?: string | null
+          meta?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          assigned_to?: string
+          assigned_by?: string | null
+          title?: string
+          description?: string | null
+          status?: "pending" | "in_progress" | "done" | "cancelled"
+          priority?: "low" | "normal" | "high" | "urgent"
+          due_at?: string | null
+          read_at?: string | null
+          completed_at?: string | null
+          meta?: Json
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }

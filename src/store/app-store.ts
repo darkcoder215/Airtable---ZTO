@@ -10,6 +10,9 @@ interface UserInfo {
   // Airtable table IDs the user is allowed to see. NULL = no
   // restriction (admin/editor/viewer roles already grant full access).
   allowedTableIds?: string[] | null;
+  // True when the Tasks tab + bell are visible for this user. Default
+  // true for content_writer; admin can flip per user from access-control.
+  tasksEnabled?: boolean;
 }
 
 interface Toast {

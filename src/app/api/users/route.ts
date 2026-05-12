@@ -37,6 +37,8 @@ interface SafePublicUser {
   // Per-user Airtable table allowlist (content_writer only). null
   // means "no restriction"; an array (even empty) means restricted.
   allowedTableIds: string[] | null;
+  // True when the Tasks tab + bell are visible for this user.
+  tasksEnabled: boolean;
 }
 type Row = Database["public"]["Tables"]["app_users"]["Row"];
 function map(r: Row): SafePublicUser {
@@ -51,6 +53,7 @@ function map(r: Row): SafePublicUser {
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
     allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
+    tasksEnabled: r.tasks_enabled === true,
   };
 }
 
@@ -165,6 +168,12 @@ export async function POST(request: NextRequest) {
         // we explicitly null it so a stale value can't leak through.
         const allowed_table_ids =
           role === "content_writer" ? readAllowedTableIds(body.allowedTableIds) ?? [] : null;
+        // Tasks tab — defaults to true for content_writer, false otherwise.
+        // The admin can override either way at create time.
+        const tasks_enabled =
+          typeof body.tasksEnabled === "boolean"
+            ? body.tasksEnabled
+            : role === "content_writer";
         const { data, error } = await sb
           .from("app_users")
           .insert({
@@ -176,6 +185,7 @@ export async function POST(request: NextRequest) {
             password_hash,
             created_by: me.id,
             allowed_table_ids,
+            tasks_enabled,
           })
           .select()
           .single();
@@ -244,6 +254,12 @@ export async function POST(request: NextRequest) {
         }
         if (nextRole && nextRole !== "content_writer" && body.allowedTableIds === undefined) {
           patch.allowed_table_ids = null;
+        }
+        if (body.tasksEnabled !== undefined) {
+          if (typeof body.tasksEnabled !== "boolean") {
+            return NextResponse.json({ error: "tasksEnabled يجب أن يكون boolean" }, { status: 400 });
+          }
+          patch.tasks_enabled = body.tasksEnabled;
         }
         const { data, error } = await sb
           .from("app_users")
