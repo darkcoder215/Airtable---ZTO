@@ -51,7 +51,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("editorial-dark");
   const [mounted, setMounted] = useState(false);
 
   // Hydrate the saved preference once on mount; the SSR placeholder below
@@ -91,7 +91,7 @@ export function ThemeToggle() {
         aria-label="تبديل السمة"
       >
         <span className="px-2 py-1.5 rounded-md bg-[var(--c-brand)] text-[var(--c-txt)]">
-          <Moon className="w-4 h-4" />
+          <BookOpen className="w-4 h-4" />
         </span>
       </div>
     );

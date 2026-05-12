@@ -1820,3 +1820,280 @@ html[data-embed="1"] body {
 [data-theme="editorial-dark"] .bg-amber-400\/15 { background-color: var(--c-gold-bg) !important; }
 [data-theme="editorial-dark"] .border-amber-400\/30,
 [data-theme="editorial-dark"] .border-amber-400\/40 { border-color: rgba(0, 193, 122, 0.30) !important; }
+
+/* ============================================================
+   EDITORIAL theme — readability + light-mode rescue layer
+   Most components were written assuming the dark ZTO palette,
+   so dark-only utility classes (text-white, text-neutral-200,
+   bg-[#0a0a0a]…) render invisible under editorial-light. This
+   block performs the inversion. It also boosts base size +
+   weight + line-height across both editorial variants and
+   shrinks the dashboard padding so the canvas feels roomier.
+   ============================================================ */
+
+/* ── Roomier canvas + denser chrome so the workspace doesn't
+      feel cramped after the editorial typography landed. */
+[data-theme="editorial-dark"] [data-zto-chrome="main"],
+[data-theme="editorial-light"] [data-zto-chrome="main"] {
+  padding: 1rem 1.25rem !important;
+}
+[data-theme="editorial-dark"] [data-zto-chrome="sidebar"],
+[data-theme="editorial-light"] [data-zto-chrome="sidebar"] {
+  width: 220px !important;
+}
+[data-theme="editorial-dark"] [data-zto-chrome="header"],
+[data-theme="editorial-light"] [data-zto-chrome="header"] {
+  height: 52px !important;
+  padding-inline: 1rem !important;
+}
+
+/* ── Bigger, calmer base type. Editorial gets a small bump in
+      size + line-height so body copy is comfortable to read
+      for long stretches. Weight nudges up to 500 (medium) so
+      thin glyphs don't look anemic on dark surfaces. */
+[data-theme="editorial-dark"] body,
+[data-theme="editorial-light"] body {
+  font-size: 16px;
+  line-height: 1.65;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+[data-theme="editorial-dark"] .text-xs,
+[data-theme="editorial-light"] .text-xs        { font-size: 0.82rem !important; line-height: 1.55 !important; }
+[data-theme="editorial-dark"] .text-sm,
+[data-theme="editorial-light"] .text-sm        { font-size: 0.95rem !important; line-height: 1.6 !important; }
+[data-theme="editorial-dark"] .text-base,
+[data-theme="editorial-light"] .text-base      { font-size: 1.05rem !important; line-height: 1.65 !important; }
+[data-theme="editorial-dark"] .text-\[13px\],
+[data-theme="editorial-light"] .text-\[13px\]  { font-size: 14.5px !important; line-height: 1.55 !important; }
+[data-theme="editorial-dark"] .text-\[0\.7rem\],
+[data-theme="editorial-light"] .text-\[0\.7rem\]   { font-size: 0.82rem !important; }
+[data-theme="editorial-dark"] .text-\[0\.65rem\],
+[data-theme="editorial-light"] .text-\[0\.65rem\]  { font-size: 0.78rem !important; }
+[data-theme="editorial-dark"] .text-\[0\.6rem\],
+[data-theme="editorial-light"] .text-\[0\.6rem\]   { font-size: 0.72rem !important; }
+[data-theme="editorial-dark"] .text-\[0\.55rem\],
+[data-theme="editorial-light"] .text-\[0\.55rem\]  { font-size: 0.68rem !important; }
+
+/* Lift "muted" weights so labels don't disappear. */
+[data-theme="editorial-dark"] .font-bold,
+[data-theme="editorial-light"] .font-bold    { font-weight: 700 !important; }
+[data-theme="editorial-dark"] .font-black,
+[data-theme="editorial-light"] .font-black   { font-weight: 800 !important; }
+[data-theme="editorial-dark"] .font-semibold,
+[data-theme="editorial-light"] .font-semibold { font-weight: 600 !important; }
+
+/* ── Subtle reading wash. Card body paragraphs and form labels
+      sit on a barely-perceptible cream/ink wash so the eye
+      finds the text without strain. Keep the wash inset so it
+      reads as type emphasis, not a separate block. */
+[data-theme="editorial-dark"] .zto-card p:not([class*="text-"]),
+[data-theme="editorial-light"] .zto-card p:not([class*="text-"]) {
+  /* leave bare-p untouched; the per-class rules below own
+     the actual recoloring */
+}
+
+/* ============================================================
+   LIGHT MODE INVERSION
+   These overrides flip dark-only Tailwind utility classes so
+   components built assuming a black canvas remain readable
+   under editorial-light.
+   ============================================================ */
+
+/* — Pure-white and near-white text → ink base — */
+[data-theme="editorial-light"] .text-white,
+[data-theme="editorial-light"] .text-neutral-50,
+[data-theme="editorial-light"] .text-neutral-100,
+[data-theme="editorial-light"] .text-neutral-200,
+[data-theme="editorial-light"] .text-zinc-100,
+[data-theme="editorial-light"] .text-zinc-200,
+[data-theme="editorial-light"] .text-gray-100,
+[data-theme="editorial-light"] .text-gray-200 {
+  color: var(--text-strong) !important;
+}
+[data-theme="editorial-light"] .text-neutral-300,
+[data-theme="editorial-light"] .text-zinc-300,
+[data-theme="editorial-light"] .text-gray-300 {
+  color: var(--text-base) !important;
+}
+[data-theme="editorial-light"] .text-neutral-400,
+[data-theme="editorial-light"] .text-zinc-400,
+[data-theme="editorial-light"] .text-gray-400 {
+  color: var(--text-dim) !important;
+}
+[data-theme="editorial-light"] .text-neutral-500,
+[data-theme="editorial-light"] .text-zinc-500,
+[data-theme="editorial-light"] .text-gray-500 {
+  color: #5C6075 !important;
+}
+[data-theme="editorial-light"] .text-neutral-600,
+[data-theme="editorial-light"] .text-neutral-700,
+[data-theme="editorial-light"] .text-zinc-600,
+[data-theme="editorial-light"] .text-zinc-700 {
+  color: var(--text-faint) !important;
+}
+
+/* — Black / near-black surface utilities → editorial surfaces — */
+[data-theme="editorial-light"] .bg-black,
+[data-theme="editorial-light"] .bg-\[#000\],
+[data-theme="editorial-light"] .bg-\[#000000\] {
+  background-color: var(--surface-card) !important;
+}
+[data-theme="editorial-light"] .bg-\[#0a0a0a\],
+[data-theme="editorial-light"] .bg-\[#0a0a0a\]\/95,
+[data-theme="editorial-light"] .bg-\[#0d0d0d\],
+[data-theme="editorial-light"] .bg-\[#111\],
+[data-theme="editorial-light"] .bg-\[#111111\],
+[data-theme="editorial-light"] .bg-\[#141414\],
+[data-theme="editorial-light"] .bg-\[#151515\],
+[data-theme="editorial-light"] .bg-\[#161616\],
+[data-theme="editorial-light"] .bg-\[#1a1a1a\],
+[data-theme="editorial-light"] .bg-\[#1a1a1d\] {
+  background-color: var(--surface-card) !important;
+}
+[data-theme="editorial-light"] .bg-\[#232323\],
+[data-theme="editorial-light"] .bg-\[#2a2a2a\],
+[data-theme="editorial-light"] .bg-\[#2e2e2e\] {
+  background-color: var(--surface-elevated) !important;
+}
+[data-theme="editorial-light"] .bg-neutral-800,
+[data-theme="editorial-light"] .bg-neutral-900,
+[data-theme="editorial-light"] .bg-zinc-800,
+[data-theme="editorial-light"] .bg-zinc-900 {
+  background-color: var(--surface-elevated) !important;
+}
+[data-theme="editorial-light"] .bg-neutral-800\/30,
+[data-theme="editorial-light"] .bg-neutral-800\/40 {
+  background-color: rgba(17, 20, 33, 0.05) !important;
+}
+
+/* — Dark borders → editorial borders — */
+[data-theme="editorial-light"] .border-neutral-700,
+[data-theme="editorial-light"] .border-neutral-800,
+[data-theme="editorial-light"] .border-neutral-900,
+[data-theme="editorial-light"] .border-zinc-700,
+[data-theme="editorial-light"] .border-zinc-800 {
+  border-color: var(--border-strong) !important;
+}
+
+/* Header backdrop tint already covered above; nail down the
+   bg/95 variants used by sticky modal headers. */
+[data-theme="editorial-light"] .bg-\[#0a0a0a\]\/95 {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+}
+
+/* ── Subtle highlight wash for "lifted" text in cards under
+      both editorial themes. A 2-3px inline padded background on
+      strong copy gives the eye a soft anchor without becoming a
+      button. Applied to common emphasis nodes in cards. */
+[data-theme="editorial-dark"] .zto-card .text-base,
+[data-theme="editorial-light"] .zto-card .text-base,
+[data-theme="editorial-dark"] .zto-card .text-sm.font-bold,
+[data-theme="editorial-light"] .zto-card .text-sm.font-bold {
+  /* tighter tracking for serif text at body size */
+  letter-spacing: -0.005em;
+}
+
+/* ── Brighter outlines + a quiet wash on inputs under both
+      editorial themes so form fields read distinctly from the
+      surrounding card surface. */
+[data-theme="editorial-dark"] .zto-input,
+[data-theme="editorial-dark"] .zto-select,
+[data-theme="editorial-dark"] .zto-input[readonly],
+[data-theme="editorial-dark"] textarea.zto-input {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-strong) !important;
+}
+[data-theme="editorial-light"] .zto-input,
+[data-theme="editorial-light"] .zto-select,
+[data-theme="editorial-light"] textarea.zto-input {
+  background: #FFFFFF !important;
+  border-color: rgba(17, 20, 33, 0.18) !important;
+  color: var(--text-strong) !important;
+}
+[data-theme="editorial-dark"] .zto-input:focus,
+[data-theme="editorial-light"] .zto-input:focus,
+[data-theme="editorial-dark"] .zto-select:focus,
+[data-theme="editorial-light"] .zto-select:focus {
+  border-color: var(--ed-green) !important;
+  box-shadow: 0 0 0 3px rgba(0, 193, 122, 0.18) !important;
+  outline: none !important;
+}
+
+/* ── Card surface in editorial-light: pure white on a cream
+      page background gives the cleanest "paper on table" feel.
+      Inputs sit on white inside the card, so we need to
+      darken the empty-record placeholders for readability. */
+[data-theme="editorial-light"] .zto-card {
+  background: var(--surface-card) !important;
+  border: 1px solid var(--border-soft) !important;
+}
+
+/* ── Editorial-light: code/mono spans visible — — */
+[data-theme="editorial-light"] code,
+[data-theme="editorial-light"] .font-mono {
+  color: var(--text-dim) !important;
+  background: rgba(17, 20, 33, 0.04);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* ── Pill/badge readability: bg-*/10 wash classes get bumped
+      to /14 wash under editorial-light for visible contrast. */
+[data-theme="editorial-light"] .bg-amber-400\/10,
+[data-theme="editorial-light"] .bg-amber-400\/15 { background-color: rgba(176, 122, 0, 0.14) !important; }
+[data-theme="editorial-light"] .bg-blue-400\/10,
+[data-theme="editorial-light"] .bg-blue-500\/10 { background-color: rgba(0, 114, 249, 0.10) !important; }
+[data-theme="editorial-light"] .bg-emerald-500\/10,
+[data-theme="editorial-light"] .bg-green-500\/10 { background-color: rgba(0, 156, 98, 0.12) !important; }
+[data-theme="editorial-light"] .bg-red-500\/10,
+[data-theme="editorial-light"] .bg-red-500\/5 { background-color: rgba(199, 56, 36, 0.10) !important; }
+[data-theme="editorial-light"] .bg-purple-400\/10,
+[data-theme="editorial-light"] .bg-purple-500\/10 { background-color: rgba(130, 0, 58, 0.10) !important; }
+
+/* ── Page guide accent stays warm on light. */
+[data-theme="editorial-light"] .border-amber-400\/30,
+[data-theme="editorial-light"] .border-amber-400\/40,
+[data-theme="editorial-light"] .border-amber-500\/30,
+[data-theme="editorial-light"] .border-amber-500\/40 {
+  border-color: rgba(0, 156, 98, 0.30) !important;
+}
+
+/* ── Sidebar nav items on editorial-light need darker hover
+      since their default uses opacity-on-white. */
+[data-theme="editorial-light"] .zto-nav-item {
+  color: var(--text-dim) !important;
+}
+[data-theme="editorial-light"] .zto-nav-item:hover {
+  background: rgba(17, 20, 33, 0.06) !important;
+  color: var(--text-strong) !important;
+}
+[data-theme="editorial-light"] .zto-nav-active {
+  background: rgba(0, 156, 98, 0.12) !important;
+  color: var(--c-gold) !important;
+  font-weight: 700 !important;
+}
+
+/* ── User name + role chip in the sidebar bottom block. */
+[data-theme="editorial-light"] .bg-\[#232323\] {
+  background-color: var(--surface-elevated) !important;
+}
+
+/* ── Kanban / detail-card scrim — bright white scrim on light
+      doesn't focus the eye; deepen to the surface-elevated tone
+      so the modal pops without going pitch-black. */
+[data-theme="editorial-light"] .bg-black\/50,
+[data-theme="editorial-light"] .bg-black\/70,
+[data-theme="editorial-light"] .bg-black\/80 {
+  background-color: rgba(17, 20, 33, 0.55) !important;
+}
+
+/* ── Force focus rings to the brand green on both editorial
+      variants so keyboard navigation is obvious. */
+[data-theme="editorial-dark"] :focus-visible,
+[data-theme="editorial-light"] :focus-visible {
+  outline: 2px solid var(--ed-green);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

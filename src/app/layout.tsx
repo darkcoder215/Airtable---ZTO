@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ar" dir="rtl" data-theme="dark" suppressHydrationWarning>
+    <html lang="ar" dir="rtl" data-theme="editorial-dark" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -55,12 +55,18 @@ export default function RootLayout({
           type="font/otf"
           crossOrigin="anonymous"
         />
+        {/* Preload one editorial weight per family so the new default
+            (editorial-dark) doesn't flash a Georgia fallback while the
+            .otf files stream in. */}
+        <link rel="preload" href="/fonts/EditorialSerif-Bold.otf"   as="font" type="font/otf" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/EditorialText-Regular.otf" as="font" type="font/otf" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/EditorialSans-Medium.otf"  as="font" type="font/otf" crossOrigin="anonymous" />
         {/* Bootstrap the saved theme synchronously to avoid a flash on
-            first paint. We allow all four valid theme keys; anything else
-            falls back to the dark default. */}
+            first paint. New default is editorial-dark; the script
+            accepts every valid theme key. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('zto-theme');if(t==='light'||t==='dark'||t==='signal'||t==='signal-light'){document.documentElement.setAttribute('data-theme',t);}}catch(_){}})();`,
+            __html: `(function(){try{var v=['dark','light','signal','signal-light','editorial-dark','editorial-light'];var t=localStorage.getItem('zto-theme');if(t&&v.indexOf(t)!==-1){document.documentElement.setAttribute('data-theme',t);}}catch(_){}})();`,
           }}
         />
       </head>
