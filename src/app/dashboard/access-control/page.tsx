@@ -23,6 +23,9 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
+  Info,
+  ListChecks,
+  Sparkles,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import PageGuide from "@/components/PageGuide";
@@ -504,75 +507,128 @@ export default function AccessControlPage() {
               </button>
             </div>
             <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="zto-label">الاسم الكامل *</label>
-                  <input
-                    type="text"
-                    className="zto-input"
-                    value={form.name}
-                    onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="مثال: أحمد المحرّر"
-                  />
-                </div>
-                <div>
-                  <label className="zto-label">اسم المستخدم *</label>
-                  <input
-                    type="text"
-                    className="zto-input font-mono text-xs"
-                    value={form.username}
-                    onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-                    placeholder="ahmed.editor"
-                    dir="ltr"
-                  />
-                  <p className="text-[0.6rem] text-neutral-500 mt-1">حروف لاتينية، أرقام، نقطة، شرطة (3-64 حرف)</p>
+              {/* Intro banner — what this dialog actually does. Shown
+                  on create + edit so admins always have the context. */}
+              <div className="bg-amber-400/5 border border-amber-400/30 rounded-lg p-3 flex items-start gap-2">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[0.7rem] text-neutral-300 leading-relaxed">
+                  {form.id ? (
+                    <>
+                      <span className="font-bold text-amber-300">تعديل مستخدم.</span>{" "}
+                      أيّ تغيير هنا يدخل حيّز التنفيذ فور الحفظ.
+                      اترك حقل كلمة المرور فارغاً للإبقاء على القديمة.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-bold text-amber-300">إنشاء مستخدم جديد.</span>{" "}
+                      اضبط الحقول بالترتيب: <span className="text-neutral-200 font-bold">الهوية</span> ←
+                      <span className="text-neutral-200 font-bold"> كلمة المرور</span> ←
+                      <span className="text-neutral-200 font-bold"> الدور</span> ←
+                      <span className="text-neutral-200 font-bold"> الجداول المسموحة</span> (لكاتب المحتوى فقط) ←
+                      <span className="text-neutral-200 font-bold"> المهام</span>.
+                      جميع الحقول المُعلَّمة بـ <span className="text-red-400 font-black">*</span> إلزامية.
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div>
-                <label className="zto-label">البريد الإلكتروني *</label>
-                <input
-                  type="email"
-                  className="zto-input"
-                  value={form.email}
-                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                  placeholder="ahmed@example.com"
-                  dir="ltr"
-                />
-              </div>
+              {/* Identity section */}
+              <section className="space-y-3">
+                <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                  ١. هوية المستخدم
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="zto-label">الاسم الكامل *</label>
+                    <input
+                      type="text"
+                      className="zto-input"
+                      value={form.name}
+                      onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="مثال: أحمد المحرّر"
+                    />
+                    <p className="text-[0.6rem] text-neutral-500 mt-1">
+                      الاسم الذي يظهر في أعلى الصفحة، في المهام، وفي السجلات.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="zto-label">اسم المستخدم *</label>
+                    <input
+                      type="text"
+                      className="zto-input font-mono text-xs"
+                      value={form.username}
+                      onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+                      placeholder="ahmed.editor"
+                      dir="ltr"
+                    />
+                    <p className="text-[0.6rem] text-neutral-500 mt-1">
+                      يُستخدم لتسجيل الدخول. حروف لاتينية، أرقام، نقطة، شرطة (٣ – ٦٤ حرف). غير قابل للتغيير لاحقاً.
+                    </p>
+                  </div>
+                </div>
 
-              <div>
-                <label className="zto-label flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5" />
-                  كلمة المرور {form.id ? "(اتركها فارغة للإبقاء على القديمة)" : "*"}
-                </label>
-                <div className="relative">
+                <div>
+                  <label className="zto-label">البريد الإلكتروني *</label>
                   <input
-                    type={showPassword ? "text" : "password"}
+                    type="email"
                     className="zto-input"
-                    style={{ paddingInlineEnd: "2.5rem" }}
-                    value={form.password}
-                    onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                    placeholder={form.id ? "••••••••" : "8 حروف على الأقل"}
-                    autoComplete="new-password"
+                    value={form.email}
+                    onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                    placeholder="ahmed@example.com"
                     dir="ltr"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white"
-                    title={showPassword ? "إخفاء" : "إظهار"}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                  <p className="text-[0.6rem] text-neutral-500 mt-1">
+                    للأرشفة والتعريف فقط — حالياً لا تُرسَل إليه إشعارات تلقائية.
+                  </p>
                 </div>
-                <p className="text-[0.6rem] text-neutral-500 mt-1">
-                  تُحفظ مُجزّأة (scrypt) — لن تظهر مجدداً حتى للمدير.
+              </section>
+
+              {/* Password section */}
+              <section className="space-y-2">
+                <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                  ٢. كلمة المرور
+                </h4>
+                <div>
+                  <label className="zto-label flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    كلمة المرور {form.id ? "(اتركها فارغة للإبقاء على القديمة)" : "*"}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="zto-input"
+                      style={{ paddingInlineEnd: "2.5rem" }}
+                      value={form.password}
+                      onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                      placeholder={form.id ? "••••••••" : "8 حروف على الأقل"}
+                      autoComplete="new-password"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white"
+                      title={showPassword ? "إخفاء" : "إظهار"}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[0.6rem] text-neutral-500 mt-1 leading-relaxed">
+                    تُحفظ مُجزّأة بخوارزمية scrypt — <span className="text-neutral-300 font-bold">لن تستطيع رؤيتها مجدداً</span>،
+                    حتى أنت كمدير. انسخها واحفظها في مكان آمن قبل الإغلاق وأرسلها للمستخدم بقناة موثوقة.
+                    عند نسيانها، الحلّ الوحيد هو تعيين كلمة جديدة من هذه الصفحة.
+                  </p>
+                </div>
+              </section>
+
+              {/* Role section */}
+              <section className="space-y-2">
+                <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                  ٣. الدور
+                </h4>
+                <p className="text-[0.65rem] text-neutral-500">
+                  يحدّد الدور الأقسام التي يستطيع المستخدم رؤيتها. اختر بأقل صلاحية ممكنة لإنجاز عمله.
                 </p>
-              </div>
-
-              <div>
-                <label className="zto-label">الدور *</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {(Object.keys(ROLE_META) as Role[]).map((r) => {
                     const meta = ROLE_META[r];
@@ -599,61 +655,83 @@ export default function AccessControlPage() {
                     );
                   })}
                 </div>
-              </div>
+              </section>
 
               {form.role === "content_writer" && (
-                <AllowedTablesPicker
-                  selected={form.allowedTableIds}
-                  onChange={(next) => setForm((p) => ({ ...p, allowedTableIds: next }))}
-                />
+                <section className="space-y-2">
+                  <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                    ٤. الجداول المسموحة (لكاتب المحتوى)
+                  </h4>
+                  <p className="text-[0.65rem] text-neutral-500 leading-relaxed">
+                    اختر الجداول التي سيستطيع هذا المستخدم رؤيتها وتحريرها. أيّ جدول خارج القائمة محجوب تماماً —
+                    حتى لو حاول الوصول إليه بالرابط المباشر. اختيار صفر جداول يعني أنه لن يرى أيّ شيء بعد تسجيل الدخول.
+                  </p>
+                  <AllowedTablesPicker
+                    selected={form.allowedTableIds}
+                    onChange={(next) => setForm((p) => ({ ...p, allowedTableIds: next }))}
+                  />
+                </section>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">حالة الحساب</p>
-                    <p className="text-[0.65rem] text-neutral-500 truncate">
-                      {form.isActive ? "المستخدم يستطيع تسجيل الدخول الآن" : "تسجيل الدخول معطّل لهذا المستخدم"}
-                    </p>
+              {/* Toggles section */}
+              <section className="space-y-2">
+                <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                  {form.role === "content_writer" ? "٥" : "٤"}. الحساب والمهام
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-white">حالة الحساب</p>
+                      <p className="text-[0.65rem] text-neutral-500 leading-snug">
+                        {form.isActive
+                          ? "يستطيع تسجيل الدخول الآن. أوقفه مؤقتاً بدلاً من الحذف عند انتهاء عمله."
+                          : "تسجيل الدخول معطّل. البيانات والمهام محفوظة، يمكنك إعادة التفعيل لاحقاً."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
+                      className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
+                        form.isActive
+                          ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+                          : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                      }`}
+                    >
+                      {form.isActive ? "مفعّل" : "معطّل"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                    className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
-                      form.isActive
-                        ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
-                        : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
-                    }`}
-                  >
-                    {form.isActive ? "مفعّل" : "معطّل"}
-                  </button>
-                </div>
 
-                {/* Tasks tab toggle — defaults to true for content_writer
-                    when creating, but the admin can flip it for any role.
-                    Surfaces the bell + the /dashboard/tasks page. */}
-                <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">تبويب «المهام»</p>
-                    <p className="text-[0.65rem] text-neutral-500 truncate">
-                      {form.tasksEnabled
-                        ? "يرى تبويب المهام + جرس الإشعارات"
-                        : "تبويب المهام مخفي لهذا الحساب"}
-                    </p>
+                  {/* Tasks tab toggle — defaults to true for content_writer
+                      when creating, but the admin can flip it for any role.
+                      Surfaces the bell + the /dashboard/tasks page. */}
+                  <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-white">تبويب «المهام»</p>
+                      <p className="text-[0.65rem] text-neutral-500 leading-snug">
+                        {form.tasksEnabled
+                          ? "يظهر تبويب «المهام» + جرس الإشعارات. تستطيع تكليفه بمهام من تلك الصفحة."
+                          : "تبويب «المهام» مخفي. لن تستطيع تكليفه بمهام حتى تفعّله."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, tasksEnabled: !p.tasksEnabled }))}
+                      className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
+                        form.tasksEnabled
+                          ? "border-amber-400/40 text-amber-300 bg-amber-400/10"
+                          : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
+                      }`}
+                    >
+                      {form.tasksEnabled ? "ظاهر" : "مخفي"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm((p) => ({ ...p, tasksEnabled: !p.tasksEnabled }))}
-                    className={`text-[0.65rem] font-bold rounded-full px-3 py-1 border transition-colors shrink-0 ${
-                      form.tasksEnabled
-                        ? "border-amber-400/40 text-amber-300 bg-amber-400/10"
-                        : "border-neutral-700 text-neutral-500 bg-neutral-800/30"
-                    }`}
-                  >
-                    {form.tasksEnabled ? "ظاهر" : "مخفي"}
-                  </button>
                 </div>
-              </div>
+              </section>
+
+              {/* Live summary — what this user will actually be able to
+                  do once we hit save. Reads form state, so it updates
+                  as the admin tweaks role / tables / toggles. */}
+              <FormPreview form={form} />
 
               {error && (
                 <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
@@ -814,6 +892,83 @@ function AllowedTablesPicker({
       <p className="text-[0.6rem] text-neutral-500 mt-2 font-bold">
         {selected.length} جدول مختار من أصل {tables.length}
       </p>
+    </div>
+  );
+}
+
+/* ─────────────── FormPreview ───────────────
+   Live recap of what the new/edited user will be able to do, based on
+   the current form state. Helps the admin double-check the choices
+   before they hit save and accidentally over- or under-provision the
+   account.
+*/
+function FormPreview({ form }: { form: FormState }) {
+  const role = ROLE_META[form.role];
+  const allow: string[] = [];
+  const deny: string[] = [];
+
+  // Build the per-section list. Order matches the sidebar so it's
+  // easy to map "this card" → "the actual nav".
+  if (form.role === "admin") {
+    allow.push("جميع الأقسام والإعدادات والسجلات");
+  } else if (form.role === "editor") {
+    allow.push("قاعدة البيانات + المصادر + التحليلات + الوكلاء + مولّد الصور");
+    deny.push("إدارة المستخدمين + السجلات");
+  } else if (form.role === "content_writer") {
+    if (form.allowedTableIds.length === 0) {
+      deny.push("لا توجد جداول مخصّصة — لن يرى أيّ بيانات بعد تسجيل الدخول");
+    } else {
+      allow.push(`${form.allowedTableIds.length} جدول من Airtable (تحرير + قراءة، بدون حذف)`);
+    }
+    allow.push("مولّد الصور + وكلاء الكتابة");
+    deny.push("المصادر + التحليلات + لوحات الفريق + إدارة المستخدمين + السجلات");
+  } else {
+    allow.push("قراءة جميع الجداول + التحليلات");
+    deny.push("التعديل والحذف وإدارة المستخدمين");
+  }
+
+  if (form.tasksEnabled || form.role === "admin") {
+    allow.push("تبويب «المهام» + جرس الإشعارات");
+  } else {
+    deny.push("تبويب «المهام» (مخفي)");
+  }
+
+  if (!form.isActive) {
+    deny.push("تسجيل الدخول معطّل — لن يستطيع الدخول حتى التفعيل");
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-amber-400/[0.04] to-transparent border border-amber-400/20 rounded-lg p-3 space-y-2">
+      <p className="text-[0.65rem] font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5" />
+        ما الذي سيراه هذا المستخدم؟
+      </p>
+      <p className="text-[0.65rem] text-neutral-400 leading-snug">
+        دور <span className={`font-bold ${role.color}`}>{role.label}</span>
+        {form.name ? <> — <span className="text-neutral-200 font-bold">{form.name}</span></> : null}
+      </p>
+      <ul className="space-y-1">
+        {allow.map((line, i) => (
+          <li key={`a-${i}`} className="flex items-start gap-1.5 text-[0.65rem] text-emerald-300">
+            <CheckCircle2 className="w-3 h-3 shrink-0 mt-0.5" />
+            <span className="leading-snug">{line}</span>
+          </li>
+        ))}
+        {deny.map((line, i) => (
+          <li key={`d-${i}`} className="flex items-start gap-1.5 text-[0.65rem] text-neutral-500">
+            <XCircle className="w-3 h-3 shrink-0 mt-0.5" />
+            <span className="leading-snug">{line}</span>
+          </li>
+        ))}
+      </ul>
+      {!form.id && (
+        <p className="text-[0.6rem] text-neutral-500 leading-snug pt-1 border-t border-neutral-800/60 mt-2 flex items-start gap-1.5">
+          <ListChecks className="w-3 h-3 shrink-0 mt-0.5 text-amber-400" />
+          <span>
+            بعد الحفظ: شارك مع المستخدم اسم المستخدم وكلمة المرور بقناة آمنة. يستطيع الدخول فوراً من الصفحة الرئيسية للموقع.
+          </span>
+        </p>
+      )}
     </div>
   );
 }
