@@ -15,7 +15,8 @@ import type { Database } from "@/lib/supabase/database.types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_ROLES: Role[] = ["admin", "editor", "viewer"];
+const VALID_ROLES: Role[] = ["admin", "editor", "content_writer", "viewer"];
+const TABLE_ID_RE = /^tbl[A-Za-z0-9]{8,32}$/;
 
 // Tightened to ASCII-ish identifiers so URLs can stay clean and SQL never
 // sees anything weird. citext on the column gives us case-insensitive
@@ -33,6 +34,9 @@ interface SafePublicUser {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
+  // Per-user Airtable table allowlist (content_writer only). null
+  // means "no restriction"; an array (even empty) means restricted.
+  allowedTableIds: string[] | null;
 }
 type Row = Database["public"]["Tables"]["app_users"]["Row"];
 function map(r: Row): SafePublicUser {
@@ -46,7 +50,29 @@ function map(r: Row): SafePublicUser {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
+    allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
   };
+}
+
+// Validate an allowlist payload. Returns either an array of valid
+// Airtable table IDs (possibly empty) or null when the caller wants
+// to clear the restriction. Anything malformed throws.
+function readAllowedTableIds(v: unknown): string[] | null {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) {
+    throw new Error("قائمة الجداول المسموحة يجب أن تكون مصفوفة");
+  }
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (typeof x !== "string") throw new Error("معرّف جدول غير صالح");
+    const t = x.trim();
+    if (!TABLE_ID_RE.test(t)) {
+      throw new Error(`معرّف جدول غير صالح: ${t.slice(0, 40)}`);
+    }
+    seen.add(t);
+  }
+  if (seen.size > 64) throw new Error("الحد الأقصى 64 جدولاً للمستخدم الواحد");
+  return Array.from(seen);
 }
 
 // Keep payload validation in one place — reused by create + update.
@@ -74,7 +100,7 @@ function readEmail(v: unknown): string {
 
 function readRole(v: unknown): Role {
   if (typeof v !== "string" || !VALID_ROLES.includes(v as Role)) {
-    throw new Error("الدور غير صالح (admin/editor/viewer فقط)");
+    throw new Error("الدور غير صالح (admin/editor/content_writer/viewer فقط)");
   }
   return v as Role;
 }
@@ -135,6 +161,10 @@ export async function POST(request: NextRequest) {
         const role = readRole(body.role);
         const password = readPassword(body.password);
         const password_hash = hashPassword(password);
+        // Allowlist only meaningful for content_writer — for other roles
+        // we explicitly null it so a stale value can't leak through.
+        const allowed_table_ids =
+          role === "content_writer" ? readAllowedTableIds(body.allowedTableIds) ?? [] : null;
         const { data, error } = await sb
           .from("app_users")
           .insert({
@@ -145,6 +175,7 @@ export async function POST(request: NextRequest) {
             is_active: body.isActive === false ? false : true,
             password_hash,
             created_by: me.id,
+            allowed_table_ids,
           })
           .select()
           .single();
@@ -201,6 +232,18 @@ export async function POST(request: NextRequest) {
         if (body.password !== undefined) {
           const p = readPassword(body.password);
           patch.password_hash = hashPassword(p);
+        }
+        // Allowed-tables can be patched on its own or alongside the
+        // role change. When the resulting role isn't content_writer
+        // we wipe the allowlist (the role itself already permits all
+        // tables, so a leftover restriction would be confusing).
+        const nextRole = patch.role as Role | undefined;
+        if (body.allowedTableIds !== undefined) {
+          const list = readAllowedTableIds(body.allowedTableIds);
+          patch.allowed_table_ids = list;
+        }
+        if (nextRole && nextRole !== "content_writer" && body.allowedTableIds === undefined) {
+          patch.allowed_table_ids = null;
         }
         const { data, error } = await sb
           .from("app_users")

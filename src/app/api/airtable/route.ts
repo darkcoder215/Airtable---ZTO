@@ -37,7 +37,14 @@ export async function GET(request: NextRequest) {
         if (!(await checkPermission(user.id, user.role, baseId, "*", "canView"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
         }
-        const tables = await listTables(baseId);
+        let tables = await listTables(baseId);
+        // Content-writer accounts only see the explicit allowlist. An
+        // empty array means "no tables" — we still return [] so the UI
+        // can render its "ask your admin" state instead of failing.
+        if (user.role === "content_writer") {
+          const allow = new Set(user.allowedTableIds ?? []);
+          tables = tables.filter((t) => allow.has(t.id));
+        }
         return NextResponse.json({ tables });
       }
 
@@ -49,6 +56,11 @@ export async function GET(request: NextRequest) {
         }
         if (!(await checkPermission(user.id, user.role, baseId, tableId, "canView"))) {
           return NextResponse.json({ error: "لا تملك صلاحية الوصول" }, { status: 403 });
+        }
+        // Content-writer: hard-block tables outside the allowlist even
+        // if they have a stale URL.
+        if (user.role === "content_writer" && !(user.allowedTableIds ?? []).includes(tableId)) {
+          return NextResponse.json({ error: "هذا الجدول خارج صلاحيتك" }, { status: 403 });
         }
 
         const offset = searchParams.get("offset") || undefined;

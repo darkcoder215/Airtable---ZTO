@@ -168,6 +168,7 @@ export type Database = {
           updated_at: string
           last_login_at: string | null
           created_by: string | null
+          allowed_table_ids: string[] | null
         }
         Insert: {
           id?: string
@@ -181,6 +182,7 @@ export type Database = {
           updated_at?: string
           last_login_at?: string | null
           created_by?: string | null
+          allowed_table_ids?: string[] | null
         }
         Update: {
           id?: string
@@ -194,6 +196,7 @@ export type Database = {
           updated_at?: string
           last_login_at?: string | null
           created_by?: string | null
+          allowed_table_ids?: string[] | null
         }
         Relationships: []
       }

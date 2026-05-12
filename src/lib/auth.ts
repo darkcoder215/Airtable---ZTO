@@ -26,7 +26,11 @@ import type { Database } from "@/lib/supabase/database.types";
 
 type AppUserRow = Database["public"]["Tables"]["app_users"]["Row"];
 
-export type Role = "admin" | "editor" | "viewer";
+// Roles in priority order: admin (full ops) → editor (no user/agent
+// admin) → content_writer (Airtable tables they were explicitly granted,
+// plus the writing/image-gen utilities) → viewer (read-only across
+// the whole base).
+export type Role = "admin" | "editor" | "content_writer" | "viewer";
 
 // Public user shape — no password material ever leaves the server.
 export interface SafeUser {
@@ -39,6 +43,10 @@ export interface SafeUser {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
+  // For content_writer accounts this carries the explicit list of
+  // Airtable table IDs the user is allowed to see. NULL = no
+  // restriction (the role tier already grants full access).
+  allowedTableIds: string[] | null;
 }
 
 const SCRYPT_N = 16384; // 2^14 — ~50ms on a typical Vercel serverless cold start
@@ -175,6 +183,7 @@ function mapUser(r: AppUserRow): SafeUser {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
+    allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
   };
 }
 

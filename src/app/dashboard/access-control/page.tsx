@@ -27,7 +27,7 @@ import {
 import { useAppStore } from "@/store/app-store";
 import PageGuide from "@/components/PageGuide";
 
-type Role = "admin" | "editor" | "viewer";
+type Role = "admin" | "editor" | "content_writer" | "viewer";
 
 interface AppUser {
   id: string;
@@ -39,6 +39,9 @@ interface AppUser {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
+  // Per-user Airtable table allowlist — only meaningful when role
+  // is content_writer. NULL = inherit-from-role (full access).
+  allowedTableIds: string[] | null;
 }
 
 const ROLE_META: Record<Role, { label: string; description: string; color: string; bg: string; icon: typeof Shield }> = {
@@ -56,6 +59,13 @@ const ROLE_META: Record<Role, { label: string; description: string; color: strin
     bg: "bg-blue-400/10 border-blue-400/30",
     icon: Shield,
   },
+  content_writer: {
+    label: "كاتب محتوى",
+    description: "يرى فقط الجداول المخصّصة له في Airtable + مولّد الصور + الوكلاء. لا يصل لباقي الأقسام.",
+    color: "text-purple-400",
+    bg: "bg-purple-400/10 border-purple-400/30",
+    icon: Shield,
+  },
   viewer: {
     label: "مراجع",
     description: "قراءة فقط — لا يستطيع التعديل أو الحذف.",
@@ -66,13 +76,14 @@ const ROLE_META: Record<Role, { label: string; description: string; color: strin
 };
 
 const PERMISSIONS = [
-  { feat: "قاعدة البيانات (Airtable)", admin: true, editor: true, viewer: true,  detail: "العرض دائماً متاح للجميع." },
-  { feat: "تعديل الخلايا في القاعدة",  admin: true, editor: true, viewer: false, detail: "المراجع يقرأ فقط." },
-  { feat: "إدارة المصادر",              admin: true, editor: false, viewer: false, detail: "إنشاء/تعديل/حذف يحتاج صلاحية مدير." },
-  { feat: "تشغيل عملية الجلب",          admin: true, editor: true, viewer: true,  detail: "التشغيل اليدوي متاح لكل مستخدم." },
-  { feat: "إعدادات الوجهة + الوكلاء",   admin: true, editor: false, viewer: false, detail: "تغييرات حساسة." },
-  { feat: "إدارة المستخدمين",           admin: true, editor: false, viewer: false, detail: "هذه الصفحة." },
-  { feat: "السجلات",                    admin: true, editor: false, viewer: false, detail: "للمدير فقط." },
+  { feat: "قاعدة البيانات (Airtable)", admin: true, editor: true, content_writer: "scoped" as const, viewer: true,  detail: "كاتب المحتوى يرى فقط الجداول المسموحة له." },
+  { feat: "تعديل الخلايا",              admin: true, editor: true, content_writer: true,             viewer: false, detail: "المراجع يقرأ فقط." },
+  { feat: "إدارة المصادر",              admin: true, editor: false, content_writer: false,            viewer: false, detail: "للمدير فقط." },
+  { feat: "تشغيل عملية الجلب",          admin: true, editor: true, content_writer: false,            viewer: true,  detail: "كاتب المحتوى لا يحتاج صفحة المصادر." },
+  { feat: "إعدادات الوجهة + الوكلاء",   admin: true, editor: false, content_writer: false,            viewer: false, detail: "تغييرات حساسة." },
+  { feat: "إدارة المستخدمين",           admin: true, editor: false, content_writer: false,            viewer: false, detail: "هذه الصفحة." },
+  { feat: "السجلات",                    admin: true, editor: false, content_writer: false,            viewer: false, detail: "للمدير فقط." },
+  { feat: "مولّد الصور + الوكلاء",     admin: true, editor: true, content_writer: true,             viewer: false, detail: "أدوات الكتابة والتوليد متاحة لكاتب المحتوى." },
 ];
 
 interface FormState {
@@ -83,6 +94,9 @@ interface FormState {
   role: Role;
   password: string;
   isActive: boolean;
+  // List of Airtable table IDs the user is allowed to see.
+  // Only meaningful when role === "content_writer".
+  allowedTableIds: string[];
 }
 
 const blankForm = (): FormState => ({
@@ -92,6 +106,7 @@ const blankForm = (): FormState => ({
   role: "viewer",
   password: "",
   isActive: true,
+  allowedTableIds: [],
 });
 
 function formatDate(s: string | null): string {
@@ -154,6 +169,7 @@ export default function AccessControlPage() {
       role: u.role,
       password: "",
       isActive: u.isActive,
+      allowedTableIds: Array.isArray(u.allowedTableIds) ? u.allowedTableIds : [],
     });
     setError(null);
     setShowForm(true);
@@ -179,6 +195,14 @@ export default function AccessControlPage() {
       };
       if (form.id) payload.id = form.id;
       if (form.password || !form.id) payload.password = form.password;
+      // Allowed-tables only ride along when the role is content_writer.
+      // For every other role we explicitly send null to clear any
+      // stale restriction left over from a role swap.
+      if (form.role === "content_writer") {
+        payload.allowedTableIds = form.allowedTableIds;
+      } else if (form.id) {
+        payload.allowedTableIds = null;
+      }
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -542,7 +566,7 @@ export default function AccessControlPage() {
 
               <div>
                 <label className="zto-label">الدور *</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {(Object.keys(ROLE_META) as Role[]).map((r) => {
                     const meta = ROLE_META[r];
                     const Icon = meta.icon;
@@ -569,6 +593,13 @@ export default function AccessControlPage() {
                   })}
                 </div>
               </div>
+
+              {form.role === "content_writer" && (
+                <AllowedTablesPicker
+                  selected={form.allowedTableIds}
+                  onChange={(next) => setForm((p) => ({ ...p, allowedTableIds: next }))}
+                />
+              )}
 
               <div className="bg-[#1a1a1a] border border-neutral-800 rounded-lg p-3 flex items-center justify-between">
                 <div>
@@ -620,5 +651,135 @@ function PermCell({ on }: { on: boolean }) {
         <XCircle className="w-3.5 h-3.5 text-neutral-700 inline" />
       )}
     </td>
+  );
+}
+
+/* ─────────────── AllowedTablesPicker ───────────────
+   Lists every Airtable table in the destination base + lets the admin
+   tick which ones a content-writer is allowed to see. Pulls /api/airtable
+   tables — visible to admins for every base. The "destination" base id
+   matches the rest of the app (see destination-mapping.ts).
+*/
+function AllowedTablesPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  // Hardcoded — same constant as src/lib/destination-mapping.ts. Could be
+  // wired through the API later if we ever support multiple bases.
+  const BASE_ID = "appIpXIFs2yxyxaUm";
+  interface TableLite { id: string; name: string }
+  const [tables, setTables] = useState<TableLite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch(`/api/airtable?action=tables&baseId=${encodeURIComponent(BASE_ID)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "فشل تحميل الجداول");
+        if (cancelled) return;
+        setTables(Array.isArray(data.tables) ? data.tables.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })) : []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "فشل تحميل الجداول");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggle = (id: string) => {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+  const selectAll = () => onChange(tables.map((t) => t.id));
+  const selectNone = () => onChange([]);
+
+  const q = search.trim().toLowerCase();
+  const visible = q ? tables.filter((t) => t.name.toLowerCase().includes(q)) : tables;
+
+  return (
+    <div className="bg-purple-500/5 border border-purple-500/30 rounded-lg p-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <div>
+          <p className="text-sm font-bold text-white">الجداول المسموحة *</p>
+          <p className="text-[0.65rem] text-neutral-400 mt-0.5">
+            اختر الجداول التي يستطيع هذا المستخدم رؤيتها بعد تسجيل الدخول. لن يرى أيّ شيء آخر في Airtable.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={loading || tables.length === 0}
+            className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-purple-400 hover:text-purple-300 disabled:opacity-40"
+          >
+            تحديد الكل
+          </button>
+          <button
+            type="button"
+            onClick={selectNone}
+            disabled={loading || selected.length === 0}
+            className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-red-400 hover:text-red-300 disabled:opacity-40"
+          >
+            مسح
+          </button>
+        </div>
+      </div>
+
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="بحث في الجداول..."
+        className="zto-input text-xs mb-2"
+      />
+
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-4 h-4 animate-spin text-neutral-500" />
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2">{error}</p>
+      ) : visible.length === 0 ? (
+        <p className="text-center py-4 text-xs text-neutral-500 font-bold">
+          {tables.length === 0 ? "لا توجد جداول في القاعدة" : "لا نتائج للبحث"}
+        </p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto bg-[#0d0d0d] border border-neutral-800 rounded space-y-0.5 p-1">
+          {visible.map((t) => {
+            const checked = selected.includes(t.id);
+            return (
+              <label
+                key={t.id}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                  checked ? "bg-purple-400/10 text-purple-200" : "text-neutral-300 hover:bg-neutral-800/40"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(t.id)}
+                  className="shrink-0"
+                />
+                <span className="text-xs font-bold truncate flex-1">{t.name}</span>
+                <code className="text-[0.55rem] text-neutral-600 font-mono">{t.id}</code>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="text-[0.6rem] text-neutral-500 mt-2 font-bold">
+        {selected.length} جدول مختار من أصل {tables.length}
+      </p>
+    </div>
   );
 }

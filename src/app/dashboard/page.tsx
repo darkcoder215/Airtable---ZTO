@@ -41,7 +41,14 @@ import {
   GripVertical,
   GripHorizontal,
   RotateCcw,
+  Wand2,
+  Bot,
+  Sparkles,
+  Settings,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
+import Link from "next/link";
 
 /* ────────── Types ────────── */
 
@@ -359,7 +366,61 @@ export default function DashboardPage() {
 
 
   /* view mode */
-  const [view, setView] = useState<"grid" | "kanban">("grid");
+  // Per-user kanban card configuration. The user can pick which fields
+  // appear on the card and mark them as bold. Keyed by base:table so a
+  // single user can have a different layout per table.
+  const [kanbanCardFieldIds, setKanbanCardFieldIds] = useState<string[]>([]);
+  const [kanbanCardBold, setKanbanCardBold] = useState<Record<string, boolean>>({});
+  const [showCardConfig, setShowCardConfig] = useState(false);
+
+  const cardCfgKey = `zto-kanban-card:${selectedBase?.id ?? "_"}:${selectedTable?.id ?? "_"}`;
+  // Hydrate when the table changes.
+  useEffect(() => {
+    if (!selectedBase || !selectedTable) {
+      setKanbanCardFieldIds([]);
+      setKanbanCardBold({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(cardCfgKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { fieldIds?: string[]; bold?: Record<string, boolean> };
+        setKanbanCardFieldIds(Array.isArray(parsed.fieldIds) ? parsed.fieldIds : []);
+        setKanbanCardBold(parsed.bold && typeof parsed.bold === "object" ? parsed.bold : {});
+      } else {
+        setKanbanCardFieldIds([]);
+        setKanbanCardBold({});
+      }
+    } catch {
+      setKanbanCardFieldIds([]);
+      setKanbanCardBold({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBase?.id, selectedTable?.id]);
+
+  const saveCardCfg = (fieldIds: string[], bold: Record<string, boolean>) => {
+    setKanbanCardFieldIds(fieldIds);
+    setKanbanCardBold(bold);
+    try {
+      localStorage.setItem(cardCfgKey, JSON.stringify({ fieldIds, bold }));
+    } catch {}
+  };
+
+  // Kanban is the default — most users grok cards faster than a wide
+  // grid, and the writer-role workflow always lands in kanban. The
+  // last-chosen view is restored from localStorage on mount.
+  const [view, setView] = useState<"grid" | "kanban">("kanban");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("zto-dashboard-view");
+      if (saved === "grid" || saved === "kanban") setView(saved);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("zto-dashboard-view", view);
+    } catch {}
+  }, [view]);
   const [kanbanGroupField, setKanbanGroupField] = useState<string | null>(null);
   const [kanbanMoving, setKanbanMoving] = useState<string | null>(null);
 
@@ -1321,6 +1382,20 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {/* Card configuration — opens a panel where the user picks
+                which fields appear on every card and which to bold.
+                Saved per user × table. */}
+            {view === "kanban" && selectedTable && (
+              <button
+                onClick={() => setShowCardConfig((v) => !v)}
+                className={`zto-btn zto-btn-sm ${showCardConfig ? "zto-btn-outline" : "zto-btn-ghost"}`}
+                title="تخصيص حقول البطاقة"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                حقول البطاقة
+              </button>
+            )}
+
             {/* Row height (grid view only) */}
             {view === "grid" && (
               <div className="flex items-center bg-[#1a1a1a] border border-neutral-800 rounded-lg overflow-hidden">
@@ -1762,6 +1837,135 @@ export default function DashboardPage() {
       )}
 
       {/* ── Records kanban (kanban view) ── */}
+      {/* Kanban card configuration panel — opens above the kanban grid
+          when the user clicks the Settings button in the toolbar. Lets
+          them choose which fields show on every card, reorder them,
+          and mark per-field bold. Saved per user × table to
+          localStorage so it survives reloads. */}
+      {view === "kanban" && showCardConfig && selectedTable && (() => {
+        const candidate = visibleFields.filter((f) => f.id !== selectedTable.primaryFieldId);
+        const orderedSelected = kanbanCardFieldIds
+          .map((id) => candidate.find((f) => f.id === id))
+          .filter((f): f is Field => !!f);
+        const remaining = candidate.filter((f) => !kanbanCardFieldIds.includes(f.id));
+        const move = (idx: number, delta: number) => {
+          const next = [...kanbanCardFieldIds];
+          const j = idx + delta;
+          if (j < 0 || j >= next.length) return;
+          [next[idx], next[j]] = [next[j], next[idx]];
+          saveCardCfg(next, kanbanCardBold);
+        };
+        const toggleField = (id: string) => {
+          if (kanbanCardFieldIds.includes(id)) {
+            saveCardCfg(kanbanCardFieldIds.filter((x) => x !== id), kanbanCardBold);
+          } else {
+            saveCardCfg([...kanbanCardFieldIds, id], kanbanCardBold);
+          }
+        };
+        const toggleBold = (id: string) => {
+          saveCardCfg(kanbanCardFieldIds, { ...kanbanCardBold, [id]: !kanbanCardBold[id] });
+        };
+        const resetCfg = () => {
+          saveCardCfg([], {});
+        };
+        return (
+          <div className="border border-amber-400/30 border-t-0 rounded-b-xl p-4 bg-amber-400/[0.03] mb-3">
+            <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+              <div>
+                <p className="text-sm font-black text-white flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-amber-300" />
+                  حقول البطاقة
+                </p>
+                <p className="text-[0.65rem] text-neutral-400 font-bold mt-0.5">
+                  اختر الحقول التي تظهر على بطاقات Kanban، ورتّبها، وعلّم ما تريد إبرازه بالخط الغامق. تُحفظ في متصفّحك.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={resetCfg} className="zto-btn zto-btn-ghost zto-btn-sm" title="إعادة إلى الافتراضي">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  افتراضي
+                </button>
+                <button onClick={() => setShowCardConfig(false)} className="zto-btn zto-btn-outline zto-btn-sm">
+                  <X className="w-3.5 h-3.5" />
+                  إغلاق
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <p className="text-[0.6rem] font-black text-neutral-500 uppercase tracking-widest mb-1.5">
+                  الحقول المعروضة ({orderedSelected.length})
+                </p>
+                <div className="bg-[#0d0d0d] border border-neutral-800 rounded space-y-1 p-1.5 max-h-64 overflow-y-auto">
+                  {orderedSelected.length === 0 ? (
+                    <p className="text-[0.65rem] text-neutral-500 text-center py-3 font-bold">
+                      لم تختر بعد — الافتراضي = أول 3 حقول
+                    </p>
+                  ) : (
+                    orderedSelected.map((f, idx) => (
+                      <div key={f.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-amber-400/5 text-amber-200">
+                        <span className="text-[0.55rem] font-mono text-neutral-500 w-4">{idx + 1}</span>
+                        <span className="text-xs font-bold flex-1 truncate">{f.name}</span>
+                        <button
+                          onClick={() => toggleBold(f.id)}
+                          className={`text-[0.55rem] font-black rounded px-1.5 py-0.5 border ${
+                            kanbanCardBold[f.id] ? "border-amber-400/60 text-amber-200 bg-amber-400/10" : "border-neutral-700 text-neutral-500"
+                          }`}
+                          title="غامق"
+                        >
+                          B
+                        </button>
+                        <button
+                          onClick={() => move(idx, -1)}
+                          disabled={idx === 0}
+                          className="text-neutral-500 hover:text-amber-300 disabled:opacity-30"
+                          title="أعلى"
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => move(idx, 1)}
+                          disabled={idx === orderedSelected.length - 1}
+                          className="text-neutral-500 hover:text-amber-300 disabled:opacity-30"
+                          title="أسفل"
+                        >
+                          <ArrowDown className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => toggleField(f.id)} className="text-neutral-500 hover:text-red-400" title="إزالة">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-[0.6rem] font-black text-neutral-500 uppercase tracking-widest mb-1.5">
+                  الحقول المتاحة ({remaining.length})
+                </p>
+                <div className="bg-[#0d0d0d] border border-neutral-800 rounded space-y-1 p-1.5 max-h-64 overflow-y-auto">
+                  {remaining.length === 0 ? (
+                    <p className="text-[0.65rem] text-neutral-500 text-center py-3 font-bold">— الكل مختار —</p>
+                  ) : (
+                    remaining.map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => toggleField(f.id)}
+                        className="w-full text-right flex items-center gap-2 px-2 py-1.5 rounded hover:bg-amber-400/5 text-neutral-300 hover:text-amber-200 transition-colors"
+                      >
+                        <Plus className="w-3 h-3 shrink-0" />
+                        <span className="text-xs font-bold flex-1 truncate">{f.name}</span>
+                        <code className="text-[0.55rem] text-neutral-600 font-mono">{f.type}</code>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {view === "kanban" && selectedTable && !loadingRecords && !recordsError && filteredRecords.length > 0 && (() => {
         const groupField = selectedTable.fields.find((f) => f.name === kanbanGroupField);
         if (!groupField || groupField.type !== "singleSelect") {
@@ -1785,7 +1989,16 @@ export default function DashboardPage() {
         }
         const orderedKeys = [...choices.map((c) => c.name).filter((k) => k in groups), ...Object.keys(groups).filter((k) => k !== noneKey && !choices.some((c) => c.name === k)), noneKey];
         const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
-        const cardFields = visibleFields.filter((f) => f.id !== selectedTable.primaryFieldId && f.name !== groupField.name).slice(0, 3);
+        // Card fields: prefer the user's saved preference (per-user, keyed by
+        // base:table) when present, otherwise the first 3 visible non-primary
+        // non-group fields. Per-field 'bold' state is also stored on the same
+        // map and applied at render time.
+        const cardFields = (kanbanCardFieldIds.length > 0
+          ? (kanbanCardFieldIds
+              .map((id) => visibleFields.find((f) => f.id === id))
+              .filter((f): f is Field => !!f && f.id !== selectedTable.primaryFieldId && f.name !== groupField.name)
+            )
+          : visibleFields.filter((f) => f.id !== selectedTable.primaryFieldId && f.name !== groupField.name).slice(0, 3));
 
         const colorMap: Record<string, string> = {
           redLight2: "#7f1d1d", orangeLight2: "#7c2d12", yellowLight2: "#713f12",
@@ -1962,13 +2175,16 @@ export default function DashboardPage() {
                                   if (v == null || v === "") return null;
                                   const preview = renderCellPreview(v);
                                   if (!preview) return null;
+                                  const isBold = kanbanCardBold[f.id] === true;
                                   return (
                                     <div key={f.id} className="flex items-start gap-1.5">
                                       <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
                                         {f.name}
                                       </span>
                                       <span
-                                        className={`text-neutral-300 break-words ${
+                                        className={`break-words ${
+                                          isBold ? "text-white font-black" : "text-neutral-300"
+                                        } ${
                                           kanbanDensity === "compact"
                                             ? "text-[10px] line-clamp-1"
                                             : kanbanDensity === "comfy"
@@ -2146,16 +2362,19 @@ export default function DashboardPage() {
         >
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             onClick={() => setDetailRecordId(null)}
           />
-          {/* Side panel — slides in from the leading edge in RTL.
-              Wider (840px) so the 2-col fields/comments layout breathes
-              on desktop; full width on mobile/tablet. */}
-          <aside
-            className="absolute inset-y-0 left-0 w-full lg:w-[860px] xl:w-[960px] bg-[#0a0a0a] border-l border-neutral-800 shadow-2xl shadow-black/60 flex flex-col zto-slide-up"
-            onClick={(e) => e.stopPropagation()}
+          {/* Centered modal — replaces the side drawer. Cap width on
+              very wide screens; otherwise stretch with safe margins
+              so the content has real breathing room. */}
+          <div
+            className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 pointer-events-none"
           >
+            <aside
+              className="pointer-events-auto bg-[#0a0a0a] border border-neutral-800 rounded-2xl shadow-2xl shadow-black/70 flex flex-col zto-slide-up w-full max-w-[1080px] max-h-[calc(100vh-64px)] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
             {/* Sticky header */}
             <header className="sticky top-0 z-10 px-6 py-4 bg-[#0a0a0a]/95 backdrop-blur border-b border-neutral-800 flex items-start gap-3">
               <div className="flex-1 min-w-0">
@@ -2375,8 +2594,54 @@ export default function DashboardPage() {
                   </ul>
                 )}
               </section>
+
+              {/* AI writer panel — drafts post copy from the article
+                  text using a writing-type scraper agent. Lazy-loads
+                  the agents list once. The output panel surfaces char,
+                  word, and social-channel-fit indicators so writers
+                  know whether their copy will be cut on X/LinkedIn. */}
+              <CardAgentsPanel
+                articleText={detailRecord.fields[primary?.name ?? ""] != null ? renderCellPreview(detailRecord.fields[primary?.name ?? ""]) : ""}
+                fields={detailRecord.fields}
+              />
+
+              {/* Image generator quick-launch — links to /dashboard/image-generator
+                  pre-seeded with the article's title and (if present) image. */}
+              {(() => {
+                const titleText = renderCellPreview(primaryV) || "";
+                const heroImage = images[0]?.url ?? null;
+                const params = new URLSearchParams();
+                if (titleText) params.set("text", titleText.slice(0, 800));
+                if (heroImage) params.set("image", heroImage);
+                params.set("recordId", detailRecord.id);
+                return (
+                  <section className="border border-neutral-800 rounded-xl p-4 bg-[#0d0d0d]">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="w-9 h-9 rounded-md bg-amber-400/10 border border-amber-400/30 flex items-center justify-center shrink-0">
+                          <Wand2 className="w-4 h-4 text-amber-300" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-[0.85rem] font-black text-white">مولّد الصور</h3>
+                          <p className="text-[0.65rem] text-neutral-400 font-bold mt-0.5">
+                            افتح المولّد ومرّر له نصّ هذا السجل + صورته كنقطة بداية.
+                          </p>
+                        </div>
+                      </div>
+                      <Link
+                        href={`/dashboard/image-generator?${params.toString()}`}
+                        className="zto-btn zto-btn-gold zto-btn-sm shrink-0"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        افتح مع هذا السجل
+                      </Link>
+                    </div>
+                  </section>
+                );
+              })()}
             </div>
-          </aside>
+            </aside>
+          </div>
         </div>
         );
       })()}
@@ -2465,5 +2730,263 @@ function DrawerImageGallery({
         </div>
       )}
     </div>
+  );
+}
+
+/* ─────────────── Card agents panel ───────────────
+   In-card writer that hands the article text to a writing-style
+   scraper agent and shows the draft alongside live counters (chars,
+   words, X-friendly + LinkedIn-friendly fits). Collapsed by default
+   so the card stays compact for non-writers; the writer role can
+   one-click expand and iterate. */
+
+interface CardAgentsPanelProps {
+  articleText: string;
+  fields: Record<string, unknown>;
+}
+
+interface ListedAgent {
+  id: string;
+  name: string;
+  description?: string;
+  modelName: string;
+  agentType: "writing" | "filtering" | "editing" | "summarizing";
+  isActive: boolean;
+}
+
+// Twitter/X cap = 280; LinkedIn truncates the feed preview around 210
+// chars on web, then shows a "see more" link. We use 280 / 1300 / 2200
+// as the three thresholds and grade against them.
+const LIMITS = {
+  x: 280,
+  linkedin_preview: 210,
+  linkedin_full: 3000,
+  instagram: 2200,
+  facebook: 63206,
+} as const;
+
+function CardAgentsPanel({ articleText, fields }: CardAgentsPanelProps) {
+  const [open, setOpen] = useState(false);
+  const [agents, setAgents] = useState<ListedAgent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState("");
+  const [extraPrompt, setExtraPrompt] = useState("");
+  const [running, setRunning] = useState(false);
+  const [output, setOutput] = useState("");
+  const [runError, setRunError] = useState<string | null>(null);
+
+  // Lazy-load the agents list the first time the panel opens.
+  useEffect(() => {
+    if (!open || agents.length > 0 || agentsLoading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setAgentsLoading(true);
+        setAgentsError(null);
+        const res = await fetch("/api/agents", { cache: "no-store" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "فشل تحميل الوكلاء");
+        if (cancelled) return;
+        const all = (Array.isArray(d.agents) ? d.agents : []) as ListedAgent[];
+        // Only writing/editing/summarizing agents make sense here —
+        // a filtering agent would just return yes/no on the article.
+        const usable = all.filter(
+          (a) => a.isActive && (a.agentType === "writing" || a.agentType === "editing" || a.agentType === "summarizing")
+        );
+        setAgents(usable);
+        if (usable.length > 0 && !agentId) setAgentId(usable[0].id);
+      } catch (err) {
+        if (!cancelled) setAgentsError(err instanceof Error ? err.message : "خطأ");
+      } finally {
+        if (!cancelled) setAgentsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Assemble the article context. We use the title + the long-text
+  // fields as the source. The extra prompt is appended so the agent
+  // gets both the raw input + the writer's intent in one turn.
+  const buildInput = () => {
+    const longText = Object.entries(fields)
+      .filter(([, v]) => typeof v === "string" && (v as string).length > 60)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n\n");
+    const parts: string[] = [];
+    if (articleText) parts.push(`العنوان: ${articleText}`);
+    if (longText) parts.push(longText);
+    if (extraPrompt.trim()) parts.push(`تعليمات إضافية: ${extraPrompt.trim()}`);
+    return parts.join("\n\n").slice(0, 8000);
+  };
+
+  const run = async () => {
+    if (!agentId) return;
+    setRunning(true);
+    setRunError(null);
+    setOutput("");
+    try {
+      const res = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview", agentId, input: buildInput() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "فشل الاستدعاء");
+      setOutput(typeof d.preview === "string" ? d.preview : "");
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "خطأ");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // Char/word counters use Intl.Segmenter when available for accurate
+  // Arabic word counts; fall back to whitespace splitting otherwise.
+  const chars = output.length;
+  const words = output.trim().length === 0
+    ? 0
+    : (() => {
+        try {
+          const seg = new Intl.Segmenter("ar", { granularity: "word" });
+          return Array.from(seg.segment(output)).filter((s) => s.isWordLike).length;
+        } catch {
+          return output.trim().split(/\s+/).filter(Boolean).length;
+        }
+      })();
+
+  const fitChip = (label: string, used: number, limit: number) => {
+    const pct = (used / limit) * 100;
+    const tone =
+      used <= limit ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/5"
+      : "border-red-500/40 text-red-300 bg-red-500/10";
+    return (
+      <span
+        key={label}
+        className={`text-[0.6rem] font-bold rounded-full px-2 py-1 border ${tone} flex items-center gap-1`}
+        title={`${used.toLocaleString("ar")} / ${limit.toLocaleString("ar")} حرف (${pct.toFixed(0)}%)`}
+      >
+        {used <= limit ? "✓" : "✗"} {label}
+      </span>
+    );
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(output);
+    } catch {
+      // clipboard may be blocked in private mode — silently ignore
+    }
+  };
+
+  return (
+    <section className="border border-neutral-800 rounded-xl overflow-hidden bg-[#0d0d0d]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-right hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="w-9 h-9 rounded-md bg-purple-400/10 border border-purple-400/30 flex items-center justify-center shrink-0">
+          <Bot className="w-4 h-4 text-purple-300" />
+        </div>
+        <div className="flex-1 min-w-0 text-right">
+          <h3 className="text-[0.85rem] font-black text-white">كاتب AI</h3>
+          <p className="text-[0.65rem] text-neutral-400 font-bold mt-0.5">
+            ولّد منشوراً جاهزاً من هذا السجل عبر أحد وكلاء الكتابة.
+          </p>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-neutral-500 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-neutral-800 p-4 space-y-3 zto-fade-in">
+          {agentsError ? (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2 font-bold">
+              ⚠ {agentsError}
+            </p>
+          ) : agentsLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-4 h-4 animate-spin text-neutral-500" />
+            </div>
+          ) : agents.length === 0 ? (
+            <p className="text-xs text-neutral-500 bg-neutral-800/30 rounded p-3 font-bold text-center">
+              لا يوجد وكيل كتابة مفعّل. اطلب من المدير إنشاء واحد من صفحة الوكلاء.
+            </p>
+          ) : (
+            <>
+              <div>
+                <label className="zto-label text-[0.65rem]">اختر الوكيل</label>
+                <select
+                  className="zto-input text-xs"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                >
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} · {a.agentType === "writing" ? "كتابة" : a.agentType === "editing" ? "تحرير" : "تلخيص"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="zto-label text-[0.65rem]">تعليمات إضافية (اختياري)</label>
+                <textarea
+                  value={extraPrompt}
+                  onChange={(e) => setExtraPrompt(e.target.value.slice(0, 2000))}
+                  placeholder="مثلاً: اجعل التغريدة قصيرة وحماسية، أضف هاشتاجات..."
+                  className="zto-input text-xs min-h-[60px]"
+                />
+                <p className="text-[0.55rem] text-neutral-600 font-mono text-left mt-1">{extraPrompt.length}/2000</p>
+              </div>
+              <button
+                onClick={run}
+                disabled={running || !agentId}
+                className="zto-btn zto-btn-gold zto-btn-sm w-full"
+              >
+                {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {running ? "جاري الكتابة..." : "ولّد المنشور"}
+              </button>
+
+              {runError && (
+                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2 font-bold">
+                  ⚠ {runError}
+                </p>
+              )}
+
+              {output && (
+                <div className="space-y-2 zto-fade-in">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[0.6rem] text-neutral-400 font-bold">
+                      {chars.toLocaleString("ar")} حرف · {words.toLocaleString("ar")} كلمة
+                    </span>
+                    <span className="text-neutral-700">·</span>
+                    {fitChip("X", chars, LIMITS.x)}
+                    {fitChip("LinkedIn معاينة", chars, LIMITS.linkedin_preview)}
+                    {fitChip("LinkedIn كامل", chars, LIMITS.linkedin_full)}
+                    {fitChip("Instagram", chars, LIMITS.instagram)}
+                  </div>
+                  <textarea
+                    readOnly
+                    value={output}
+                    className="zto-input text-xs min-h-[140px] font-bold"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={copy}
+                      className="zto-btn zto-btn-ghost zto-btn-sm"
+                      title="نسخ"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      نسخ
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

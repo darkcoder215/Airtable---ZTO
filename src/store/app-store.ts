@@ -4,8 +4,12 @@ interface UserInfo {
   id: string;
   username: string;
   name: string;
-  role: "admin" | "editor" | "viewer";
+  role: "admin" | "editor" | "content_writer" | "viewer";
   email: string;
+  // For content_writer accounts this carries the explicit list of
+  // Airtable table IDs the user is allowed to see. NULL = no
+  // restriction (admin/editor/viewer roles already grant full access).
+  allowedTableIds?: string[] | null;
 }
 
 interface Toast {
