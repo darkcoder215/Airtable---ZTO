@@ -286,7 +286,7 @@ export async function executeAgent(
   return callOpenRouter(apiKey, model, systemPrompt, userInput, agent.temperature, agent.maxTokens);
 }
 
-async function callOpenRouter(
+export async function callOpenRouter(
   apiKey: string,
   model: string,
   systemPrompt: string,

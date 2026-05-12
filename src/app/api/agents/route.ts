@@ -9,6 +9,7 @@ import {
   addExecution,
   updateExecution,
   getOpenRouterKey,
+  callOpenRouter,
   OPENROUTER_MODELS,
 } from "@/lib/agents";
 import { verifySessionToken, getUserById } from "@/lib/auth";
@@ -129,6 +130,105 @@ export async function POST(request: NextRequest) {
         try {
           const output = await executeAgent(agent, data.input, data.modelOverride);
           return NextResponse.json({ preview: output });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : "خطأ غير معروف";
+          return NextResponse.json({ error: errMsg }, { status: 500 });
+        }
+      }
+
+      case "extract-style": {
+        // Runs at agent-creation time: takes the writer's raw examples
+        // + agent type and asks the LLM to extract the underlying
+        // "writing template" — phases (hook / context / takeaway),
+        // tone, length, vocabulary patterns — so the agent can
+        // replicate the style consistently. The result is stitched
+        // into the final system prompt alongside the raw examples.
+        if (user.role !== "admin") {
+          return NextResponse.json({ error: "صلاحيات المدير مطلوبة" }, { status: 403 });
+        }
+        const examples = Array.isArray(data.examples) ? data.examples : [];
+        if (examples.length < 2) {
+          return NextResponse.json(
+            { error: "أضف مثالين على الأقل قبل الاستخراج" },
+            { status: 400 }
+          );
+        }
+        const apiKey = getOpenRouterKey();
+        if (!apiKey) {
+          return NextResponse.json(
+            { error: "مفتاح OpenRouter غير مُعَد." },
+            { status: 500 }
+          );
+        }
+        const model =
+          typeof data.model === "string" && data.model.length > 0
+            ? data.model
+            : "openai/gpt-4o-mini";
+        const typeLabel: Record<string, string> = {
+          writing: "كتابة منشورات",
+          editing: "تحرير نصوص",
+          summarizing: "تلخيص",
+          filtering: "فلترة",
+        };
+        const examplesBlock = examples
+          .map(
+            (ex: { title?: string; content?: string }, i: number) =>
+              `مثال ${i + 1} — ${String(ex.title ?? "").slice(0, 200)}:\n${String(ex.content ?? "").slice(0, 6000)}`
+          )
+          .join("\n\n---\n\n");
+
+        const metaSystem = [
+          "أنت محلّل أسلوب كتابة محترف.",
+          "ستستلم عدّة أمثلة كتبها مؤلف واحد، ومهمّتك استخراج «قالب الأسلوب» الذي يحاكيه كاتب آلي لاحقاً.",
+          "اكتب القالب باللغة العربية الفصحى. أعد JSON فقط، بدون أيّ شرح خارجه.",
+          "اعتمد المخطط التالي:",
+          "{",
+          '  "phases": [ { "name": string, "purpose": string, "guidance": string } ],',
+          '  "tone": string,',
+          '  "voice": string,',
+          '  "length": { "minWords": number, "maxWords": number },',
+          '  "formattingRules": string[],',
+          '  "vocabularySignals": string[],',
+          '  "avoid": string[]',
+          "}",
+          "أمثلة على phases للكتابة: hook (الجذب)، context (السياق)، body (الجسم)، takeaway (الخلاصة)، cta (دعوة للتفاعل).",
+          "ابقِ كلّ قيمة قصيرة وعملية — جملة أو سطر واحد كحدّ أقصى.",
+        ].join("\n");
+
+        const userMsg = [
+          `نوع المهمّة: ${typeLabel[String(data.agentType)] ?? "عام"}`,
+          "",
+          "الأمثلة:",
+          examplesBlock,
+        ].join("\n");
+
+        try {
+          const raw = await callOpenRouter(
+            apiKey,
+            model,
+            metaSystem,
+            userMsg,
+            0.4,
+            1200
+          );
+          // Try to parse as JSON; if the model wrapped it in markdown fences, strip them.
+          let style: unknown = null;
+          const cleaned = raw
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```\s*$/i, "");
+          try {
+            style = JSON.parse(cleaned);
+          } catch {
+            style = null;
+          }
+          logger.info(
+            `Style extracted from ${examples.length} examples by ${user.name}`,
+            "Agents",
+            { agentType: data.agentType, model },
+            user.id
+          );
+          return NextResponse.json({ style, raw: cleaned });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "خطأ غير معروف";
           return NextResponse.json({ error: errMsg }, { status: 500 });

@@ -250,6 +250,26 @@ export default function AgentsPage() {
   // would see — that's enough to catch obvious omissions.
   const [simInput, setSimInput] = useState("");
 
+  // AI-extracted style template — derived from the user's examples
+  // by an LLM meta-pass. Carries the writing "phases" (hook → body →
+  // takeaway), tone, length range, formatting rules, and vocabulary
+  // signals so the agent can replicate the style consistently.
+  // Stored as raw JSON text so the admin can hand-edit before save.
+  interface ExtractedPhase { name: string; purpose: string; guidance: string }
+  interface ExtractedStyle {
+    phases?: ExtractedPhase[];
+    tone?: string;
+    voice?: string;
+    length?: { minWords?: number; maxWords?: number };
+    formattingRules?: string[];
+    vocabularySignals?: string[];
+    avoid?: string[];
+  }
+  const [extractedStyle, setExtractedStyle] = useState<ExtractedStyle | null>(null);
+  const [extractedRaw, setExtractedRaw] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState("");
+
   useEffect(() => {
     loadAgents();
     loadStatus();
@@ -414,10 +434,47 @@ export default function AgentsPage() {
   // clearly delimited rules block, then the named templates. The
   // delimiters are markdown-style headings so the model sees clean
   // structure regardless of which provider routes the request.
+  // Render the extracted style block as plain text so it lives
+  // happily inside the system prompt. The structure is preserved
+  // (phases, tone, length, etc) but flattened into readable Arabic.
+  const renderExtractedStyle = (s: ExtractedStyle | null): string => {
+    if (!s) return "";
+    const lines: string[] = [];
+    if (s.tone) lines.push(`النبرة: ${s.tone}`);
+    if (s.voice) lines.push(`الصوت: ${s.voice}`);
+    if (s.length && (s.length.minWords || s.length.maxWords)) {
+      const min = s.length.minWords ?? "";
+      const max = s.length.maxWords ?? "";
+      lines.push(`الطول المتوقّع: ${min}-${max} كلمة`);
+    }
+    if (Array.isArray(s.phases) && s.phases.length > 0) {
+      lines.push("مراحل الكتابة (التزم بهذا التسلسل):");
+      s.phases.forEach((p, i) => {
+        const purpose = p.purpose ? ` — ${p.purpose}` : "";
+        const guidance = p.guidance ? `\n     • ${p.guidance}` : "";
+        lines.push(`  ${i + 1}. ${p.name}${purpose}${guidance}`);
+      });
+    }
+    if (Array.isArray(s.formattingRules) && s.formattingRules.length > 0) {
+      lines.push("قواعد التنسيق:");
+      s.formattingRules.forEach((r) => lines.push(`  • ${r}`));
+    }
+    if (Array.isArray(s.vocabularySignals) && s.vocabularySignals.length > 0) {
+      lines.push("علامات المفردات المميّزة:");
+      s.vocabularySignals.forEach((v) => lines.push(`  • ${v}`));
+    }
+    if (Array.isArray(s.avoid) && s.avoid.length > 0) {
+      lines.push("تجنّب:");
+      s.avoid.forEach((a) => lines.push(`  • ${a}`));
+    }
+    return lines.join("\n");
+  };
+
   const composeSystemPrompt = (
     intent: string,
     rules: string[],
-    templates: ExamplePost[]
+    templates: ExamplePost[],
+    style: ExtractedStyle | null
   ): string => {
     const parts: string[] = [];
     const intentText = intent.trim();
@@ -426,13 +483,60 @@ export default function AgentsPage() {
       const numbered = rules.map((r, i) => `${i + 1}. ${r}`).join("\n");
       parts.push(`القواعد العامة (التزم بها دائماً):\n${numbered}`);
     }
+    const styleText = renderExtractedStyle(style);
+    if (styleText) {
+      parts.push(`قالب الأسلوب المستخرَج من الأمثلة (حاكِه بدقّة):\n${styleText}`);
+    }
     if (templates.length > 0) {
       const blocks = templates
         .map((t, i) => `قالب ${i + 1} — ${t.title}:\n${t.content}`)
         .join("\n\n");
-      parts.push(`أمثلة وقوالب مرجعية (حاكي أسلوبها وبنيتها):\n\n${blocks}`);
+      parts.push(`أمثلة مرجعية كاملة:\n\n${blocks}`);
     }
     return parts.join("\n\n");
+  };
+
+  const extractStyle = async () => {
+    if (formData.examplePosts.length < 2) {
+      addToast("أضف مثالين على الأقل أوّلاً", "warning");
+      return;
+    }
+    setExtracting(true);
+    setExtractError("");
+    try {
+      const res = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "extract-style",
+          agentType: formData.agentType,
+          model: formData.modelName,
+          examples: formData.examplePosts.map((ex) => ({
+            title: ex.title,
+            content: ex.content,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل الاستخراج");
+      if (data.style && typeof data.style === "object") {
+        setExtractedStyle(data.style as ExtractedStyle);
+        setExtractedRaw(JSON.stringify(data.style, null, 2));
+        addToast("تم استخراج الأسلوب", "success");
+      } else if (typeof data.raw === "string") {
+        setExtractedRaw(data.raw);
+        setExtractError(
+          "تعذّر تحويل النتيجة إلى JSON منظّم. حرّر النصّ يدوياً قبل الحفظ."
+        );
+      } else {
+        throw new Error("لم يُرجع النموذج أيّ نتيجة");
+      }
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "خطأ غير معروف");
+      addToast(err instanceof Error ? err.message : "خطأ", "error");
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const openCreate = () => {
@@ -444,6 +548,9 @@ export default function AgentsPage() {
     setRawIntent("");
     setComposedPreview("");
     setSimInput("");
+    setExtractedStyle(null);
+    setExtractedRaw("");
+    setExtractError("");
     setShowCreateModal(true);
   };
 
@@ -457,6 +564,9 @@ export default function AgentsPage() {
     setCustomRule("");
     setRawIntent(agent.systemPrompt);
     setComposedPreview(agent.systemPrompt);
+    setExtractedStyle(null);
+    setExtractedRaw("");
+    setExtractError("");
     setShowCreateModal(true);
   };
 
@@ -471,6 +581,9 @@ export default function AgentsPage() {
     setRawIntent("");
     setComposedPreview("");
     setSimInput("");
+    setExtractedStyle(null);
+    setExtractedRaw("");
+    setExtractError("");
   };
 
   const toggleRule = (rule: string) => {
@@ -500,7 +613,8 @@ export default function AgentsPage() {
     const composed = composeSystemPrompt(
       rawIntent,
       Array.from(selectedRules),
-      formData.examplePosts
+      formData.examplePosts,
+      extractedStyle
     );
     setComposedPreview(composed);
     setFormData((p) => ({ ...p, systemPrompt: composed }));
@@ -1399,6 +1513,149 @@ export default function AgentsPage() {
                         💡 أضف {3 - formData.examplePosts.length} قالباً آخر لنتائج أكثر ثباتاً.
                       </p>
                     )}
+
+                    {/* AI extraction panel — appears once there are
+                        enough examples. Asks the model to extract the
+                        writing template (phases / tone / length / etc)
+                        so the agent replicates the style on every call. */}
+                    {formData.examplePosts.length >= 2 && (
+                      <div className="bg-gradient-to-br from-purple-500/[0.06] to-amber-400/[0.04] border border-amber-400/30 rounded-lg p-4 space-y-3">
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-8 h-8 rounded-md bg-amber-400/10 border border-amber-400/30 flex items-center justify-center shrink-0">
+                            <Wand2 className="w-4 h-4 text-amber-300" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[0.8rem] font-black text-white">
+                              استخراج قالب الأسلوب بالذكاء الاصطناعي
+                            </p>
+                            <p className="text-[0.65rem] text-neutral-400 mt-0.5 leading-snug">
+                              يحلّل النموذج {examplesNoun}ك ويستخرج: مراحل الكتابة (Hook → السياق → الخلاصة),
+                              النبرة، الطول المتوقّع، قواعد التنسيق، والكلمات المميّزة. الوكيل سيرى هذا القالب
+                              في كلّ استدعاء، فيحاكي الأسلوب بثبات.
+                            </p>
+                          </div>
+                          <button
+                            onClick={extractStyle}
+                            disabled={extracting}
+                            className="zto-btn zto-btn-gold zto-btn-sm shrink-0"
+                          >
+                            {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                            {extracting ? "جاري التحليل..." : extractedStyle || extractedRaw ? "إعادة الاستخراج" : "استخرج الأسلوب"}
+                          </button>
+                        </div>
+
+                        {extractError && (
+                          <div className="text-[0.7rem] text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded p-2 flex items-start gap-2">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{extractError}</span>
+                          </div>
+                        )}
+
+                        {extractedStyle && (
+                          <div className="space-y-2 zto-fade-in">
+                            <p className="text-[0.65rem] font-bold text-emerald-300 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3 h-3" />
+                              تمّ الاستخراج — هذا ما سيلتزم به الوكيل:
+                            </p>
+                            <div className="bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-2 text-[0.72rem]">
+                              {extractedStyle.tone && (
+                                <p><span className="text-amber-300 font-bold">النبرة:</span> <span className="text-neutral-200">{extractedStyle.tone}</span></p>
+                              )}
+                              {extractedStyle.voice && (
+                                <p><span className="text-amber-300 font-bold">الصوت:</span> <span className="text-neutral-200">{extractedStyle.voice}</span></p>
+                              )}
+                              {extractedStyle.length && (extractedStyle.length.minWords || extractedStyle.length.maxWords) && (
+                                <p>
+                                  <span className="text-amber-300 font-bold">الطول:</span>{" "}
+                                  <span className="text-neutral-200">
+                                    {extractedStyle.length.minWords ?? "?"} - {extractedStyle.length.maxWords ?? "?"} كلمة
+                                  </span>
+                                </p>
+                              )}
+                              {Array.isArray(extractedStyle.phases) && extractedStyle.phases.length > 0 && (
+                                <div>
+                                  <p className="text-amber-300 font-bold mb-1">مراحل الكتابة:</p>
+                                  <ol className="space-y-1.5 pr-4">
+                                    {extractedStyle.phases.map((ph, i) => (
+                                      <li key={i} className="text-neutral-200 leading-snug">
+                                        <span className="text-amber-200 font-bold">{i + 1}. {ph.name}</span>
+                                        {ph.purpose && <span className="text-neutral-400"> — {ph.purpose}</span>}
+                                        {ph.guidance && <div className="text-[0.65rem] text-neutral-500 mt-0.5">{ph.guidance}</div>}
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </div>
+                              )}
+                              {Array.isArray(extractedStyle.formattingRules) && extractedStyle.formattingRules.length > 0 && (
+                                <div>
+                                  <p className="text-amber-300 font-bold mb-1">قواعد التنسيق:</p>
+                                  <ul className="space-y-0.5 pr-4">
+                                    {extractedStyle.formattingRules.map((r, i) => (
+                                      <li key={i} className="text-neutral-300 leading-snug">• {r}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {Array.isArray(extractedStyle.vocabularySignals) && extractedStyle.vocabularySignals.length > 0 && (
+                                <div>
+                                  <p className="text-amber-300 font-bold mb-1">مفردات مميّزة:</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {extractedStyle.vocabularySignals.map((v, i) => (
+                                      <span key={i} className="text-[0.65rem] bg-amber-400/10 border border-amber-400/20 text-amber-200 rounded px-1.5 py-0.5">
+                                        {v}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {Array.isArray(extractedStyle.avoid) && extractedStyle.avoid.length > 0 && (
+                                <div>
+                                  <p className="text-red-300 font-bold mb-1">تجنّب:</p>
+                                  <ul className="space-y-0.5 pr-4">
+                                    {extractedStyle.avoid.map((a, i) => (
+                                      <li key={i} className="text-neutral-300 leading-snug">• {a}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                            <details className="text-[0.65rem]">
+                              <summary className="cursor-pointer text-neutral-500 hover:text-amber-300 font-bold">
+                                تحرير القالب يدوياً (JSON)
+                              </summary>
+                              <textarea
+                                value={extractedRaw}
+                                onChange={(e) => {
+                                  setExtractedRaw(e.target.value);
+                                  try {
+                                    setExtractedStyle(JSON.parse(e.target.value));
+                                  } catch {
+                                    // wait for valid JSON before applying
+                                  }
+                                }}
+                                className="zto-input mt-2 min-h-[160px] font-mono text-[0.7rem]"
+                                spellCheck={false}
+                              />
+                            </details>
+                          </div>
+                        )}
+
+                        {!extractedStyle && extractedRaw && (
+                          <div>
+                            <p className="text-[0.65rem] text-amber-300 mb-1 font-bold">النصّ الخام (حرّره ليصبح JSON صالحاً):</p>
+                            <textarea
+                              value={extractedRaw}
+                              onChange={(e) => {
+                                setExtractedRaw(e.target.value);
+                                try { setExtractedStyle(JSON.parse(e.target.value)); } catch {}
+                              }}
+                              className="zto-input min-h-[140px] font-mono text-[0.7rem]"
+                              spellCheck={false}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1434,6 +1691,12 @@ export default function AgentsPage() {
                         <p className="text-[0.75rem] text-purple-300 font-bold mt-1">{formData.temperature}</p>
                       </div>
                     </div>
+                    {extractedStyle && (
+                      <p className="text-[0.7rem] text-emerald-300 bg-emerald-500/5 border border-emerald-500/30 rounded p-2 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        قالب الأسلوب المستخرَج مُضمَّن في التعليمات — الوكيل سيحاكي مراحل الكتابة والنبرة من الأمثلة.
+                      </p>
+                    )}
 
                     {/* Composed prompt viewer */}
                     <div>
