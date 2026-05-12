@@ -1,22 +1,30 @@
 "use client";
 
-// Four-way theme picker:
-//   dark         → ZTO gold-on-near-black (default)
-//   light        → ZTO gold-on-paper
-//   signal       → Signal Engineering, dark
-//   signal-light → Signal Engineering, light
+// Six-way theme picker:
+//   dark            → ZTO gold-on-near-black (default)
+//   light           → ZTO gold-on-paper
+//   signal          → Signal Engineering, dark
+//   signal-light    → Signal Engineering, light
+//   editorial-dark  → Editorial serif, dark
+//   editorial-light → Editorial serif, light
 //
-// All four themes are pure CSS-token swaps driven by data-theme on <html>;
-// see globals.css for the token definitions. The user's choice persists in
-// localStorage under the same key the original toggles used. The control
-// renders as a segmented pill with one icon per option; a small "ZTO"/"SIG"
-// label sits between the gold pair and the signal pair so users can tell
-// which family each icon belongs to at a glance.
+// All themes are pure CSS-token swaps driven by data-theme on <html>;
+// see globals.css for the token definitions. The user's choice persists
+// in localStorage under the same key the original toggles used. The
+// control renders as a segmented pill with one icon per option; family
+// dividers (ZTO/SIG/ED) sit between the pairs so users can tell which
+// family each icon belongs to at a glance.
 
 import { useEffect, useState } from "react";
-import { Sun, Moon, Radio, Cpu } from "lucide-react";
+import { Sun, Moon, Radio, Cpu, BookOpen, Feather } from "lucide-react";
 
-type Theme = "dark" | "light" | "signal" | "signal-light";
+type Theme =
+  | "dark"
+  | "light"
+  | "signal"
+  | "signal-light"
+  | "editorial-dark"
+  | "editorial-light";
 
 const STORAGE_KEY = "zto-theme";
 
@@ -25,14 +33,16 @@ interface ThemeOption {
   hint: string;
   Icon: typeof Sun;
   // family used for the divider label
-  family: "zto" | "signal";
+  family: "zto" | "signal" | "editorial";
 }
 
 const THEMES: ThemeOption[] = [
-  { key: "dark",         hint: "ZTO ذهبي · داكن",        Icon: Moon,  family: "zto"    },
-  { key: "light",        hint: "ZTO ذهبي · فاتح",        Icon: Sun,   family: "zto"    },
-  { key: "signal",       hint: "Signal · داكن (هندسي)",  Icon: Radio, family: "signal" },
-  { key: "signal-light", hint: "Signal · فاتح (هندسي)",  Icon: Cpu,   family: "signal" },
+  { key: "dark",            hint: "ZTO ذهبي · داكن",         Icon: Moon,    family: "zto"       },
+  { key: "light",           hint: "ZTO ذهبي · فاتح",         Icon: Sun,     family: "zto"       },
+  { key: "signal",          hint: "Signal · داكن (هندسي)",   Icon: Radio,   family: "signal"    },
+  { key: "signal-light",    hint: "Signal · فاتح (هندسي)",   Icon: Cpu,     family: "signal"    },
+  { key: "editorial-dark",  hint: "تحريري · داكن (سيريف)",   Icon: BookOpen, family: "editorial" },
+  { key: "editorial-light", hint: "تحريري · فاتح (سيريف)",   Icon: Feather, family: "editorial" },
 ];
 
 function applyTheme(theme: Theme) {
@@ -48,10 +58,15 @@ export function ThemeToggle() {
   // matches a "dark" render to avoid the well-known hydration warning.
   useEffect(() => {
     const saved = (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) as Theme | null;
-    const initial: Theme =
-      saved === "light" || saved === "signal" || saved === "signal-light" || saved === "dark"
-        ? saved
-        : "dark";
+    const valid: Theme[] = [
+      "dark",
+      "light",
+      "signal",
+      "signal-light",
+      "editorial-dark",
+      "editorial-light",
+    ];
+    const initial: Theme = saved && valid.includes(saved) ? saved : "dark";
     setTheme(initial);
     applyTheme(initial);
     setMounted(true);
