@@ -84,6 +84,21 @@ async function loadMatching(
   return data ?? [];
 }
 
+// Content-writer access is stored on `app_users.allowed_table_ids` — a
+// separate, simpler model than the rules table editor/viewer use. We
+// short-circuit here so the airtable route's pre-flight gate doesn't
+// reject them before the allowlist filter runs.
+async function getContentWriterAllowedTableIds(userId: string): Promise<string[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("app_users")
+    .select("allowed_table_ids")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error || !data) return [];
+  return Array.isArray(data.allowed_table_ids) ? data.allowed_table_ids : [];
+}
+
 export async function checkPermission(
   userId: string,
   role: string,
@@ -92,6 +107,19 @@ export async function checkPermission(
   action: "canView" | "canEdit" | "canCreate" | "canDelete"
 ): Promise<boolean> {
   if (role === "admin") return true;
+
+  if (role === "content_writer") {
+    // Writers can view + edit (incl. create) on tables they've been
+    // granted. They cannot delete records — that stays admin/editor.
+    if (action === "canDelete") return false;
+    // Base-level pre-check (tableId === "*") used by the tables listing
+    // endpoint. Let it through; downstream code filters the table list
+    // by the allowlist anyway.
+    if (tableId === "*") return true;
+    const allowed = await getContentWriterAllowedTableIds(userId);
+    return allowed.includes(tableId);
+  }
+
   const rules = await loadMatching(userId, baseId, tableId);
   if (rules.length === 0) return false;
   const col = action === "canView" ? "can_view"
