@@ -751,48 +751,90 @@ export default function DashboardPage() {
   }, [selectedBase, addToast]);
 
   /* ──── Fetch records ──── */
+  // In kanban view we auto-paginate every page so newly-added
+  // records — which Airtable appends at the bottom — show up
+  // without the writer having to discover the small "next page"
+  // arrow. In grid view we keep the per-page model (still 100
+  // now, up from 50) so very large tables stay responsive.
   const loadRecords = useCallback(
-    (pageOffset?: string) => {
+    (pageOffset?: string, opts?: { drainAll?: boolean }) => {
       if (!selectedBase || !selectedTable) return;
       setLoadingRecords(true);
       setRecordsError(null);
-      const params = new URLSearchParams({
-        action: "records",
-        baseId: selectedBase.id,
-        tableId: selectedTable.id,
-        pageSize: "50",
-      });
-      if (pageOffset) params.set("offset", pageOffset);
-      if (filterFormula.trim()) params.set("filter", filterFormula.trim());
-      if (sortField) {
-        params.set("sortField", sortField);
-        params.set("sortDir", sortDir);
-      }
 
-      fetch(`/api/airtable?${params.toString()}`)
-        .then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then((data) => {
-          if (data.error) {
-            setRecordsError(data.error);
-            addToast(data.error, "error");
-          } else if (data.records) {
-            setRecords(data.records);
-            setOffset(data.offset);
+      const buildParams = (off?: string) => {
+        const p = new URLSearchParams({
+          action: "records",
+          baseId: selectedBase.id,
+          tableId: selectedTable.id,
+          pageSize: "100",
+        });
+        if (off) p.set("offset", off);
+        if (filterFormula.trim()) p.set("filter", filterFormula.trim());
+        if (sortField) {
+          p.set("sortField", sortField);
+          p.set("sortDir", sortDir);
+        }
+        return p;
+      };
+
+      const drain = opts?.drainAll === true;
+
+      (async () => {
+        try {
+          if (!drain) {
+            const params = buildParams(pageOffset);
+            const r = await fetch(`/api/airtable?${params.toString()}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            if (data.error) {
+              setRecordsError(data.error);
+              addToast(data.error, "error");
+              return;
+            }
+            if (data.records) {
+              setRecords(data.records);
+              setOffset(data.offset);
+              if (data.linkedRecordNames) {
+                setLinkedNames((prev) => ({ ...prev, ...data.linkedRecordNames }));
+              }
+            }
+            return;
+          }
+
+          // Drain mode: keep pulling until Airtable stops returning
+          // an offset. Cap at 20 pages (2k records) so a misconfig
+          // can't lock up the UI for minutes.
+          const acc: AirtableRecord[] = [];
+          let nextOffset: string | undefined;
+          for (let i = 0; i < 20; i++) {
+            const params = buildParams(i === 0 ? undefined : nextOffset);
+            const r = await fetch(`/api/airtable?${params.toString()}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            if (data.error) {
+              setRecordsError(data.error);
+              addToast(data.error, "error");
+              return;
+            }
+            if (Array.isArray(data.records)) acc.push(...data.records);
             if (data.linkedRecordNames) {
               setLinkedNames((prev) => ({ ...prev, ...data.linkedRecordNames }));
             }
+            nextOffset = data.offset;
+            if (!nextOffset) break;
           }
-        })
-        .catch(() => {
+          setRecords(acc);
+          setOffset(undefined);
+        } catch {
           const msg =
             "فشل تحميل السجلات. تحقق من صيغة الفلترة إذا كنت تستخدمها.";
           setRecordsError(msg);
           addToast(msg, "error");
-        })
-        .finally(() => setLoadingRecords(false));
+        } finally {
+          setLoadingRecords(false);
+        }
+      })();
     },
     [selectedBase, selectedTable, filterFormula, sortField, sortDir, addToast]
   );
@@ -800,9 +842,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (selectedTable) {
       setPrevOffsets([]);
-      loadRecords();
+      // Kanban defaults to "show me everything"; grid keeps paging.
+      loadRecords(undefined, { drainAll: view === "kanban" });
     }
-  }, [selectedTable, loadRecords]);
+  }, [selectedTable, loadRecords, view]);
 
   /* ──── Per-cell Edit ──── */
   const startCellEdit = (recordId: string, fieldName: string, currentValue: unknown) => {
@@ -1348,7 +1391,7 @@ export default function DashboardPage() {
                 value={sortField}
                 onChange={(e) => {
                   setSortField(e.target.value);
-                  loadRecords();
+                  loadRecords(undefined, { drainAll: view === "kanban" });
                 }}
               >
                 <option value="">ترتيب حسب...</option>
@@ -1545,9 +1588,10 @@ export default function DashboardPage() {
               {filteredRecords.length} سجل
             </span>
             <button
-              onClick={() => loadRecords()}
+              onClick={() => loadRecords(undefined, { drainAll: view === "kanban" })}
               disabled={loadingRecords}
               className="zto-btn zto-btn-ghost zto-btn-sm"
+              title={view === "kanban" ? "تحديث كل السجلات" : "تحديث الصفحة"}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingRecords ? "animate-spin" : ""}`} />
             </button>
@@ -1621,7 +1665,7 @@ export default function DashboardPage() {
                     updated[idx] = { ...rule, value: e.target.value };
                     setFilterRules(updated);
                   }}
-                  onKeyDown={(e) => { if (e.key === "Enter") loadRecords(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") loadRecords(undefined, { drainAll: view === "kanban" }); }}
                 />
               )}
               <button
@@ -1642,12 +1686,12 @@ export default function DashboardPage() {
             </button>
             {filterRules.length > 0 && (
               <>
-                <button onClick={() => loadRecords()} className="zto-btn zto-btn-gold zto-btn-sm">
+                <button onClick={() => loadRecords(undefined, { drainAll: view === "kanban" })} className="zto-btn zto-btn-gold zto-btn-sm">
                   <Filter className="w-3 h-3" />
                   تطبيق
                 </button>
                 <button
-                  onClick={() => { setFilterRules([]); loadRecords(); }}
+                  onClick={() => { setFilterRules([]); loadRecords(undefined, { drainAll: view === "kanban" }); }}
                   className="zto-btn zto-btn-ghost zto-btn-sm text-red-400"
                 >
                   <X className="w-3 h-3" />

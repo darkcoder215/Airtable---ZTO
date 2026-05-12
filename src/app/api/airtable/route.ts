@@ -2,7 +2,46 @@ import { NextRequest, NextResponse } from "next/server";
 import { listBases, listTables, listRecords, createRecord, updateRecord, deleteRecord, getRecord, resolveLinkedRecordNames, listComments, createComment, deleteComment } from "@/lib/airtable";
 import { verifySessionToken, getUserById } from "@/lib/auth";
 import { checkPermission, getFieldRestrictions } from "@/lib/access-control";
+import { listBrands } from "@/lib/scraper/db";
 import { logger } from "@/lib/logger";
+
+// Default Airtable column that carries the brand name. Records are
+// written here by the destination-mapping step ("Brand" by default).
+// If a future deployment renames the column, expose this via env.
+const BRAND_COLUMN = "Brand";
+
+// Build an Airtable formula that limits results to records whose
+// {Brand} column matches one of the writer's allowed brand names.
+// Returns null when the writer has no restriction set (NULL allowlist
+// or non-content_writer role), or when the brand IDs can't be
+// resolved. Empty array → returns a formula that matches nothing so
+// the writer sees no records (matching the "deny all" intent).
+async function buildBrandFilterFormula(
+  allowedBrandIds: string[] | null,
+  role: string
+): Promise<string | null> {
+  if (role !== "content_writer") return null;
+  if (allowedBrandIds == null) return null; // no restriction
+  if (allowedBrandIds.length === 0) {
+    // Explicit "no brand selected" → match nothing.
+    return "FALSE()";
+  }
+  try {
+    const allBrands = await listBrands();
+    const wanted = new Set(allowedBrandIds);
+    const names = allBrands
+      .filter((b) => wanted.has(b.id))
+      .map((b) => b.name)
+      .filter((n): n is string => typeof n === "string" && n.length > 0);
+    if (names.length === 0) return "FALSE()";
+    const escaped = names.map((n) => `"${n.replace(/"/g, "\\\"")}"`);
+    const ors = escaped.map((s) => `{${BRAND_COLUMN}}=${s}`).join(",");
+    return `OR(${ors})`;
+  } catch (err) {
+    logger.warn("Brand filter resolution failed", "API", err);
+    return null;
+  }
+}
 
 async function getUser(request: NextRequest) {
   const token = request.cookies.get("session")?.value;
@@ -65,11 +104,25 @@ export async function GET(request: NextRequest) {
 
         const offset = searchParams.get("offset") || undefined;
         const pageSize = searchParams.get("pageSize") ? parseInt(searchParams.get("pageSize")!) : 50;
-        const filterByFormula = searchParams.get("filter") || undefined;
+        const userFilter = searchParams.get("filter") || undefined;
         const sortField = searchParams.get("sortField");
         const sortDir = searchParams.get("sortDir") as "asc" | "desc" | null;
 
         const sort = sortField ? [{ field: sortField, direction: sortDir || ("asc" as const) }] : undefined;
+
+        // Server-side brand allowlist for content writers. The
+        // formula joins (AND) with whatever the user typed in the
+        // client filter so the writer can never escape the limit.
+        const brandFormula = await buildBrandFilterFormula(
+          user.allowedBrandIds,
+          user.role
+        );
+        let filterByFormula: string | undefined = userFilter;
+        if (brandFormula) {
+          filterByFormula = userFilter
+            ? `AND(${brandFormula},${userFilter})`
+            : brandFormula;
+        }
 
         const result = await listRecords(baseId, tableId, {
           pageSize,

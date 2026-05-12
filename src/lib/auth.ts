@@ -47,6 +47,10 @@ export interface SafeUser {
   // Airtable table IDs the user is allowed to see. NULL = no
   // restriction (the role tier already grants full access).
   allowedTableIds: string[] | null;
+  // Per-user brand allowlist for content_writer accounts. NULL = no
+  // restriction; an array (even empty) means the writer only sees
+  // records whose Brand column matches one of these brand IDs.
+  allowedBrandIds: string[] | null;
   // True when the Tasks tab + bell are visible for this user. Default
   // true for content_writer; admin can flip per user from access-control.
   tasksEnabled: boolean;
@@ -187,6 +191,7 @@ function mapUser(r: AppUserRow): SafeUser {
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
     allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
+    allowedBrandIds: Array.isArray(r.allowed_brand_ids) ? r.allowed_brand_ids : null,
     tasksEnabled: r.tasks_enabled === true || (r.tasks_enabled == null && r.role === "content_writer"),
   };
 }

@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 
 const VALID_ROLES: Role[] = ["admin", "editor", "content_writer", "viewer"];
 const TABLE_ID_RE = /^tbl[A-Za-z0-9]{8,32}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Tightened to ASCII-ish identifiers so URLs can stay clean and SQL never
 // sees anything weird. citext on the column gives us case-insensitive
@@ -37,6 +38,10 @@ interface SafePublicUser {
   // Per-user Airtable table allowlist (content_writer only). null
   // means "no restriction"; an array (even empty) means restricted.
   allowedTableIds: string[] | null;
+  // Per-user brand allowlist (content_writer only). null means "no
+  // restriction"; an array (even empty) means the writer only sees
+  // records whose Brand column matches one of these brand IDs.
+  allowedBrandIds: string[] | null;
   // True when the Tasks tab + bell are visible for this user.
   tasksEnabled: boolean;
 }
@@ -53,8 +58,30 @@ function map(r: Row): SafePublicUser {
     updatedAt: r.updated_at,
     lastLoginAt: r.last_login_at,
     allowedTableIds: Array.isArray(r.allowed_table_ids) ? r.allowed_table_ids : null,
+    allowedBrandIds: Array.isArray(r.allowed_brand_ids) ? r.allowed_brand_ids : null,
     tasksEnabled: r.tasks_enabled === true,
   };
+}
+
+// Validate a brand-id allowlist payload. Same shape as the table
+// allowlist but uses UUIDs (matching scraper_brands.id) rather than
+// Airtable table IDs.
+function readAllowedBrandIds(v: unknown): string[] | null {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) {
+    throw new Error("قائمة العلامات المسموحة يجب أن تكون مصفوفة");
+  }
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (typeof x !== "string") throw new Error("معرّف علامة غير صالح");
+    const t = x.trim();
+    if (!UUID_RE.test(t)) {
+      throw new Error(`معرّف علامة غير صالح: ${t.slice(0, 40)}`);
+    }
+    seen.add(t);
+  }
+  if (seen.size > 64) throw new Error("الحد الأقصى 64 علامة للمستخدم الواحد");
+  return Array.from(seen);
 }
 
 // Validate an allowlist payload. Returns either an array of valid
@@ -168,6 +195,11 @@ export async function POST(request: NextRequest) {
         // we explicitly null it so a stale value can't leak through.
         const allowed_table_ids =
           role === "content_writer" ? readAllowedTableIds(body.allowedTableIds) ?? [] : null;
+        // Brand allowlist follows the same rule — only stored for
+        // content_writer accounts. Empty array = "no brands picked
+        // yet" (visible nothing); null = "no restriction".
+        const allowed_brand_ids =
+          role === "content_writer" ? readAllowedBrandIds(body.allowedBrandIds) : null;
         // Tasks tab — defaults to true for content_writer, false otherwise.
         // The admin can override either way at create time.
         const tasks_enabled =
@@ -185,6 +217,7 @@ export async function POST(request: NextRequest) {
             password_hash,
             created_by: me.id,
             allowed_table_ids,
+            allowed_brand_ids,
             tasks_enabled,
           })
           .select()
@@ -254,6 +287,12 @@ export async function POST(request: NextRequest) {
         }
         if (nextRole && nextRole !== "content_writer" && body.allowedTableIds === undefined) {
           patch.allowed_table_ids = null;
+        }
+        if (body.allowedBrandIds !== undefined) {
+          patch.allowed_brand_ids = readAllowedBrandIds(body.allowedBrandIds);
+        }
+        if (nextRole && nextRole !== "content_writer" && body.allowedBrandIds === undefined) {
+          patch.allowed_brand_ids = null;
         }
         if (body.tasksEnabled !== undefined) {
           if (typeof body.tasksEnabled !== "boolean") {

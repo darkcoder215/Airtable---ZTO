@@ -169,6 +169,7 @@ export type Database = {
           last_login_at: string | null
           created_by: string | null
           allowed_table_ids: string[] | null
+          allowed_brand_ids: string[] | null
           tasks_enabled: boolean
         }
         Insert: {
@@ -184,6 +185,7 @@ export type Database = {
           last_login_at?: string | null
           created_by?: string | null
           allowed_table_ids?: string[] | null
+          allowed_brand_ids?: string[] | null
           tasks_enabled?: boolean
         }
         Update: {
@@ -199,6 +201,7 @@ export type Database = {
           last_login_at?: string | null
           created_by?: string | null
           allowed_table_ids?: string[] | null
+          allowed_brand_ids?: string[] | null
           tasks_enabled?: boolean
         }
         Relationships: []

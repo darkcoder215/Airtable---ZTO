@@ -45,6 +45,8 @@ interface AppUser {
   // Per-user Airtable table allowlist — only meaningful when role
   // is content_writer. NULL = inherit-from-role (full access).
   allowedTableIds: string[] | null;
+  // Brand allowlist (content_writer only). null = no restriction.
+  allowedBrandIds: string[] | null;
   // True when the Tasks tab + bell are visible for this user.
   tasksEnabled: boolean;
 }
@@ -102,6 +104,9 @@ interface FormState {
   // List of Airtable table IDs the user is allowed to see.
   // Only meaningful when role === "content_writer".
   allowedTableIds: string[];
+  // List of brand IDs the writer is allowed to see records for.
+  // Records outside these brands are hidden server-side.
+  allowedBrandIds: string[];
   // Enables the Tasks tab + the topbar bell.
   tasksEnabled: boolean;
 }
@@ -114,6 +119,7 @@ const blankForm = (): FormState => ({
   password: "",
   isActive: true,
   allowedTableIds: [],
+  allowedBrandIds: [],
   tasksEnabled: false,
 });
 
@@ -178,6 +184,7 @@ export default function AccessControlPage() {
       password: "",
       isActive: u.isActive,
       allowedTableIds: Array.isArray(u.allowedTableIds) ? u.allowedTableIds : [],
+      allowedBrandIds: Array.isArray(u.allowedBrandIds) ? u.allowedBrandIds : [],
       tasksEnabled: u.tasksEnabled === true,
     });
     setError(null);
@@ -209,8 +216,10 @@ export default function AccessControlPage() {
       // stale restriction left over from a role swap.
       if (form.role === "content_writer") {
         payload.allowedTableIds = form.allowedTableIds;
+        payload.allowedBrandIds = form.allowedBrandIds;
       } else if (form.id) {
         payload.allowedTableIds = null;
+        payload.allowedBrandIds = null;
       }
       payload.tasksEnabled = form.tasksEnabled;
       const res = await fetch("/api/users", {
@@ -673,6 +682,23 @@ export default function AccessControlPage() {
                 </section>
               )}
 
+              {form.role === "content_writer" && (
+                <section className="space-y-2">
+                  <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
+                    ٤.١ العلامات المسموحة (تصفية حسب العلامة)
+                  </h4>
+                  <p className="text-[0.65rem] text-neutral-500 leading-relaxed">
+                    حدّد العلامات التجارية التي سيرى الكاتب سجلاتها. الفلترة تتم على عمود
+                    <code className="text-amber-300 mx-1 font-mono">Brand</code>
+                    في Airtable. إذا تركتها فارغة، لن يرى أيّ سجل ضمن جداوله. اتركها بلا اختيار (شاملة) لإلغاء التقييد عبر تعديل لاحق.
+                  </p>
+                  <AllowedBrandsPicker
+                    selected={form.allowedBrandIds}
+                    onChange={(next) => setForm((p) => ({ ...p, allowedBrandIds: next }))}
+                  />
+                </section>
+              )}
+
               {/* Toggles section */}
               <section className="space-y-2">
                 <h4 className="text-[0.65rem] font-black text-neutral-500 uppercase tracking-wider border-b border-neutral-800 pb-1">
@@ -896,6 +922,142 @@ function AllowedTablesPicker({
   );
 }
 
+/* ─────────────── AllowedBrandsPicker ───────────────
+   Same pattern as AllowedTablesPicker but pulls from /api/brands. The
+   writer's records get filtered server-side against {Brand}=brand.name
+   in Airtable, so the admin picks brand IDs here and the server does
+   the name lookup at request time. */
+function AllowedBrandsPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  interface BrandLite { id: string; name: string; slug: string }
+  const [brands, setBrands] = useState<BrandLite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch("/api/brands");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "فشل تحميل العلامات");
+        if (cancelled) return;
+        const list = Array.isArray(data.brands) ? data.brands : [];
+        setBrands(
+          list.map((b: { id: string; name: string; slug: string }) => ({
+            id: b.id,
+            name: b.name,
+            slug: b.slug,
+          }))
+        );
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "فشل تحميل العلامات");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggle = (id: string) => {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+  const selectAll = () => onChange(brands.map((b) => b.id));
+  const selectNone = () => onChange([]);
+
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? brands.filter((b) => b.name.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q))
+    : brands;
+
+  return (
+    <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <div>
+          <p className="text-sm font-bold text-white">العلامات المسموحة</p>
+          <p className="text-[0.65rem] text-neutral-400 mt-0.5">
+            الفلترة تطبَّق على عمود <code className="text-amber-300 mx-0.5 font-mono">Brand</code>
+            في كلّ جدول. الكاتب يرى فقط السجلات المنسوبة لهذه العلامات.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={loading || brands.length === 0}
+            className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-emerald-400 hover:text-emerald-300 disabled:opacity-40"
+          >
+            تحديد الكل
+          </button>
+          <button
+            type="button"
+            onClick={selectNone}
+            disabled={loading || selected.length === 0}
+            className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-red-400 hover:text-red-300 disabled:opacity-40"
+          >
+            مسح
+          </button>
+        </div>
+      </div>
+
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="بحث في العلامات..."
+        className="zto-input text-xs mb-2"
+      />
+
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-4 h-4 animate-spin text-neutral-500" />
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2">{error}</p>
+      ) : visible.length === 0 ? (
+        <p className="text-center py-4 text-xs text-neutral-500 font-bold">
+          {brands.length === 0 ? "لا توجد علامات بعد — أضفها من قسم «العلامات والمصادر»" : "لا نتائج للبحث"}
+        </p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto bg-[#0d0d0d] border border-neutral-800 rounded space-y-0.5 p-1">
+          {visible.map((b) => {
+            const checked = selected.includes(b.id);
+            return (
+              <label
+                key={b.id}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                  checked ? "bg-emerald-400/10 text-emerald-100" : "text-neutral-300 hover:bg-neutral-800/40"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(b.id)}
+                  className="shrink-0"
+                />
+                <span className="text-xs font-bold truncate flex-1">{b.name}</span>
+                <code className="text-[0.55rem] text-neutral-500 font-mono">{b.slug}</code>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="text-[0.6rem] text-neutral-500 mt-2 font-bold">
+        {selected.length} علامة مختارة من أصل {brands.length}
+      </p>
+    </div>
+  );
+}
+
 /* ─────────────── FormPreview ───────────────
    Live recap of what the new/edited user will be able to do, based on
    the current form state. Helps the admin double-check the choices
@@ -919,6 +1081,11 @@ function FormPreview({ form }: { form: FormState }) {
       deny.push("لا توجد جداول مخصّصة — لن يرى أيّ بيانات بعد تسجيل الدخول");
     } else {
       allow.push(`${form.allowedTableIds.length} جدول من Airtable (تحرير + قراءة، بدون حذف)`);
+    }
+    if (form.allowedBrandIds.length === 0) {
+      deny.push("لا توجد علامات مخصّصة — لن يرى أيّ سجل (الفلترة على عمود Brand)");
+    } else {
+      allow.push(`${form.allowedBrandIds.length} علامة — يرى فقط سجلات هذه العلامات`);
     }
     allow.push("مولّد الصور + وكلاء الكتابة");
     deny.push("المصادر + التحليلات + لوحات الفريق + إدارة المستخدمين + السجلات");
