@@ -1,79 +1,3 @@
-@import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Sora:wght@200;300;400;500;600;700;800&display=swap');
-
-/* Tinta Arabic — local file ships in /public/fonts. Two weights only
-   (Light + Bold). We expose them as 300 and 700 in the @font-face rules,
-   then let CSS interpolate from the same file with `font-weight: 100 300`
-   / `400 700` ranges so the engine picks Light for thin text and Bold
-   for emphasis. Display: swap keeps Sora visible while Tinta downloads.
-   Same unicode-range trick as Naveid below — these brand display faces
-   often have weak / missing Latin + digit glyphs, so we scope them to
-   Arabic codepoints and let the rest of the font stack (Sora / IBM Plex
-   Sans Arabic / system-ui) handle Latin and numerals. */
-@font-face {
-  font-family: 'Tinta Arabic';
-  font-style: normal;
-  font-weight: 100 300;
-  font-display: swap;
-  src: url('/fonts/TintaArabic-Light.otf') format('opentype');
-  unicode-range:
-    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
-}
-@font-face {
-  font-family: 'Tinta Arabic';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/fonts/TintaArabic-Bold.otf') format('opentype');
-  unicode-range:
-    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
-}
-
-/* Naveid Arabic DEMO — three discrete weights (Thin / Regular /
-   ExtraBold). We split the weight ranges so 100-300 picks Thin, 400-600
-   picks Regular, 700-900 picks ExtraBold. Used by the gold ZTO themes
-   (dark + light) for a more contemporary Arabic display face than the
-   default Noto Kufi.
-
-   `unicode-range` is critical here: Naveid's DEMO build doesn't ship
-   complete Latin or digit glyphs, so without scoping the file the
-   browser would either substitute a fallback per-character (giving
-   inconsistent number widths) or render numerals as broken/wrong
-   shapes. Restricting the file to Arabic codepoints lets Latin / digits
-   fall through cleanly to the next font in the stack (Noto Kufi
-   Arabic, which has correct Latin numerals). */
-@font-face {
-  font-family: 'Naveid Arabic';
-  font-style: normal;
-  font-weight: 100 300;
-  font-display: swap;
-  src: url('/fonts/NaveidArabicDEMO-Thin.otf') format('opentype');
-  unicode-range:
-    U+0600-06FF, /* Arabic                          */
-    U+0750-077F, /* Arabic Supplement               */
-    U+08A0-08FF, /* Arabic Extended-A               */
-    U+FB50-FDFF, /* Arabic Presentation Forms-A     */
-    U+FE70-FEFF; /* Arabic Presentation Forms-B     */
-}
-@font-face {
-  font-family: 'Naveid Arabic';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/NaveidArabicDEMO-Regular.otf') format('opentype');
-  unicode-range:
-    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
-}
-@font-face {
-  font-family: 'Naveid Arabic';
-  font-style: normal;
-  font-weight: 700 900;
-  font-display: swap;
-  src: url('/fonts/NaveidArabicDEMO-ExtraBold.otf') format('opentype');
-  unicode-range:
-    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
-}
-
 /* ============================================================
    Tailwind theme tokens — these stay in @theme so utilities
    like bg-brand and text-gold work. Default values match the
@@ -101,91 +25,13 @@
   --color-err-bg: var(--c-err-bg);
   --color-info: var(--c-info);
   --color-info-bg: var(--c-info-bg);
-  /* Default font stack — used by both ZTO gold themes. Naveid Arabic
-     leads for the contemporary display feel; Noto Kufi is the safe
-     fallback while Naveid loads (and for any glyph it doesn't cover). */
-  --font-sans: 'Naveid Arabic', 'Noto Kufi Arabic', system-ui, sans-serif;
+  /* Default font stack — the editorial themes override body to the
+     serif text family; this stack just keeps a sensible Arabic-aware
+     system fallback for any surface that doesn't explicitly set one. */
+  --font-sans: "Editorial Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
 }
 
-/* ============================================================
-   Default (dark) theme
-   ============================================================ */
-:root,
-[data-theme="dark"] {
-  --c-brand: #1a1a1a;
-  --c-brand-light: #232323;
-  --c-brand-lighter: #2e2e2e;
-  --c-brand-border: #3a3a3a;
-  --c-brand-hover: #444444;
-  --c-gold: #c9a84c;
-  --c-gold-dark: #a88a3a;
-  --c-gold-light: #e2cc7e;
-  --c-gold-bg: rgba(201, 168, 76, 0.12);
-  --c-txt: #e4e4e4;
-  --c-txt-dim: #9a9a9a;
-  --c-txt-faint: #666666;
-  --c-ok: #34d399;
-  --c-ok-bg: rgba(52, 211, 153, 0.12);
-  --c-warn: #fbbf24;
-  --c-warn-bg: rgba(251, 191, 36, 0.12);
-  --c-err: #f87171;
-  --c-err-bg: rgba(248, 113, 113, 0.12);
-  --c-info: #60a5fa;
-  --c-info-bg: rgba(96, 165, 250, 0.12);
 
-  /* Semantic surface tokens used by the override layer below. */
-  --surface-page: #111111;
-  --surface-card: #1a1a1a;
-  --surface-elevated: #232323;
-  --surface-sunken: #0d0d0d;
-  --surface-header: #161616;
-  --border-strong: #3a3a3a;
-  --border-soft: #262626;
-  --text-strong: #ffffff;
-  --text-base: #e4e4e4;
-  --text-dim: #9a9a9a;
-  --text-faint: #666666;
-  --modal-overlay: rgba(0, 0, 0, 0.65);
-}
-
-/* ============================================================
-   Light theme — bold black text on pure white
-   ============================================================ */
-[data-theme="light"] {
-  --c-brand: #ffffff;
-  --c-brand-light: #f4f4f5;
-  --c-brand-lighter: #e7e7e9;
-  --c-brand-border: #d4d4d8;
-  --c-brand-hover: #a1a1aa;
-  --c-gold: #a07a1f;
-  --c-gold-dark: #7a5d18;
-  --c-gold-light: #c9a84c;
-  --c-gold-bg: rgba(160, 122, 31, 0.12);
-  --c-txt: #0a0a0a;
-  --c-txt-dim: #404040;
-  --c-txt-faint: #737373;
-  --c-ok: #047857;
-  --c-ok-bg: rgba(4, 120, 87, 0.10);
-  --c-warn: #b45309;
-  --c-warn-bg: rgba(180, 83, 9, 0.10);
-  --c-err: #b91c1c;
-  --c-err-bg: rgba(185, 28, 28, 0.10);
-  --c-info: #1d4ed8;
-  --c-info-bg: rgba(29, 78, 216, 0.10);
-
-  --surface-page: #ffffff;
-  --surface-card: #ffffff;
-  --surface-elevated: #f4f4f5;
-  --surface-sunken: #fafafa;
-  --surface-header: #f4f4f5;
-  --border-strong: #d4d4d8;
-  --border-soft: #e7e7e9;
-  --text-strong: #000000;
-  --text-base: #0a0a0a;
-  --text-dim: #404040;
-  --text-faint: #737373;
-  --modal-overlay: rgba(15, 23, 42, 0.45);
-}
 
 @layer base {
   html { direction: rtl; }
@@ -233,7 +79,6 @@
   background: var(--c-gold); color: #000; border-color: var(--c-gold);
 }
 .zto-btn-gold:hover:not(:disabled) { background: var(--c-gold-dark); border-color: var(--c-gold-dark); }
-[data-theme="light"] .zto-btn-gold { color: #fff; }
 
 .zto-btn-ghost {
   background: transparent; color: var(--c-txt-dim); border-color: transparent;
@@ -254,7 +99,6 @@
 .zto-btn-ok {
   background: var(--c-ok); color: #000; border-color: var(--c-ok);
 }
-[data-theme="light"] .zto-btn-ok { color: #fff; }
 
 .zto-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
 
@@ -354,14 +198,6 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
     radial-gradient(circle at 80% 100%, rgba(99,102,241,0.05) 0%, transparent 40%),
     linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-  background-size: auto, auto, 48px 48px, 48px 48px;
-}
-[data-theme="light"] .zto-grid-backdrop {
-  background-image:
-    radial-gradient(circle at 20% 0%, rgba(201,168,76,0.10) 0%, transparent 35%),
-    radial-gradient(circle at 80% 100%, rgba(99,102,241,0.08) 0%, transparent 40%),
-    linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px);
   background-size: auto, auto, 48px 48px, 48px 48px;
 }
 
@@ -469,7 +305,6 @@ button.zto-card:hover {
   box-shadow: 0 24px 48px rgba(0,0,0,0.5);
   width: 100%; max-height: 85vh; overflow-y: auto;
 }
-[data-theme="light"] .zto-modal { box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18); }
 
 /* ========== Toast ========== */
 .zto-toast {
@@ -523,875 +358,12 @@ button.zto-card:hover {
    light mode without touching every component. Dark mode
    keeps the original Tailwind values untouched.
    ============================================================ */
-[data-theme="light"] .bg-\[\#0d0d0d\],
-[data-theme="light"] .bg-\[\#111\],
-[data-theme="light"] .bg-\[\#111111\],
-[data-theme="light"] .bg-\[\#0a0a0a\] {
-  background-color: var(--surface-sunken) !important;
-}
-[data-theme="light"] .bg-\[\#1a1a1a\],
-[data-theme="light"] .bg-\[\#151515\],
-[data-theme="light"] .bg-\[\#161616\],
-[data-theme="light"] .bg-\[\#181818\],
-[data-theme="light"] .bg-neutral-900,
-[data-theme="light"] .bg-zinc-900,
-[data-theme="light"] .bg-stone-900 {
-  background-color: var(--surface-card) !important;
-}
-[data-theme="light"] .bg-\[\#232323\],
-[data-theme="light"] .bg-\[\#252525\],
-[data-theme="light"] .bg-\[\#2a2a2a\],
-[data-theme="light"] .bg-\[\#2e2e2e\],
-[data-theme="light"] .bg-neutral-800,
-[data-theme="light"] .bg-zinc-800,
-[data-theme="light"] .bg-stone-800 {
-  background-color: var(--surface-elevated) !important;
-}
-[data-theme="light"] .bg-black {
-  background-color: var(--surface-page) !important;
-}
-[data-theme="light"] .bg-black\/50,
-[data-theme="light"] .bg-black\/40,
-[data-theme="light"] .bg-black\/60 {
-  background-color: rgba(15, 23, 42, 0.30) !important;
-}
 
-[data-theme="light"] .text-white,
-[data-theme="light"] .text-neutral-50,
-[data-theme="light"] .text-neutral-100,
-[data-theme="light"] .text-zinc-50,
-[data-theme="light"] .text-zinc-100 {
-  color: var(--text-strong) !important;
-  font-weight: 700;
-}
-[data-theme="light"] .text-neutral-200,
-[data-theme="light"] .text-neutral-300,
-[data-theme="light"] .text-neutral-400,
-[data-theme="light"] .text-zinc-300,
-[data-theme="light"] .text-zinc-400 {
-  color: var(--text-dim) !important;
-}
-[data-theme="light"] .text-neutral-500,
-[data-theme="light"] .text-neutral-600,
-[data-theme="light"] .text-zinc-500,
-[data-theme="light"] .text-zinc-600 {
-  color: var(--text-faint) !important;
-}
 
-[data-theme="light"] .border-neutral-700,
-[data-theme="light"] .border-neutral-800,
-[data-theme="light"] .border-neutral-900,
-[data-theme="light"] .border-zinc-700,
-[data-theme="light"] .border-zinc-800,
-[data-theme="light"] .border-\[\#3a3a3a\],
-[data-theme="light"] .border-\[\#2a2a2a\],
-[data-theme="light"] .border-\[\#2e2e2e\] {
-  border-color: var(--border-strong) !important;
-}
 
 /* Brand accents (gold/amber) stay as-is for recognizability,
    but soften for white backgrounds. */
-[data-theme="light"] .text-amber-400,
-[data-theme="light"] .text-amber-500,
-[data-theme="light"] .text-yellow-400 {
-  color: var(--c-gold) !important;
-}
 
-/* ============================================================
-   SIGNAL ENGINEERING theme — v2 (upgraded spec)
-   Dark-mode engineering aesthetic with a single saturated blue
-   accent, mono labels, sharp 2-4px corners, and a faint 48px grid
-   backdrop. Activated by setting data-theme="signal" on <html>.
-
-   Strategy: map the project's familiar token names (--c-brand,
-   --c-gold, ...) onto Signal's paper/ink/signal palette so every
-   existing component recolors automatically without changing the
-   component source. Class-scoped overrides (radius, borders,
-   fonts) tighten the visual identity. Arabic is paired with
-   IBM Plex Sans Arabic — same engineering character as Sora,
-   designed alongside IBM Plex Sans for technical contexts; we
-   list it inside the font stack so Latin glyphs pick up Sora
-   while Arabic glyphs pick up IBM Plex Sans Arabic.
-   ============================================================ */
-[data-theme="signal"], [data-theme="signal-light"] {
-  /* Signal palette — see SIGNAL ENGINEERING / DESIGN SYSTEM v2 */
-  --signal: #2E6BFF;
-  --signal-bright: #4F8BFF;
-  --signal-deep: #1A4DCC;
-  --signal-glow: rgba(46, 107, 255, 0.35);
-  --signal-wash: rgba(46, 107, 255, 0.08);
-  --cyan-edge: #4FD4E3;
-  --success: #3DD68C;
-  --amber-warn: #E8A33D;
-
-  /* Map the project's brand/gold token names onto Signal so
-     every utility class (zto-btn-gold, zto-badge-gold, ...) and
-     every Tailwind override below recolors automatically. */
-  --c-brand: #0A0C12;          /* card background (ink-1) */
-  --c-brand-light: #10131B;    /* popover (ink-2) */
-  --c-brand-lighter: #171B26;  /* muted surface (ink-3) */
-  --c-brand-border: #2A2F3E;   /* card border (ink-border) */
-  --c-brand-hover: #1E2230;    /* subtle hover */
-  --c-gold: var(--signal);
-  --c-gold-dark: var(--signal-deep);
-  --c-gold-light: var(--signal-bright);
-  --c-gold-bg: var(--signal-wash);
-  --c-txt: #F2F3F5;            /* paper */
-  --c-txt-dim: #B7BCC9;        /* paper-mute */
-  --c-txt-faint: #70768A;      /* paper-dim */
-  --c-ok: var(--success);
-  --c-ok-bg: rgba(61, 214, 140, 0.10);
-  --c-warn: var(--amber-warn);
-  --c-warn-bg: rgba(232, 163, 61, 0.10);
-  --c-err: #E8A33D;            /* signal uses amber for warn/err — never red */
-  --c-err-bg: rgba(232, 163, 61, 0.10);
-  --c-info: var(--signal-bright);
-  --c-info-bg: var(--signal-wash);
-
-  --surface-page: #06070A;     /* ink — true near-black, never grey */
-  --surface-card: #0A0C12;     /* ink-1 */
-  --surface-elevated: #10131B; /* ink-2 */
-  --surface-sunken: #06070A;
-  --surface-header: #0A0C12;
-  --border-strong: #2A2F3E;
-  --border-soft: #1E2230;
-  --text-strong: #F2F3F5;      /* spec: never pure white */
-  --text-base: #F2F3F5;
-  --text-dim: #B7BCC9;
-  --text-faint: #70768A;
-  --modal-overlay: rgba(0, 0, 0, 0.78);
-
-  /* Display = Sora 200/600 split. Arabic falls through to
-     IBM Plex Sans Arabic, which pairs with Sora's geometric
-     character and ships in matching weights. Mono = JetBrains
-     Mono for tags, labels, numeric readouts. */
-  /* Display chain: Sora handles Latin/numerals; the browser falls
-     through to Tinta Arabic (the brand-owned face shipped from
-     /public/fonts) for Arabic codepoints, with IBM Plex Sans Arabic
-     as a safe fallback when Tinta hasn't loaded yet. */
-  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-  --font-sans: var(--font-display);
-}
-
-/* ========== Signal — LIGHT inversion ==========
-   Same engineering identity, paper-on-card. The brand chroma deepens
-   to #1D5CE0 for AA contrast on light surfaces, body weight bumps to
-   400 (per spec §3.4), semantic colours shift darker. Toggle via
-   data-theme="signal-light" on <html>. */
-[data-theme="signal-light"] {
-  --signal: #1D5CE0;
-  --signal-bright: #1248C0;
-  --signal-deep: #0D3699;
-  --signal-glow: rgba(29, 92, 224, 0.25);
-  --signal-wash: rgba(29, 92, 224, 0.06);
-  --cyan-edge: #0C8A98;
-  --success: #148C4E;
-  --amber-warn: #A86200;
-
-  --c-brand: #FFFFFF;
-  --c-brand-light: #EFF0F4;
-  --c-brand-lighter: #E5E7ED;
-  --c-brand-border: #B8BCC8;
-  --c-brand-hover: #D8DBE3;
-  --c-gold: var(--signal);
-  --c-gold-dark: var(--signal-deep);
-  --c-gold-light: var(--signal-bright);
-  --c-gold-bg: var(--signal-wash);
-  --c-txt: #0A0D14;
-  --c-txt-dim: #2D3348;
-  --c-txt-faint: #464E68;
-  --c-ok: var(--success);
-  --c-ok-bg: rgba(20, 140, 78, 0.10);
-  --c-warn: var(--amber-warn);
-  --c-warn-bg: rgba(168, 98, 0, 0.10);
-  --c-err: var(--amber-warn);
-  --c-err-bg: rgba(168, 98, 0, 0.10);
-  --c-info: var(--signal);
-  --c-info-bg: var(--signal-wash);
-
-  --surface-page: #F7F8FA;
-  --surface-card: #FFFFFF;
-  --surface-elevated: #EFF0F4;
-  --surface-sunken: #E5E7ED;
-  --surface-header: #FFFFFF;
-  --border-strong: #B8BCC8;
-  --border-soft: #D8DBE3;
-  --text-strong: #0A0D14;
-  --text-base: #0A0D14;
-  --text-dim: #2D3348;
-  --text-faint: #464E68;
-  --modal-overlay: rgba(10, 13, 20, 0.4);
-
-  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-  --font-sans: var(--font-display);
-}
-
-/* Body weight + 48px engineering grid. The spec is austere — no
-   node dots, no diagonal traces. Two soft radial signal glows
-   layered on body::after add depth without competing with the
-   grid lines. */
-[data-theme="signal"] body,
-[data-theme="signal-light"] body {
-  font-family: var(--font-display);
-  letter-spacing: -0.005em;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss01" 1;
-}
-[data-theme="signal"] body { font-weight: 300; }
-/* Light variant uses 400 body per spec §3.4 — thin weight on a
-   light surface looks washed out otherwise. */
-[data-theme="signal-light"] body { font-weight: 400; }
-
-/* Blur safeguard for small UI text. Sora 200/300 reads cleanly at
-   display sizes but pixel-snapping at <=12px on a dark surface
-   makes the weight look fuzzy. We bump the floor weight to 500
-   for tiny text and keep mono numerics aliased.
-   These selectors pick up the Tailwind size utilities the codebase
-   uses heavily (text-[0.55rem] through text-[0.7rem] and text-xs). */
-[data-theme="signal"] .text-\[0\.55rem\],
-[data-theme="signal"] .text-\[0\.6rem\],
-[data-theme="signal"] .text-\[0\.65rem\],
-[data-theme="signal"] .text-\[0\.7rem\],
-[data-theme="signal-light"] .text-\[0\.55rem\],
-[data-theme="signal-light"] .text-\[0\.6rem\],
-[data-theme="signal-light"] .text-\[0\.65rem\],
-[data-theme="signal-light"] .text-\[0\.7rem\] {
-  font-weight: 500;
-}
-[data-theme="signal"] .text-xs,
-[data-theme="signal-light"] .text-xs {
-  font-weight: 500;
-}
-[data-theme="signal"] .font-mono,
-[data-theme="signal-light"] .font-mono {
-  font-family: var(--font-mono);
-  /* Mono numerics stay aliased — antialiasing softens their stroke
-     contrast which is exactly what makes timestamps look fuzzy. */
-  -webkit-font-smoothing: subpixel-antialiased;
-  -moz-osx-font-smoothing: auto;
-}
-
-/* Backdrop — austere 48px grid + two soft radial signal glows.
-   Same pattern in both signal variants, with grid line opacity
-   tuned per surface (white on dark / black on light). Each
-   selector is written out long-hand to avoid collapsing the
-   pseudo-element with the bare element — the previous combined
-   form accidentally applied position:fixed/inset:0 to <body>
-   itself, which removed the page from normal flow and made the
-   theme look completely broken. */
-[data-theme="signal"] body::before,
-[data-theme="signal-light"] body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background-size: 48px 48px;
-}
-[data-theme="signal"] body::before {
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-}
-[data-theme="signal-light"] body::before {
-  background-image:
-    linear-gradient(rgba(10, 13, 20, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(10, 13, 20, 0.04) 1px, transparent 1px);
-}
-[data-theme="signal"] body::after,
-[data-theme="signal-light"] body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-}
-[data-theme="signal"] body::after {
-  background:
-    radial-gradient(80vmin 60vmin at 80% 10%, rgba(46, 107, 255, 0.08), transparent 60%),
-    radial-gradient(60vmin 50vmin at 10% 90%, rgba(79, 212, 227, 0.04), transparent 60%);
-}
-[data-theme="signal-light"] body::after {
-  background:
-    radial-gradient(80vmin 60vmin at 80% 10%, rgba(29, 92, 224, 0.06), transparent 60%),
-    radial-gradient(60vmin 50vmin at 10% 90%, rgba(12, 138, 152, 0.04), transparent 60%);
-}
-/* Lift normal page content above the fixed grid + shapes layers
-   without disturbing the .signal-bg-shapes container itself
-   (it needs to keep its own position: fixed). */
-[data-theme="signal"] body > *:not(.signal-bg-shapes),
-[data-theme="signal-light"] body > *:not(.signal-bg-shapes) {
-  position: relative;
-  z-index: 1;
-}
-
-/* ===== Subtle drifting geometrical shapes ==========================
-   A tiny SVG layer behind the page renders four 1px-stroked outlines
-   (square, circle, triangle, hexagon) drifting at 60–100s loops with
-   ~0.06 opacity. The shapes are positioned absolutely in viewport
-   units so they never crowd content. CSS variables let signal-light
-   recolour them without duplicating the markup.
-   pointer-events: none keeps them invisible to interactions; will-
-   change isolates them on the GPU so the body composite stays cheap.
-*/
-[data-theme="signal"],
-[data-theme="signal-light"] { --signal-shape: var(--signal); }
-.signal-bg-shapes {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-  /* Only render under signal themes; the holder element is mounted
-     globally but stays invisible elsewhere. */
-  display: none;
-}
-[data-theme="signal"] .signal-bg-shapes,
-[data-theme="signal-light"] .signal-bg-shapes { display: block; }
-.signal-bg-shapes .shape {
-  position: absolute;
-  opacity: 0.07;
-  color: var(--signal);
-  will-change: transform, opacity;
-}
-[data-theme="signal-light"] .signal-bg-shapes .shape { opacity: 0.06; }
-.signal-bg-shapes .s1 { top: 8%;  right: 12%; width: 220px; height: 220px; animation: zto-bg-drift-a 80s ease-in-out infinite; }
-.signal-bg-shapes .s2 { top: 62%; right: 38%; width: 160px; height: 160px; animation: zto-bg-drift-b 95s ease-in-out infinite; }
-.signal-bg-shapes .s3 { top: 30%; left:  6%;  width: 280px; height: 280px; animation: zto-bg-drift-c 110s ease-in-out infinite; }
-.signal-bg-shapes .s4 { top: 78%; left:  20%; width: 180px; height: 180px; animation: zto-bg-drift-d 70s ease-in-out infinite; }
-@keyframes zto-bg-drift-a {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  50%      { transform: translate(-20px, 30px) rotate(45deg); }
-}
-@keyframes zto-bg-drift-b {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  50%      { transform: translate(28px, -22px) rotate(-30deg); }
-}
-@keyframes zto-bg-drift-c {
-  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
-  50%      { transform: translate(40px, 18px) rotate(60deg) scale(1.05); }
-}
-@keyframes zto-bg-drift-d {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  50%      { transform: translate(-26px, -34px) rotate(-50deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .signal-bg-shapes .shape { animation: none; }
-}
-
-/* Sharp engineering corners — override the rounded shapes the
-   default dark theme uses for the signature 2-4px radius. */
-[data-theme="signal"] .zto-card, [data-theme="signal-light"] .zto-card { border-radius: 4px; border-width: 1px; }
-[data-theme="signal"] .zto-btn, [data-theme="signal-light"] .zto-btn { border-radius: 4px; }
-[data-theme="signal"] .zto-btn-sm, [data-theme="signal-light"] .zto-btn-sm { border-radius: 4px; }
-[data-theme="signal"] .zto-input, [data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
-[data-theme="signal"] .zto-input:focus, [data-theme="signal-light"] .zto-input:focus {
-  border-color: var(--signal);
-  box-shadow: 0 0 0 3px var(--signal-glow);
-}
-[data-theme="signal"] .zto-section, [data-theme="signal-light"] .zto-section { padding: 22px; }
-[data-theme="signal"] .zto-badge, [data-theme="signal-light"] .zto-badge {
-  border-radius: 2px;
-  letter-spacing: 0.12em;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-[data-theme="signal"] .zto-roster-row, [data-theme="signal-light"] .zto-roster-row { border-radius: 4px; }
-[data-theme="signal"] .zto-glow-edge::before, [data-theme="signal-light"] .zto-glow-edge::before {
-  background: linear-gradient(180deg, var(--signal) 0%, transparent 60%);
-}
-
-/* The primary action button under Signal is engineering-style:
-   mono, uppercase, 0.18em tracking, 2px corners, signal-blue fill
-   with void text. This recolors every existing zto-btn-gold the
-   app already uses, so all CTAs flip in unison. */
-[data-theme="signal"] .zto-btn-gold, [data-theme="signal-light"] .zto-btn-gold {
-  background: var(--signal);
-  color: #000000;
-  border-color: var(--signal);
-  font-family: var(--font-mono);
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  border-radius: 2px;
-}
-[data-theme="signal"] .zto-btn-gold:hover:not(:disabled),
-[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
-  background: var(--signal-bright);
-  border-color: var(--signal-bright);
-  box-shadow: 0 0 0 3px var(--signal-glow);
-}
-[data-theme="signal"] .zto-btn-outline, [data-theme="signal-light"] .zto-btn-outline {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-/* Tailwind utility remap — the default app uses amber/emerald
-   freely; under Signal those flatten into signal-blue / success
-   so the visual language stays coherent. */
-[data-theme="signal"] .text-amber-400, [data-theme="signal-light"] .text-amber-400,
-[data-theme="signal"] .text-amber-300, [data-theme="signal-light"] .text-amber-300,
-[data-theme="signal"] .text-amber-500, [data-theme="signal-light"] .text-amber-500,
-[data-theme="signal"] .text-yellow-400, [data-theme="signal-light"] .text-yellow-400 {
-  color: var(--signal-bright) !important;
-}
-[data-theme="signal"] .bg-amber-400\/10, [data-theme="signal-light"] .bg-amber-400\/10,
-[data-theme="signal"] .bg-amber-400\/15, [data-theme="signal-light"] .bg-amber-400\/15,
-[data-theme="signal"] .bg-amber-400\/20, [data-theme="signal-light"] .bg-amber-400\/20,
-[data-theme="signal"] .bg-amber-500\/10, [data-theme="signal-light"] .bg-amber-500\/10 {
-  background-color: var(--signal-wash) !important;
-}
-[data-theme="signal"] .border-amber-400\/30, [data-theme="signal-light"] .border-amber-400\/30,
-[data-theme="signal"] .border-amber-400\/40, [data-theme="signal-light"] .border-amber-400\/40,
-[data-theme="signal"] .border-amber-500\/30, [data-theme="signal-light"] .border-amber-500\/30 {
-  border-color: rgba(46, 107, 255, 0.4) !important;
-}
-[data-theme="signal"] .text-emerald-400, [data-theme="signal-light"] .text-emerald-400,
-[data-theme="signal"] .text-emerald-300, [data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
-[data-theme="signal"] .bg-emerald-400\/10, [data-theme="signal-light"] .bg-emerald-400\/10,
-[data-theme="signal"] .bg-emerald-500\/10, [data-theme="signal-light"] .bg-emerald-500\/10 { background-color: rgba(61, 214, 140, 0.10) !important; }
-[data-theme="signal"] .border-emerald-400\/30, [data-theme="signal-light"] .border-emerald-400\/30,
-[data-theme="signal"] .border-emerald-500\/30, [data-theme="signal-light"] .border-emerald-500\/30 { border-color: rgba(61, 214, 140, 0.30) !important; }
-/* Spec says: never red for warnings — flip Tailwind reds to amber-warn. */
-[data-theme="signal"] .text-red-400, [data-theme="signal-light"] .text-red-400,
-[data-theme="signal"] .text-red-300, [data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
-[data-theme="signal"] .bg-red-500\/10, [data-theme="signal-light"] .bg-red-500\/10,
-[data-theme="signal"] .bg-red-500\/5, [data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(232, 163, 61, 0.10) !important; }
-[data-theme="signal"] .border-red-500\/30, [data-theme="signal-light"] .border-red-500\/30,
-[data-theme="signal"] .border-red-500\/40, [data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(232, 163, 61, 0.30) !important; }
-
-[data-theme="signal"] ::selection, [data-theme="signal-light"] ::selection { background: var(--signal); color: #FFFFFF; }
-
-/* ============================================================
-   Signal utility classes — eyebrow / tag / logo-mark / chrome /
-   corner-frame / display headlines / KPI / big stat / orbital
-   radar / severity dots. They're declared globally so any page
-   can use them, but most decorative bits gate on
-   data-theme=signal so the gold/light themes don't suddenly
-   grow stray L-brackets.
-   ============================================================ */
-
-/* >>> EYEBROW [01]
-   Thin uppercase mono label preceded by a 24px signal-blue dash. */
-.signal-eyebrow,
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--c-txt-dim);
-}
-.signal-eyebrow::before,
-.eyebrow::before {
-  content: "";
-  width: 24px;
-  height: 1px;
-  background: var(--c-gold);
-}
-
-/* Bracketed tag — supports the canonical >>> LABEL [01] pattern.
-   Pass three child spans: .arrow ">>>", the label as a text node,
-   and .bracket spans for the index. The .is-accent variant fills
-   with signal-wash and a thin signal border. */
-.signal-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--c-txt);
-  padding: 6px 12px;
-  border: 1px solid var(--c-brand-border);
-  background: var(--c-brand-light);
-  border-radius: 2px;
-  white-space: nowrap;
-}
-.signal-tag .arrow { color: var(--c-gold); font-weight: 700; }
-.signal-tag .bracket { color: var(--c-txt-faint); }
-.signal-tag.is-accent {
-  color: var(--c-gold-light);
-  border-color: rgba(46, 107, 255, 0.4);
-  background: var(--c-gold-bg);
-}
-.signal-tag.is-accent .bracket { color: var(--c-gold); }
-
-/* Logo mark — 28×28 signal-bordered square with a slow-rotating
-   dashed inner frame and a glowing centre dot. Pair with the
-   "[ LOGO ]" text placeholder in mono. */
-.logo-mark {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--c-gold);
-  border-radius: 2px;
-  background: var(--c-gold-bg);
-  flex: 0 0 28px;
-}
-.logo-mark::before {
-  content: "";
-  position: absolute;
-  inset: 4px;
-  border: 1px dashed rgba(46, 107, 255, 0.5);
-  border-radius: 1px;
-  animation: zto-logo-rotate 24s linear infinite;
-}
-.logo-mark::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  background: var(--c-gold);
-  border-radius: 50%;
-  box-shadow: 0 0 12px var(--c-gold);
-}
-@keyframes zto-logo-rotate { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .logo-mark::before { animation: none; }
-}
-
-/* Chrome row — top + bottom strip on slides / hero pages.
-   UPPERCASE, 0.22em tracking, mono. Children .l / .r split the row. */
-.signal-chrome {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--c-txt-faint);
-  border-bottom: 1px solid var(--c-brand-border);
-}
-.signal-chrome .l,
-.signal-chrome .r {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* Corner frame — 16px L-brackets at top-left + bottom-right.
-   Spec stays on data-theme=signal so the dark+gold theme's
-   regular cards aren't accidentally branded. */
-.corner-frame { position: relative; }
-[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before,
-[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
-  content: "";
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border: 1px solid var(--signal);
-  pointer-events: none;
-}
-[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before {
-  top: 20px;
-  left: 20px;
-  border-right: none;
-  border-bottom: none;
-}
-[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
-  bottom: 20px;
-  right: 20px;
-  border-left: none;
-  border-top: none;
-}
-
-/* Display headlines — Sora 200 with .pivot for the 600-weight
-   word that carries the meaning. Always one or two pivots, never
-   three. End with a period.
-
-   <h1 class="signal-display">
-     Engineered <span class="pivot">connectivity</span> for high-footfall <span class="pivot">venues.</span>
-   </h1>                                                                           */
-.signal-display {
-  font-family: var(--font-display);
-  font-weight: 200;
-  font-size: clamp(34px, 3.8vw, 54px);
-  line-height: 1.05;
-  letter-spacing: -0.025em;
-  color: var(--text-strong);
-}
-.signal-display.signal-display-xl {
-  font-size: clamp(44px, 6.5vw, 88px);
-  line-height: 0.95;
-}
-.signal-display .pivot { font-weight: 600; }
-
-/* KPI tile — the canonical metric card for dashboards. */
-.signal-kpi {
-  background: var(--c-brand);
-  border: 1px solid var(--c-brand-border);
-  border-radius: 4px;
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  position: relative;
-}
-.signal-kpi .label { font-size: 13px; font-weight: 500; color: var(--c-txt-dim); }
-.signal-kpi .meta {
-  font-family: var(--font-mono); font-size: 10px; font-weight: 400;
-  letter-spacing: 0.22em; text-transform: uppercase; color: var(--c-txt-faint);
-}
-.signal-kpi .value {
-  font-family: var(--font-display); font-weight: 300; font-size: 40px;
-  letter-spacing: -0.02em; color: var(--text-strong);
-  display: inline-flex; align-items: baseline; gap: 6px;
-}
-.signal-kpi .value .unit {
-  font-size: 13px; font-weight: 500; letter-spacing: 0.06em;
-  color: var(--c-gold);
-}
-.signal-kpi .delta {
-  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
-  letter-spacing: 0.06em;
-}
-.signal-kpi .delta.up   { color: var(--success); }
-.signal-kpi .delta.down { color: var(--amber-warn); }
-
-/* Big stat reveal — single massive number. One per page max. */
-.signal-bigstat {
-  font-family: var(--font-display);
-  font-weight: 200;
-  font-size: clamp(72px, 12vw, 160px);
-  line-height: 0.9;
-  letter-spacing: -0.03em;
-  color: var(--text-strong);
-  display: inline-flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.signal-bigstat .unit {
-  font-size: 0.18em; font-weight: 500; letter-spacing: 0.18em;
-  text-transform: uppercase; color: var(--c-gold);
-}
-
-/* Orbital radar — concentric dashed rings + rotating sweep + pulsing
-   core. Use for hero moments only. Pair with a mono caption like
-   "SCANNING · CH. 36 / 5 GHZ". 280–480px diameter. */
-.signal-radar {
-  position: relative;
-  width: 320px;
-  height: 320px;
-  display: grid;
-  place-items: center;
-}
-.signal-radar .ring {
-  position: absolute;
-  border: 1px solid var(--c-brand-border);
-  border-radius: 50%;
-}
-.signal-radar .ring.r1 { width: 100%; height: 100%; }
-.signal-radar .ring.r2 { width: 75%; height: 75%; border-style: dashed; opacity: 0.7; }
-.signal-radar .ring.r3 { width: 50%; height: 50%; opacity: 0.6; }
-.signal-radar .ring.r4 { width: 25%; height: 25%; border-style: dashed; opacity: 0.5; }
-.signal-radar .sweep {
-  position: absolute;
-  width: 100%; height: 100%;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg, transparent 0deg, var(--signal-glow) 30deg, transparent 60deg);
-  animation: zto-radar-sweep 5s linear infinite;
-}
-.signal-radar .core {
-  position: relative;
-  width: 10px; height: 10px;
-  background: var(--signal);
-  border-radius: 50%;
-  box-shadow: 0 0 16px var(--signal-glow);
-  animation: zto-radar-pulse 2.4s ease-out infinite;
-}
-.signal-radar .blip {
-  position: absolute;
-  width: 6px; height: 6px;
-  background: var(--cyan-edge);
-  border-radius: 50%;
-  box-shadow: 0 0 8px rgba(79, 212, 227, 0.7);
-}
-@keyframes zto-radar-sweep  { to { transform: rotate(360deg); } }
-@keyframes zto-radar-pulse  {
-  0%   { box-shadow: 0 0 0 0 var(--signal-glow); }
-  70%  { box-shadow: 0 0 0 24px rgba(46, 107, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(46, 107, 255, 0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .signal-radar .sweep,
-  .signal-radar .core { animation: none; }
-}
-
-/* Severity dots/badges. */
-.severity-critical { color: #E8A33D; background: rgba(232,163,61,.10); border: 1px solid rgba(232,163,61,.30); }
-.severity-major    { color: #4FD4E3; background: rgba(79,212,227,.10); border: 1px solid rgba(79,212,227,.30); }
-.severity-minor    { color: #B7BCC9; background: rgba(183,188,201,.08); border: 1px solid rgba(183,188,201,.20); }
-.severity-positive { color: #3DD68C; background: rgba(61,214,140,.10); border: 1px solid rgba(61,214,140,.30); }
-
-/* SVG dash-flow — used on architecture diagrams + signal traces. */
-@keyframes ztoSignalDash { to { stroke-dashoffset: -24; } }
-[data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash {
-  stroke-dasharray: 4 8;
-  animation: ztoSignalDash 2s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash { animation: none; }
-}
-
-/* ============================================================
-   Comprehensive component coverage under both Signal variants.
-   Every surface that ships its own background / border / radius
-   gets re-tuned here so the engineering identity is consistent
-   across cards, tables, dividers, scrollbars, modals, popovers,
-   roster rows, and the page-guide accent strip.
-   ============================================================ */
-
-/* Tables — sharper rows, mono headers, colour-tuned hover. */
-[data-theme="signal"] .zto-th,
-[data-theme="signal-light"] .zto-th {
-  background: var(--c-brand-light);
-  color: var(--c-txt-faint);
-  border-bottom: 1px solid var(--c-brand-border);
-  font-family: var(--font-mono);
-  letter-spacing: 0.18em;
-}
-[data-theme="signal"] .zto-td,
-[data-theme="signal-light"] .zto-td {
-  border-bottom-color: var(--c-brand-border);
-  font-weight: 400;
-}
-[data-theme="signal"] table tbody tr:hover,
-[data-theme="signal-light"] table tbody tr:hover {
-  background: var(--c-gold-bg);
-}
-
-/* Dividers + soft borders. */
-[data-theme="signal"] .border-neutral-800,
-[data-theme="signal"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
-[data-theme="signal-light"] .border-neutral-800,
-[data-theme="signal-light"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
-[data-theme="signal"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]),
-[data-theme="signal-light"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]) {
-  border-color: var(--c-brand-border) !important;
-}
-
-/* Neutral surfaces (lots of components use bg-[#1a1a1a] / [#0d0d0d]
-   / [#161616] inline). Map them onto Signal's ink-1 / ink-2 / ink. */
-[data-theme="signal"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
-[data-theme="signal"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
-[data-theme="signal"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
-[data-theme="signal"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
-[data-theme="signal"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
-[data-theme="signal-light"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
-[data-theme="signal-light"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
-[data-theme="signal-light"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
-[data-theme="signal-light"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
-[data-theme="signal-light"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
-/* Hard text colours used in places. */
-[data-theme="signal-light"] .text-white { color: var(--text-strong) !important; }
-[data-theme="signal-light"] .text-neutral-300,
-[data-theme="signal-light"] .text-neutral-400 { color: var(--c-txt) !important; }
-[data-theme="signal-light"] .text-neutral-500 { color: var(--c-txt-dim) !important; }
-[data-theme="signal-light"] .text-neutral-600,
-[data-theme="signal-light"] .text-neutral-700 { color: var(--c-txt-faint) !important; }
-
-/* Scrollbar accents pick up the brand. */
-[data-theme="signal"] ::-webkit-scrollbar-thumb,
-[data-theme="signal-light"] ::-webkit-scrollbar-thumb {
-  background: var(--c-brand-border);
-  border-radius: 2px;
-}
-[data-theme="signal"] ::-webkit-scrollbar-thumb:hover,
-[data-theme="signal-light"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--signal);
-}
-
-/* Modal / popover surfaces — Signal prefers ink-2 popovers with a
-   thin signal border so they read as instrument panels. */
-[data-theme="signal"] .zto-modal,
-[data-theme="signal"] .zto-modal-content,
-[data-theme="signal-light"] .zto-modal,
-[data-theme="signal-light"] .zto-modal-content {
-  border-radius: 4px;
-  border: 1px solid var(--c-brand-border);
-  background: var(--surface-elevated);
-}
-
-/* Page guide accent — when the bg color uses an emerald/blue/amber
-   wash, swap in the signal wash so the colour family is consistent. */
-[data-theme="signal"] .zto-card.bg-emerald-400\/5,
-[data-theme="signal"] .zto-card.bg-blue-400\/5,
-[data-theme="signal"] .zto-card.bg-purple-400\/5,
-[data-theme="signal"] .zto-card.bg-amber-400\/5,
-[data-theme="signal-light"] .zto-card.bg-emerald-400\/5,
-[data-theme="signal-light"] .zto-card.bg-blue-400\/5,
-[data-theme="signal-light"] .zto-card.bg-purple-400\/5,
-[data-theme="signal-light"] .zto-card.bg-amber-400\/5 {
-  background-color: var(--signal-wash) !important;
-  border-color: rgba(46, 107, 255, 0.30) !important;
-}
-
-/* Buttons — Signal-light keeps the same engineering treatment as
-   Signal-dark but with a deeper signal-blue for AA contrast on
-   paper, and white text instead of void. */
-[data-theme="signal-light"] .zto-btn-gold {
-  background: var(--signal);
-  color: #FFFFFF;
-  border-color: var(--signal);
-  font-family: var(--font-mono);
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  border-radius: 2px;
-}
-[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
-  background: var(--signal-deep);
-  border-color: var(--signal-deep);
-}
-[data-theme="signal-light"] .zto-btn-outline {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-/* Inputs — focus ring under signal-light. */
-[data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
-[data-theme="signal-light"] .zto-input:focus {
-  border-color: var(--signal);
-  box-shadow: 0 0 0 3px rgba(29, 92, 224, 0.18);
-}
-
-/* Severity remap to honour the spec's "amber not red for warnings"
-   rule under signal-light too. */
-[data-theme="signal-light"] .text-red-400,
-[data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
-[data-theme="signal-light"] .bg-red-500\/10,
-[data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(168, 98, 0, 0.10) !important; }
-[data-theme="signal-light"] .border-red-500\/30,
-[data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(168, 98, 0, 0.30) !important; }
-[data-theme="signal-light"] .text-amber-400,
-[data-theme="signal-light"] .text-amber-300,
-[data-theme="signal-light"] .text-amber-500 { color: var(--signal) !important; }
-[data-theme="signal-light"] .bg-amber-400\/10,
-[data-theme="signal-light"] .bg-amber-400\/15 { background-color: var(--signal-wash) !important; }
-[data-theme="signal-light"] .border-amber-400\/30,
-[data-theme="signal-light"] .border-amber-400\/40 { border-color: rgba(29, 92, 224, 0.30) !important; }
-[data-theme="signal-light"] .text-emerald-400,
-[data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Embed mode — when a dashboard page is rendered inside an iframe (e.g.
@@ -1511,9 +483,9 @@ html[data-embed="1"] body {
   --ed-pink:         #FF00B7;
 
   /* Typography scale */
-  --ed-font-display: "Editorial Serif Display", "Tinta Arabic", "Naveid Arabic", Georgia, serif;
-  --ed-font-body:    "Editorial Serif Text", "Tinta Arabic", "Naveid Arabic", Georgia, serif;
-  --ed-font-ui:      "Editorial Sans", "IBM Plex Sans Arabic", "Noto Kufi Arabic", "Segoe UI", Helvetica, Arial, sans-serif;
+  --ed-font-display: "Editorial Serif Display", Georgia, "Times New Roman", serif;
+  --ed-font-body:    "Editorial Serif Text", Georgia, "Times New Roman", serif;
+  --ed-font-ui:      "Editorial Sans", "Segoe UI", Helvetica, Arial, sans-serif;
 
   /* Radii — soft rounded, never sharp */
   --ed-radius-sm: 8px;
@@ -1523,7 +495,11 @@ html[data-embed="1"] body {
   --ed-radius-full: 9999px;
 }
 
-/* ── Editorial · Dark ───────────────────────────────────── */
+/* ── Editorial · Dark ─────────────────────────────────────
+   Doubles as the :root fallback so the editorial palette is active
+   even before the bootstrap script writes data-theme on <html>.
+   This avoids a flash of unstyled-looking content on first paint. */
+:root,
 [data-theme="editorial-dark"] {
   --c-brand: #1A1A1D;          /* card */
   --c-brand-light: #21232A;    /* elevated */
@@ -1935,25 +911,25 @@ html[data-embed="1"] body {
 
 /* — Black / near-black surface utilities → editorial surfaces — */
 [data-theme="editorial-light"] .bg-black,
-[data-theme="editorial-light"] .bg-\[#000\],
-[data-theme="editorial-light"] .bg-\[#000000\] {
+[data-theme="editorial-light"] .bg-\[\#000\],
+[data-theme="editorial-light"] .bg-\[\#000000\] {
   background-color: var(--surface-card) !important;
 }
-[data-theme="editorial-light"] .bg-\[#0a0a0a\],
-[data-theme="editorial-light"] .bg-\[#0a0a0a\]\/95,
-[data-theme="editorial-light"] .bg-\[#0d0d0d\],
-[data-theme="editorial-light"] .bg-\[#111\],
-[data-theme="editorial-light"] .bg-\[#111111\],
-[data-theme="editorial-light"] .bg-\[#141414\],
-[data-theme="editorial-light"] .bg-\[#151515\],
-[data-theme="editorial-light"] .bg-\[#161616\],
-[data-theme="editorial-light"] .bg-\[#1a1a1a\],
-[data-theme="editorial-light"] .bg-\[#1a1a1d\] {
+[data-theme="editorial-light"] .bg-\[\#0a0a0a\],
+[data-theme="editorial-light"] .bg-\[\#0a0a0a\]\/95,
+[data-theme="editorial-light"] .bg-\[\#0d0d0d\],
+[data-theme="editorial-light"] .bg-\[\#111\],
+[data-theme="editorial-light"] .bg-\[\#111111\],
+[data-theme="editorial-light"] .bg-\[\#141414\],
+[data-theme="editorial-light"] .bg-\[\#151515\],
+[data-theme="editorial-light"] .bg-\[\#161616\],
+[data-theme="editorial-light"] .bg-\[\#1a1a1a\],
+[data-theme="editorial-light"] .bg-\[\#1a1a1d\] {
   background-color: var(--surface-card) !important;
 }
-[data-theme="editorial-light"] .bg-\[#232323\],
-[data-theme="editorial-light"] .bg-\[#2a2a2a\],
-[data-theme="editorial-light"] .bg-\[#2e2e2e\] {
+[data-theme="editorial-light"] .bg-\[\#232323\],
+[data-theme="editorial-light"] .bg-\[\#2a2a2a\],
+[data-theme="editorial-light"] .bg-\[\#2e2e2e\] {
   background-color: var(--surface-elevated) !important;
 }
 [data-theme="editorial-light"] .bg-neutral-800,
@@ -1978,7 +954,7 @@ html[data-embed="1"] body {
 
 /* Header backdrop tint already covered above; nail down the
    bg/95 variants used by sticky modal headers. */
-[data-theme="editorial-light"] .bg-\[#0a0a0a\]\/95 {
+[data-theme="editorial-light"] .bg-\[\#0a0a0a\]\/95 {
   background-color: rgba(255, 255, 255, 0.92) !important;
 }
 
@@ -2039,8 +1015,8 @@ html[data-embed="1"] body {
   border-radius: 4px;
 }
 
-/* ── Pill/badge readability: bg-*/10 wash classes get bumped
-      to /14 wash under editorial-light for visible contrast. */
+/* ── Pill/badge readability: bg-*\/10 wash classes get bumped
+      to \/14 wash under editorial-light for visible contrast. */
 [data-theme="editorial-light"] .bg-amber-400\/10,
 [data-theme="editorial-light"] .bg-amber-400\/15 { background-color: rgba(176, 122, 0, 0.14) !important; }
 [data-theme="editorial-light"] .bg-blue-400\/10,
@@ -2076,7 +1052,7 @@ html[data-embed="1"] body {
 }
 
 /* ── User name + role chip in the sidebar bottom block. */
-[data-theme="editorial-light"] .bg-\[#232323\] {
+[data-theme="editorial-light"] .bg-\[\#232323\] {
   background-color: var(--surface-elevated) !important;
 }
 
