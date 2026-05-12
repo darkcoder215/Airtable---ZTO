@@ -334,7 +334,12 @@ export default function DataSourcesPage() {
   interface TypeMappingState {
     tableName: string;
     columns: Array<{ column: string; entry: MappingEntry }>;
+    // Per-brand overrides, keyed by scraper_brands.id. When the writer
+    // chooses a specific brand in the toolbar, the editor edits one of
+    // these entries instead of the type-level default.
+    byBrand: Record<string, { tableName: string; columns: Array<{ column: string; entry: MappingEntry }> }>;
   }
+  interface BrandLite { id: string; name: string; slug: string }
   interface DestColumn {
     id: string;
     name: string;
@@ -358,6 +363,7 @@ export default function DataSourcesPage() {
   const blankTypeMapping = (tableName = ""): TypeMappingState => ({
     tableName,
     columns: [],
+    byBrand: {},
   });
 
   const [destPerType, setDestPerType] = useState<Record<MappableType, TypeMappingState>>({
@@ -366,6 +372,13 @@ export default function DataSourcesPage() {
     linkedin: blankTypeMapping(),
   });
   const [destActiveType, setDestActiveType] = useState<MappableType>("rss");
+  // Brand scope: null = editing the type-level default. A UUID = editing
+  // (or about to create) an override for that specific brand.
+  const [destActiveBrandId, setDestActiveBrandId] = useState<string | null>(null);
+  // List of brands populated alongside the mapping. Used by the toolbar
+  // brand picker. Empty by default so existing flows aren't blocked when
+  // the brands table is unreachable.
+  const [destBrands, setDestBrands] = useState<BrandLite[]>([]);
   const [destTokens, setDestTokens] = useState<string[]>([]);
   // Per-type token metadata loaded with the mapping. The side panel shows
   // these (label + Arabic one-liner + populated flag) so admins see exactly
@@ -472,8 +485,14 @@ export default function DataSourcesPage() {
       if (!res.ok) throw new Error(data.error || "فشل التحميل");
       const m = (data.mapping ?? {}) as Record<
         string,
-        { tableName?: string; columns?: Record<string, MappingEntry> } | undefined
+        {
+          tableName?: string;
+          columns?: Record<string, MappingEntry>;
+          byBrand?: Record<string, { tableName?: string; columns?: Record<string, MappingEntry> }>;
+        } | undefined
       >;
+      const colsToList = (cols?: Record<string, MappingEntry>) =>
+        Object.entries(cols ?? {}).map(([k, e]) => ({ column: k, entry: e as MappingEntry }));
       const next: Record<MappableType, TypeMappingState> = {
         rss: blankTypeMapping(),
         twitter: blankTypeMapping(),
@@ -481,18 +500,32 @@ export default function DataSourcesPage() {
       };
       for (const t of MAPPABLE_TYPES) {
         const v = m[t];
+        const byBrand: TypeMappingState["byBrand"] = {};
+        if (v?.byBrand && typeof v.byBrand === "object") {
+          for (const [brandId, ov] of Object.entries(v.byBrand)) {
+            byBrand[brandId] = {
+              tableName: ov?.tableName ?? "",
+              columns: colsToList(ov?.columns),
+            };
+          }
+        }
         next[t] = {
           tableName: v?.tableName ?? "",
-          columns: Object.entries(v?.columns ?? {}).map(([k, e]) => ({
-            column: k,
-            entry: e as MappingEntry,
-          })),
+          columns: colsToList(v?.columns),
+          byBrand,
         };
       }
       setDestPerType(next);
       setDestTokens(Array.isArray(data.articleTokens) ? data.articleTokens : []);
       if (data.articleTokenMetaByType && typeof data.articleTokenMetaByType === "object") {
         setDestTokenMetaByType(data.articleTokenMetaByType as Record<string, TokenMeta[]>);
+      }
+      if (Array.isArray(data.brands)) {
+        setDestBrands(
+          (data.brands as Array<{ id: string; name: string; slug: string }>).map((b) => ({
+            id: b.id, name: b.name, slug: b.slug,
+          }))
+        );
       }
       setDestDirty(false);
     } catch (err) {
@@ -567,18 +600,37 @@ export default function DataSourcesPage() {
   const saveDestinationMapping = async () => {
     setDestSaving(true);
     try {
-      const payload: Record<MappableType, { tableName: string; columns: Record<string, MappingEntry> }> = {
+      // Wire-format: per type we send tableName + columns (the default)
+      // plus an optional byBrand: { [brandId]: { tableName, columns } }
+      // map of overrides. The server sanitiser drops anything malformed.
+      type WireEntry = { tableName: string; columns: Record<string, MappingEntry> };
+      type WireType = WireEntry & { byBrand?: Record<string, WireEntry> };
+      const listToCols = (list: TypeMappingState["columns"]): Record<string, MappingEntry> => {
+        const cols: Record<string, MappingEntry> = {};
+        for (const r of list) {
+          if (r.column.trim()) cols[r.column.trim()] = r.entry;
+        }
+        return cols;
+      };
+      const payload: Record<MappableType, WireType> = {
         rss: { tableName: "", columns: {} },
         twitter: { tableName: "", columns: {} },
         linkedin: { tableName: "", columns: {} },
       };
       for (const t of MAPPABLE_TYPES) {
         const m = destPerType[t];
-        const cols: Record<string, MappingEntry> = {};
-        for (const r of m.columns) {
-          if (r.column.trim()) cols[r.column.trim()] = r.entry;
+        const byBrand: Record<string, WireEntry> = {};
+        for (const [brandId, ov] of Object.entries(m.byBrand ?? {})) {
+          byBrand[brandId] = {
+            tableName: ov.tableName.trim(),
+            columns: listToCols(ov.columns),
+          };
         }
-        payload[t] = { tableName: m.tableName.trim(), columns: cols };
+        payload[t] = {
+          tableName: m.tableName.trim(),
+          columns: listToCols(m.columns),
+          ...(Object.keys(byBrand).length > 0 ? { byBrand } : {}),
+        };
       }
       const res = await fetch("/api/data-sources", {
         method: "POST",
@@ -601,16 +653,35 @@ export default function DataSourcesPage() {
     setDestTesting(true);
     setDestTestResult(null);
     try {
-      const m = destPerType[destActiveType];
-      const cols: Record<string, MappingEntry> = {};
-      for (const r of m.columns) {
-        if (r.column.trim()) cols[r.column.trim()] = r.entry;
+      // Test against whichever scope is active in the toolbar — the
+      // type default, or a brand override if one is selected. We send
+      // the whole type entry (default + byBrand) and pass the active
+      // brandId so the server can pick the right override.
+      const parent = destPerType[destActiveType];
+      const listToCols = (list: TypeMappingState["columns"]): Record<string, MappingEntry> => {
+        const c: Record<string, MappingEntry> = {};
+        for (const r of list) {
+          if (r.column.trim()) c[r.column.trim()] = r.entry;
+        }
+        return c;
+      };
+      const byBrand: Record<string, { tableName: string; columns: Record<string, MappingEntry> }> = {};
+      for (const [brandId, ov] of Object.entries(parent.byBrand ?? {})) {
+        byBrand[brandId] = {
+          tableName: ov.tableName.trim(),
+          columns: listToCols(ov.columns),
+        };
       }
       const payload = {
         action: "test-destination-mapping",
         type: destActiveType,
+        brandId: destActiveBrandId,
         mapping: {
-          [destActiveType]: { tableName: m.tableName.trim(), columns: cols },
+          [destActiveType]: {
+            tableName: parent.tableName.trim(),
+            columns: listToCols(parent.columns),
+            ...(Object.keys(byBrand).length > 0 ? { byBrand } : {}),
+          },
         },
       };
       const res = await fetch("/api/data-sources", {
@@ -635,13 +706,78 @@ export default function DataSourcesPage() {
     }
   };
 
+  // Resolve the slice the editor is currently focused on. `null` brand
+  // = the type-level default (`destPerType[type]`). A brand UUID = the
+  // override under `destPerType[type].byBrand[brandId]`. Returns a
+  // synthetic default-shaped object when an override hasn't been
+  // initialised yet so the editor can render before "Clone from default"
+  // is clicked.
+  const getActiveScope = (
+    type: MappableType,
+    brandId: string | null,
+    state: Record<MappableType, TypeMappingState>
+  ): { tableName: string; columns: TypeMappingState["columns"] } => {
+    const parent = state[type];
+    if (!brandId) return { tableName: parent.tableName, columns: parent.columns };
+    const ov = parent.byBrand?.[brandId];
+    if (ov) return { tableName: ov.tableName, columns: ov.columns };
+    // No override yet — show the parent as a preview. Setting any value
+    // will materialise the override via setActiveTypeMapping.
+    return { tableName: parent.tableName, columns: parent.columns };
+  };
+
+  // Apply a patch to the active scope. When a brand is selected we
+  // write to byBrand[brandId], materialising the override on first edit.
   const setActiveTypeMapping = (
-    next: TypeMappingState | ((prev: TypeMappingState) => TypeMappingState)
+    next:
+      | { tableName: string; columns: TypeMappingState["columns"] }
+      | ((
+          prev: { tableName: string; columns: TypeMappingState["columns"] }
+        ) => { tableName: string; columns: TypeMappingState["columns"] })
   ) => {
     setDestPerType((prev) => {
-      const current = prev[destActiveType];
+      const parent = prev[destActiveType];
+      const current = getActiveScope(destActiveType, destActiveBrandId, prev);
       const updated = typeof next === "function" ? next(current) : next;
-      return { ...prev, [destActiveType]: updated };
+      if (!destActiveBrandId) {
+        return {
+          ...prev,
+          [destActiveType]: {
+            ...parent,
+            tableName: updated.tableName,
+            columns: updated.columns,
+          },
+        };
+      }
+      return {
+        ...prev,
+        [destActiveType]: {
+          ...parent,
+          byBrand: {
+            ...parent.byBrand,
+            [destActiveBrandId]: {
+              tableName: updated.tableName,
+              columns: updated.columns,
+            },
+          },
+        },
+      };
+    });
+    setDestDirty(true);
+  };
+
+  // Drop a brand override entirely. The brand falls back to the
+  // type-level mapping on the next save + apply.
+  const removeBrandOverride = (brandId: string) => {
+    setDestPerType((prev) => {
+      const parent = prev[destActiveType];
+      if (!parent.byBrand?.[brandId]) return prev;
+      const nextByBrand = { ...parent.byBrand };
+      delete nextByBrand[brandId];
+      return {
+        ...prev,
+        [destActiveType]: { ...parent, byBrand: nextByBrand },
+      };
     });
     setDestDirty(true);
   };
@@ -2325,7 +2461,16 @@ export default function DataSourcesPage() {
 
       {/* ───── Destination tab ───── */}
       {activeTab === "destination" && (() => {
-        const m = destPerType[destActiveType];
+        const parent = destPerType[destActiveType];
+        // What the editor actually shows + edits — type-level default
+        // or a brand override, depending on the toolbar selection.
+        const m = getActiveScope(destActiveType, destActiveBrandId, destPerType);
+        const overridingBrand = destActiveBrandId
+          ? destBrands.find((b) => b.id === destActiveBrandId) ?? null
+          : null;
+        const overrideExists =
+          destActiveBrandId != null && !!parent.byBrand?.[destActiveBrandId];
+        const overrideCount = Object.keys(parent.byBrand ?? {}).length;
         const tableColumns = m.tableName ? destColumnsByTable[m.tableName] ?? [] : [];
         const knownColumnNames = new Set(tableColumns.map((c) => c.name));
         const mappedMissing = m.columns
@@ -2434,7 +2579,36 @@ export default function DataSourcesPage() {
           {/* Toolbar */}
           <div className="zto-card p-4 space-y-3">
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex-1 min-w-[280px]">
+              <div className="min-w-[200px]">
+                <label className="zto-label">نطاق التطبيق</label>
+                <div className="zto-select-wrap">
+                  <select
+                    className="zto-input text-xs"
+                    value={destActiveBrandId ?? ""}
+                    onChange={(e) =>
+                      setDestActiveBrandId(e.target.value ? e.target.value : null)
+                    }
+                  >
+                    <option value="">افتراضي · لكل العلامات</option>
+                    {destBrands.map((b) => {
+                      const hasOverride = !!parent.byBrand?.[b.id];
+                      return (
+                        <option key={b.id} value={b.id}>
+                          {b.name} {hasOverride ? "•" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <p className="text-[0.6rem] text-neutral-500 mt-1 leading-snug">
+                  {destActiveBrandId
+                    ? overrideExists
+                      ? `يحرّر قاعدة خاصّة بعلامة «${overridingBrand?.name ?? ""}» تُطبّق فقط على سجلاتها.`
+                      : `لا يوجد تخصيص لعلامة «${overridingBrand?.name ?? ""}» — أيّ تعديل هنا ينشئ قاعدة جديدة.`
+                    : `القاعدة الافتراضية · تنطبق على كل العلامات التي ليس لها تخصيص. عدد التخصيصات الحالية: ${overrideCount}.`}
+                </p>
+              </div>
+              <div className="flex-1 min-w-[260px]">
                 <label className="zto-label">جدول الوجهة لـ {TYPE_LABELS[destActiveType]}</label>
                 <div className="zto-select-wrap">
                   <select
@@ -2452,6 +2626,16 @@ export default function DataSourcesPage() {
                   </select>
                 </div>
               </div>
+              {destActiveBrandId && overrideExists && user?.role === "admin" && (
+                <button
+                  onClick={() => removeBrandOverride(destActiveBrandId)}
+                  className="zto-btn zto-btn-outline zto-btn-sm self-end text-red-400"
+                  title="حذف هذا التخصيص — العلامة ستعود للقاعدة الافتراضية"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  حذف التخصيص
+                </button>
+              )}
               <button
                 onClick={refreshDestinationColumns}
                 disabled={destRefreshing}
@@ -2651,9 +2835,19 @@ export default function DataSourcesPage() {
                                         })
                                       }
                                     >
-                                      {destTokens.map((tk) => (
-                                        <option key={tk} value={tk}>{tk}</option>
-                                      ))}
+                                      {/* Show the human-readable Arabic
+                                          label for each token (e.g.
+                                          "العنوان" instead of "title").
+                                          Falls back to the raw token when
+                                          metadata is missing. */}
+                                      {destTokens.map((tk) => {
+                                        const meta = (destTokenMetaByType[destActiveType] ?? []).find((m2) => m2.token === tk);
+                                        return (
+                                          <option key={tk} value={tk}>
+                                            {meta?.label ? `${meta.label}` : tk}
+                                          </option>
+                                        );
+                                      })}
                                     </select>
                                   </div>
                                 </div>
@@ -2675,9 +2869,14 @@ export default function DataSourcesPage() {
                                       }
                                     >
                                       <option value="">— بدون —</option>
-                                      {destTokens.map((tk) => (
-                                        <option key={tk} value={tk}>{tk}</option>
-                                      ))}
+                                      {destTokens.map((tk) => {
+                                        const meta = (destTokenMetaByType[destActiveType] ?? []).find((m2) => m2.token === tk);
+                                        return (
+                                          <option key={tk} value={tk}>
+                                            {meta?.label ? `${meta.label}` : tk}
+                                          </option>
+                                        );
+                                      })}
                                     </select>
                                   </div>
                                 </div>

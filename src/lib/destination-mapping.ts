@@ -145,6 +145,13 @@ export type MappingEntry =
 export interface TypeMapping {
   tableName: string;
   columns: Record<string, MappingEntry>;
+  // Per-brand overrides. When a fetched article carries a brandId
+  // matching one of these keys, that mapping wins over the type
+  // default. The override is a complete TypeMapping (its own table
+  // + columns) so each brand can route to a different destination
+  // table if needed. The override map is intentionally flat — no
+  // recursive byBrand chains — so the apply path stays trivial.
+  byBrand?: Record<string, Omit<TypeMapping, "byBrand">>;
 }
 
 export type PerTypeMapping = Partial<Record<SourceType, TypeMapping>>;
@@ -243,8 +250,14 @@ function readToken(article: FetchedArticle, token: ArticleToken): string {
   }
 }
 
+// UUID shape check for brand-override keys. Trustworthy because the
+// only producer of these keys is the access-control UI which already
+// validates with the same regex.
+const BRAND_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Sanitise a single TypeMapping. Drops malformed columns silently — better
-// to skip a bad row than refuse the entire save.
+// to skip a bad row than refuse the entire save. Also preserves per-brand
+// overrides if any are present and well-formed.
 function sanitizeTypeMapping(raw: unknown): TypeMapping {
   const obj = (raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}) as Record<string, unknown>;
   const tableName =
@@ -274,7 +287,28 @@ function sanitizeTypeMapping(raw: unknown): TypeMapping {
       }
     }
   }
-  return { tableName, columns: out };
+  const result: TypeMapping = { tableName, columns: out };
+  // Per-brand overrides — each value is itself a sanitised TypeMapping.
+  // Cap at 64 brands per type to keep the JSON blob bounded.
+  const rawBrands = obj.byBrand;
+  if (rawBrands && typeof rawBrands === "object" && !Array.isArray(rawBrands)) {
+    const byBrand: NonNullable<TypeMapping["byBrand"]> = {};
+    let kept = 0;
+    for (const [brandId, brandRaw] of Object.entries(rawBrands as Record<string, unknown>)) {
+      if (!BRAND_KEY_RE.test(brandId)) continue;
+      if (kept >= 64) break;
+      // Strip nested byBrand chains via Omit; recursion is intentionally
+      // forbidden so the apply path can stay one level deep.
+      const inner = sanitizeTypeMapping(brandRaw);
+      byBrand[brandId] = {
+        tableName: inner.tableName,
+        columns: inner.columns,
+      };
+      kept += 1;
+    }
+    if (Object.keys(byBrand).length > 0) result.byBrand = byBrand;
+  }
+  return result;
 }
 
 // Accepts both legacy { columns: {...} } and new per-type
@@ -291,6 +325,26 @@ export function sanitizePerTypeMapping(raw: unknown): PerTypeMapping {
     if (obj[t]) out[t] = sanitizeTypeMapping(obj[t]);
   }
   return out;
+}
+
+// Resolve the effective mapping for a given (sourceType, brandId).
+// Looks up a brand-specific override first; falls back to the type
+// default; falls back to the built-in shipped default.
+export function getMappingForTypeAndBrand(
+  perType: PerTypeMapping,
+  type: SourceType,
+  brandId: string | null | undefined
+): TypeMapping {
+  const effectiveType: SourceType = MAPPABLE_SOURCE_TYPES.includes(type) ? type : "rss";
+  const typeMapping = perType[effectiveType];
+  if (typeMapping && brandId && typeMapping.byBrand?.[brandId]) {
+    const override = typeMapping.byBrand[brandId];
+    return { tableName: override.tableName, columns: override.columns };
+  }
+  if (typeMapping) {
+    return { tableName: typeMapping.tableName, columns: typeMapping.columns };
+  }
+  return DEFAULT_PER_TYPE_MAPPING[effectiveType] ?? DEFAULT_RSS;
 }
 
 export function getMappingForType(

@@ -30,6 +30,7 @@ import {
   getPerTypeMapping,
   setPerTypeMapping,
   getMappingForType,
+  getMappingForTypeAndBrand,
   applyMapping,
   sanitizePerTypeMapping,
   ARTICLE_TOKENS,
@@ -39,6 +40,7 @@ import {
   type TypeMapping,
 } from "@/lib/destination-mapping";
 import { listTables } from "@/lib/airtable";
+import { listBrands as listBrandsForMapping } from "@/lib/scraper/db";
 
 async function getUser(request: NextRequest) {
   const token = request.cookies.get("session")?.value;
@@ -122,7 +124,15 @@ export async function GET(request: NextRequest) {
 
   if (action === "destination-mapping") {
     try {
-      const mapping = await getPerTypeMapping();
+      // Pull brands + mapping in parallel. The client needs the brand
+      // list to render the brand-override selector; this saves the
+      // separate /api/brands round-trip on the mapping tab.
+      const [mapping, brands] = await Promise.all([
+        getPerTypeMapping(),
+        // Brands are read-only here; failure to fetch shouldn't break
+        // the mapping page so we swallow the error and ship empty.
+        listBrandsForMapping().catch(() => [] as { id: string; name: string; slug: string }[]),
+      ]);
       return NextResponse.json({
         mapping,
         baseId: DESTINATION_BASE_ID,
@@ -132,6 +142,7 @@ export async function GET(request: NextRequest) {
         // type actually fills, with a short hint next to each.
         articleTokenMetaByType: ARTICLE_TOKEN_META_BY_TYPE,
         sourceTypes: MAPPABLE_SOURCE_TYPES,
+        brands,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -673,7 +684,18 @@ export async function POST(request: NextRequest) {
           const perType = incoming
             ? sanitizePerTypeMapping(incoming)
             : await getPerTypeMapping();
-          const mapping: TypeMapping = getMappingForType(perType, sourceType);
+          // Optional `brandId` lets the preview honor a brand-specific
+          // override so the admin can sanity-check the override before
+          // saving. Falls back to the type default when omitted.
+          const previewBrandId =
+            typeof (data as { brandId?: unknown }).brandId === "string"
+              ? ((data as { brandId: string }).brandId)
+              : null;
+          const mapping: TypeMapping = getMappingForTypeAndBrand(
+            perType,
+            sourceType,
+            previewBrandId
+          );
 
           // Pull the most recent article matching this type when possible so
           // the preview reflects the actual data shape that flows through.

@@ -105,8 +105,10 @@ interface FormState {
   // Only meaningful when role === "content_writer".
   allowedTableIds: string[];
   // List of brand IDs the writer is allowed to see records for.
-  // Records outside these brands are hidden server-side.
-  allowedBrandIds: string[];
+  // Records outside these brands are hidden server-side. `null`
+  // means "no brand restriction" — the writer sees every record
+  // their table allowlist permits, regardless of Brand column.
+  allowedBrandIds: string[] | null;
   // Enables the Tasks tab + the topbar bell.
   tasksEnabled: boolean;
 }
@@ -119,7 +121,8 @@ const blankForm = (): FormState => ({
   password: "",
   isActive: true,
   allowedTableIds: [],
-  allowedBrandIds: [],
+  // Default: no brand restriction. Admin can flip to a subset.
+  allowedBrandIds: null,
   tasksEnabled: false,
 });
 
@@ -184,7 +187,9 @@ export default function AccessControlPage() {
       password: "",
       isActive: u.isActive,
       allowedTableIds: Array.isArray(u.allowedTableIds) ? u.allowedTableIds : [],
-      allowedBrandIds: Array.isArray(u.allowedBrandIds) ? u.allowedBrandIds : [],
+      // Preserve null (no restriction) vs. array (restricted) coming
+      // from the API; the picker offers a toggle for both states.
+      allowedBrandIds: Array.isArray(u.allowedBrandIds) ? u.allowedBrandIds : null,
       tasksEnabled: u.tasksEnabled === true,
     });
     setError(null);
@@ -693,7 +698,7 @@ export default function AccessControlPage() {
                     في Airtable. إذا تركتها فارغة، لن يرى أيّ سجل ضمن جداوله. اتركها بلا اختيار (شاملة) لإلغاء التقييد عبر تعديل لاحق.
                   </p>
                   <AllowedBrandsPicker
-                    selected={form.allowedBrandIds}
+                    value={form.allowedBrandIds}
                     onChange={(next) => setForm((p) => ({ ...p, allowedBrandIds: next }))}
                   />
                 </section>
@@ -928,17 +933,21 @@ function AllowedTablesPicker({
    in Airtable, so the admin picks brand IDs here and the server does
    the name lookup at request time. */
 function AllowedBrandsPicker({
-  selected,
+  value,
   onChange,
 }: {
-  selected: string[];
-  onChange: (next: string[]) => void;
+  // `null` ⇒ "no restriction" (writer sees every brand). An array
+  // (even empty) ⇒ restricted to those brand IDs.
+  value: string[] | null;
+  onChange: (next: string[] | null) => void;
 }) {
   interface BrandLite { id: string; name: string; slug: string }
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const unrestricted = value === null;
+  const selected = value ?? [];
 
   useEffect(() => {
     let cancelled = false;
@@ -992,7 +1001,7 @@ function AllowedBrandsPicker({
           <button
             type="button"
             onClick={selectAll}
-            disabled={loading || brands.length === 0}
+            disabled={loading || brands.length === 0 || unrestricted}
             className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-emerald-400 hover:text-emerald-300 disabled:opacity-40"
           >
             تحديد الكل
@@ -1000,7 +1009,7 @@ function AllowedBrandsPicker({
           <button
             type="button"
             onClick={selectNone}
-            disabled={loading || selected.length === 0}
+            disabled={loading || selected.length === 0 || unrestricted}
             className="text-[0.6rem] font-bold rounded px-2 py-1 border border-neutral-700 text-neutral-300 hover:border-red-400 hover:text-red-300 disabled:opacity-40"
           >
             مسح
@@ -1008,12 +1017,40 @@ function AllowedBrandsPicker({
         </div>
       </div>
 
+      {/* "بلا تقييد" — explicit no-filter mode. Sends null to the API
+          so the writer sees every record their table allowlist permits,
+          regardless of the Brand column. Clearer than leaving the list
+          empty (which means "deny everything"). */}
+      <label
+        className={`flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors border mb-2 ${
+          unrestricted
+            ? "border-amber-400/40 bg-amber-400/5"
+            : "border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/30"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={unrestricted}
+          onChange={(e) => onChange(e.target.checked ? null : [])}
+          className="mt-0.5 shrink-0"
+        />
+        <span className="flex-1 min-w-0">
+          <span className="block text-[0.78rem] text-white font-bold">
+            بلا تقييد · يرى كل العلامات
+          </span>
+          <span className="block text-[0.6rem] text-neutral-400 mt-0.5 leading-snug">
+            عند التفعيل، يتجاهل الخادم فلتر العلامة تماماً ويعرض كل سجلات الجداول المسموحة لهذا المستخدم.
+          </span>
+        </span>
+      </label>
+
       <input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="بحث في العلامات..."
-        className="zto-input text-xs mb-2"
+        className="zto-input text-xs mb-2 disabled:opacity-50"
+        disabled={unrestricted}
       />
 
       {loading ? (
@@ -1027,7 +1064,7 @@ function AllowedBrandsPicker({
           {brands.length === 0 ? "لا توجد علامات بعد — أضفها من قسم «العلامات والمصادر»" : "لا نتائج للبحث"}
         </p>
       ) : (
-        <div className="max-h-56 overflow-y-auto bg-[#0d0d0d] border border-neutral-800 rounded space-y-0.5 p-1">
+        <div className={`max-h-56 overflow-y-auto bg-[#0d0d0d] border border-neutral-800 rounded space-y-0.5 p-1 ${unrestricted ? "opacity-50 pointer-events-none" : ""}`}>
           {visible.map((b) => {
             const checked = selected.includes(b.id);
             return (
@@ -1042,6 +1079,7 @@ function AllowedBrandsPicker({
                   checked={checked}
                   onChange={() => toggle(b.id)}
                   className="shrink-0"
+                  disabled={unrestricted}
                 />
                 <span className="text-xs font-bold truncate flex-1">{b.name}</span>
                 <code className="text-[0.55rem] text-neutral-500 font-mono">{b.slug}</code>
@@ -1052,7 +1090,9 @@ function AllowedBrandsPicker({
       )}
 
       <p className="text-[0.6rem] text-neutral-500 mt-2 font-bold">
-        {selected.length} علامة مختارة من أصل {brands.length}
+        {unrestricted
+          ? "بلا تقييد — كل العلامات مرئية"
+          : `${selected.length} علامة مختارة من أصل ${brands.length}`}
       </p>
     </div>
   );
@@ -1082,7 +1122,9 @@ function FormPreview({ form }: { form: FormState }) {
     } else {
       allow.push(`${form.allowedTableIds.length} جدول من Airtable (تحرير + قراءة، بدون حذف)`);
     }
-    if (form.allowedBrandIds.length === 0) {
+    if (form.allowedBrandIds === null) {
+      allow.push("بلا تقييد على العلامات — يرى كل السجلات في جداوله");
+    } else if (form.allowedBrandIds.length === 0) {
       deny.push("لا توجد علامات مخصّصة — لن يرى أيّ سجل (الفلترة على عمود Brand)");
     } else {
       allow.push(`${form.allowedBrandIds.length} علامة — يرى فقط سجلات هذه العلامات`);

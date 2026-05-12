@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 import {
   applyMapping,
   getMappingForType,
+  getMappingForTypeAndBrand,
   getPerTypeMapping,
   DESTINATION_BASE_ID,
   DEFAULT_TABLE_NAME,
@@ -270,6 +271,10 @@ export interface FetchedArticle {
   // linked to a brand; empty string otherwise so the mapping renders ""
   // instead of throwing.
   brandName?: string;
+  // Brand UUID (matches scraper_brands.id). Carries through the fetch
+  // pipeline so the destination mapping can pick a brand-specific
+  // override stored under TypeMapping.byBrand[brandId].
+  brandId?: string | null;
   title: string;
   description: string;
   url: string;
@@ -1752,12 +1757,14 @@ export async function saveArticleToAirtable(
   sourceName: string,
   sourceType: SourceType = "rss"
 ): Promise<boolean> {
-  // Pick the per-type mapping. Fall back to a sane default mapping shape if
-  // the settings store is unreachable so saves don't silently disappear.
+  // Pick the per-type mapping, honoring a brand-specific override if
+  // one is configured for this article's brand. Fall back to a sane
+  // default mapping shape if the settings store is unreachable so
+  // saves don't silently disappear.
   let mapping: TypeMapping;
   try {
     const perType = await getPerTypeMapping();
-    mapping = getMappingForType(perType, sourceType);
+    mapping = getMappingForTypeAndBrand(perType, sourceType, article.brandId ?? null);
   } catch (err) {
     logger.warn(
       "Could not load destination mapping — using default shape",
@@ -2176,9 +2183,12 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
 
   // Seed source/brand metadata before persistence so the Airtable Brand
   // column (and the brandName mapping token) get filled automatically.
+  // brandId rides along so the destination mapping can switch to a
+  // brand-specific override (TypeMapping.byBrand[brandId]).
   fresh.forEach((a) => {
     a.sourceName = source.name;
     a.brandName = brandName;
+    a.brandId = source.brandId ?? null;
   });
 
   logger.info(
