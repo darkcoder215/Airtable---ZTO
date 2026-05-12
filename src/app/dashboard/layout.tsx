@@ -132,6 +132,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="zto-grid-backdrop" aria-hidden />
       {/* Sidebar */}
       <aside
+        data-zto-chrome="sidebar"
         className={`fixed lg:static inset-y-0 right-0 z-40 ${railWidth} bg-[#151515] border-l border-neutral-800 flex flex-col transition-all duration-200 ${
           sidebarOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden lg:border-0"
         } ${sidebarOpen ? "!w-[240px]" : ""} lg:${collapsed ? "w-[64px]" : "w-[240px]"}`}
@@ -199,7 +200,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Main */}
       <main className="flex-1 min-w-0 flex flex-col">
         {/* Topbar */}
-        <header className="bg-[#151515] border-b border-neutral-800 px-6 h-[56px] flex items-center gap-4 sticky top-0 z-20">
+        <header data-zto-chrome="header" className="bg-[#151515] border-b border-neutral-800 px-6 h-[56px] flex items-center gap-4 sticky top-0 z-20">
           <button onClick={toggleSidebar} className="lg:hidden text-neutral-500 hover:text-white">
             <Menu className="w-5 h-5" />
           </button>
@@ -220,7 +221,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <span className="text-[13px] text-neutral-400 font-bold hidden sm:inline">{user.name}</span>
         </header>
 
-        <div className="flex-1 p-6 overflow-auto">{children}</div>
+        <div data-zto-chrome="main" className="flex-1 p-6 overflow-auto">{children}</div>
       </main>
 
       {/* Toasts */}

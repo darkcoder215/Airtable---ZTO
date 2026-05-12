@@ -45,10 +45,11 @@ import {
   Bot,
   Sparkles,
   Settings,
+  Sliders,
+  Image as ImageIcon,
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
-import Link from "next/link";
 import PageGuide from "@/components/PageGuide";
 
 /* ────────── Types ────────── */
@@ -443,6 +444,63 @@ export default function DashboardPage() {
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [newComment, setNewComment] = useState("");
   const [postingComment, setPostingComment] = useState(false);
+
+  // Per-user preferences for which sections of the expanded record card
+  // should be visible. Persisted to localStorage so the user's choices
+  // survive reloads. Defaults: everything on, except empty fields which
+  // start collapsed (their disclosure tag still flips them open ad-hoc).
+  type CardSectionKey =
+    | "aiTools"
+    | "gallery"
+    | "fields"
+    | "emptyFields"
+    | "comments"
+    | "writer"
+    | "imageGenerator";
+  type CardSectionPrefs = Record<CardSectionKey, boolean>;
+  const DEFAULT_CARD_PREFS: CardSectionPrefs = {
+    aiTools: true,
+    gallery: true,
+    fields: true,
+    emptyFields: false,
+    comments: true,
+    writer: true,
+    imageGenerator: true,
+  };
+  const [cardPrefs, setCardPrefs] = useState<CardSectionPrefs>(DEFAULT_CARD_PREFS);
+  const [showCardPrefs, setShowCardPrefs] = useState(false);
+  // Inline image-generator embed — when true the section expands to an
+  // iframe of /dashboard/image-generator?embed=1 so writers don't have
+  // to leave the card to make a post image.
+  const [imgGenEmbedded, setImgGenEmbedded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("zto-card-prefs");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<CardSectionPrefs>;
+      setCardPrefs((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // ignore — corrupt prefs just fall back to defaults
+    }
+  }, []);
+
+  const updateCardPref = (key: CardSectionKey, val: boolean) => {
+    setCardPrefs((prev) => {
+      const next = { ...prev, [key]: val };
+      try {
+        localStorage.setItem("zto-card-prefs", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const resetCardPrefs = () => {
+    setCardPrefs(DEFAULT_CARD_PREFS);
+    try {
+      localStorage.setItem("zto-card-prefs", JSON.stringify(DEFAULT_CARD_PREFS));
+    } catch {}
+  };
 
   const detailRecord = detailRecordId
     ? records.find((r) => r.id === detailRecordId) ?? null
@@ -2445,6 +2503,70 @@ export default function DashboardPage() {
                   )}
                 </div>
               </div>
+              {/* Customize view — controls which sections of this card
+                  render. Persists to localStorage so the writer's
+                  choices stick across records and sessions. */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setShowCardPrefs((v) => !v)}
+                  className="text-neutral-500 hover:text-white p-1.5 rounded-md hover:bg-neutral-800 transition-colors"
+                  title="تخصيص العرض"
+                >
+                  <Sliders className="w-4 h-4" />
+                </button>
+                {showCardPrefs && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setShowCardPrefs(false)} />
+                    <div className="absolute left-0 mt-2 w-64 bg-[#111] border border-neutral-800 rounded-xl shadow-2xl z-30 p-3 zto-fade-in">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[0.7rem] font-black text-white">عرض البطاقة</p>
+                        <button
+                          onClick={resetCardPrefs}
+                          className="text-[0.6rem] text-neutral-500 hover:text-amber-300 font-bold"
+                          title="إعادة الإعدادات الافتراضية"
+                        >
+                          استعادة
+                        </button>
+                      </div>
+                      <p className="text-[0.6rem] text-neutral-500 mb-3 leading-snug">
+                        أزل القسمين اللذين لا تستخدمهما — الإعدادات تُحفَظ تلقائياً.
+                      </p>
+                      <div className="space-y-1.5">
+                        {([
+                          ["aiTools", "شريط أدوات الذكاء الاصطناعي"],
+                          ["gallery", "معرض الصور"],
+                          ["fields", "حقول السجل"],
+                          ["emptyFields", "إظهار الحقول الفارغة"],
+                          ["comments", "التعليقات"],
+                          ["writer", "كاتب AI"],
+                          ["imageGenerator", "مولّد الصور"],
+                        ] as Array<[CardSectionKey, string]>).map(([key, label]) => {
+                          const checked = cardPrefs[key];
+                          return (
+                            <label
+                              key={key}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-neutral-800/40 transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => updateCardPref(key, e.target.checked)}
+                                className="shrink-0"
+                              />
+                              <span className="text-[0.7rem] text-neutral-200 font-bold flex-1">{label}</span>
+                              {checked ? (
+                                <Eye className="w-3 h-3 text-amber-300" />
+                              ) : (
+                                <EyeOff className="w-3 h-3 text-neutral-600" />
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 onClick={() => setDetailRecordId(null)}
                 className="text-neutral-500 hover:text-white p-1.5 rounded-md hover:bg-neutral-800 transition-colors shrink-0"
@@ -2455,11 +2577,76 @@ export default function DashboardPage() {
             </header>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* AI quick-access strip — surfaces the writing + image
+                  generator tools at the top of the card so writers see
+                  them before scrolling through fields and comments.
+                  Each chip jumps the scroll to the matching panel. */}
+              {cardPrefs.aiTools && (cardPrefs.writer || cardPrefs.imageGenerator) && (
+                <section className="zto-fade-in">
+                  <div className="bg-gradient-to-br from-purple-500/[0.06] via-amber-400/[0.04] to-transparent border border-amber-400/20 rounded-xl p-3">
+                    <p className="text-[0.6rem] font-black text-amber-300 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3" />
+                      أدوات الذكاء الاصطناعي
+                    </p>
+                    <p className="text-[0.65rem] text-neutral-400 mb-3 leading-snug">
+                      اكتب منشوراً جاهزاً أو ولّد صورة لهذا السجل دون مغادرة هذه البطاقة.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {cardPrefs.writer && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            document
+                              .getElementById("zto-card-writer")
+                              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }}
+                          className="flex items-start gap-2.5 p-3 rounded-lg bg-[#0d0d0d] border border-neutral-800 hover:border-purple-400/40 transition-colors text-right"
+                        >
+                          <div className="w-8 h-8 rounded-md bg-purple-400/10 border border-purple-400/30 flex items-center justify-center shrink-0">
+                            <Bot className="w-4 h-4 text-purple-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[0.75rem] font-black text-white">كاتب AI</p>
+                            <p className="text-[0.6rem] text-neutral-500 mt-0.5 leading-snug">
+                              ولّد منشوراً جاهزاً للنشر مع عدّاد حروف لكل منصّة.
+                            </p>
+                          </div>
+                        </button>
+                      )}
+                      {cardPrefs.imageGenerator && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImgGenEmbedded(true);
+                            setTimeout(() => {
+                              document
+                                .getElementById("zto-card-imggen")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }, 60);
+                          }}
+                          className="flex items-start gap-2.5 p-3 rounded-lg bg-[#0d0d0d] border border-neutral-800 hover:border-amber-400/40 transition-colors text-right"
+                        >
+                          <div className="w-8 h-8 rounded-md bg-amber-400/10 border border-amber-400/30 flex items-center justify-center shrink-0">
+                            <ImageIcon className="w-4 h-4 text-amber-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[0.75rem] font-black text-white">مولّد الصور</p>
+                            <p className="text-[0.6rem] text-neutral-500 mt-0.5 leading-snug">
+                              صمّم صورة منشور مع عنوان ومنطقة شعار جاهزة.
+                            </p>
+                          </div>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
+
               {/* Hero gallery — only rendered when at least one image
                   field has a value. First image is large; remaining
                   thumbs sit in a strip underneath. Click any thumb to
                   promote it to the hero slot. */}
-              {hasImages && (
+              {cardPrefs.gallery && hasImages && (
                 <section className="zto-fade-in">
                   <DrawerImageGallery images={images} />
                 </section>
@@ -2468,6 +2655,7 @@ export default function DashboardPage() {
               {/* Fields — populated first (visible, normal), empty ones
                   collapsed inside an inline disclosure so they don't
                   visually crowd the populated set. */}
+              {cardPrefs.fields && (
               <section>
                 <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <span className="w-1 h-3 rounded-full bg-amber-400" />
@@ -2508,8 +2696,8 @@ export default function DashboardPage() {
                   </dl>
                 )}
 
-                {empty.length > 0 && (
-                  <details className="mt-3 group">
+                {cardPrefs.emptyFields && empty.length > 0 && (
+                  <details className="mt-3 group" open>
                     <summary className="cursor-pointer text-[0.65rem] text-neutral-500 hover:text-neutral-300 font-bold flex items-center gap-1.5 transition-colors">
                       <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
                       حقول فارغة
@@ -2532,8 +2720,10 @@ export default function DashboardPage() {
                   </details>
                 )}
               </section>
+              )}
 
               {/* Comments — Airtable-native record comments */}
+              {cardPrefs.comments && (
               <section>
                 <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <span className="w-1 h-3 rounded-full bg-blue-400" />
@@ -2642,28 +2832,46 @@ export default function DashboardPage() {
                 )}
               </section>
 
+              )}
+
               {/* AI writer panel — drafts post copy from the article
                   text using a writing-type scraper agent. Lazy-loads
                   the agents list once. The output panel surfaces char,
                   word, and social-channel-fit indicators so writers
                   know whether their copy will be cut on X/LinkedIn. */}
-              <CardAgentsPanel
-                articleText={detailRecord.fields[primary?.name ?? ""] != null ? renderCellPreview(detailRecord.fields[primary?.name ?? ""]) : ""}
-                fields={detailRecord.fields}
-              />
+              {cardPrefs.writer && (
+                <div id="zto-card-writer">
+                  <CardAgentsPanel
+                    articleText={detailRecord.fields[primary?.name ?? ""] != null ? renderCellPreview(detailRecord.fields[primary?.name ?? ""]) : ""}
+                    fields={detailRecord.fields}
+                  />
+                </div>
+              )}
 
-              {/* Image generator quick-launch — links to /dashboard/image-generator
-                  pre-seeded with the article's title and (if present) image. */}
-              {(() => {
+              {/* Image generator — embedded inline via an iframe in
+                  embed mode (?embed=1) so writers can design a post
+                  image without leaving the record. Collapsed by default
+                  to keep initial load fast. */}
+              {cardPrefs.imageGenerator && (() => {
                 const titleText = renderCellPreview(primaryV) || "";
                 const heroImage = images[0]?.url ?? null;
                 const params = new URLSearchParams();
                 if (titleText) params.set("text", titleText.slice(0, 800));
                 if (heroImage) params.set("image", heroImage);
                 params.set("recordId", detailRecord.id);
+                params.set("embed", "1");
+                const embedUrl = `/dashboard/image-generator?${params.toString()}`;
+                const newTabUrl = `/dashboard/image-generator?${(() => {
+                  const p = new URLSearchParams(params);
+                  p.delete("embed");
+                  return p.toString();
+                })()}`;
                 return (
-                  <section className="border border-neutral-800 rounded-xl p-4 bg-[#0d0d0d]">
-                    <div className="flex items-center gap-3 flex-wrap">
+                  <section
+                    id="zto-card-imggen"
+                    className="border border-neutral-800 rounded-xl bg-[#0d0d0d] overflow-hidden"
+                  >
+                    <div className="flex items-center gap-3 flex-wrap p-4">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <div className="w-9 h-9 rounded-md bg-amber-400/10 border border-amber-400/30 flex items-center justify-center shrink-0">
                           <Wand2 className="w-4 h-4 text-amber-300" />
@@ -2671,18 +2879,40 @@ export default function DashboardPage() {
                         <div className="min-w-0">
                           <h3 className="text-[0.85rem] font-black text-white">مولّد الصور</h3>
                           <p className="text-[0.65rem] text-neutral-400 font-bold mt-0.5">
-                            افتح المولّد ومرّر له نصّ هذا السجل + صورته كنقطة بداية.
+                            صمّم صورة المنشور هنا — العنوان + الصورة محمّلان مسبقاً من هذا السجل.
                           </p>
                         </div>
                       </div>
-                      <Link
-                        href={`/dashboard/image-generator?${params.toString()}`}
-                        className="zto-btn zto-btn-gold zto-btn-sm shrink-0"
-                      >
-                        <Wand2 className="w-3.5 h-3.5" />
-                        افتح مع هذا السجل
-                      </Link>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setImgGenEmbedded((v) => !v)}
+                          className="zto-btn zto-btn-gold zto-btn-sm"
+                        >
+                          <Wand2 className="w-3.5 h-3.5" />
+                          {imgGenEmbedded ? "إخفاء" : "افتح هنا"}
+                        </button>
+                        <a
+                          href={newTabUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="zto-btn zto-btn-ghost zto-btn-sm"
+                          title="فتح في صفحة كاملة"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
                     </div>
+                    {imgGenEmbedded && (
+                      <div className="border-t border-neutral-800 bg-black">
+                        <iframe
+                          src={embedUrl}
+                          title="مولّد الصور"
+                          className="w-full h-[720px] border-0 zto-fade-in"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
                   </section>
                 );
               })()}

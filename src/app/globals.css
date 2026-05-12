@@ -1392,3 +1392,20 @@ button.zto-card:hover {
 [data-theme="signal-light"] .border-amber-400\/40 { border-color: rgba(29, 92, 224, 0.30) !important; }
 [data-theme="signal-light"] .text-emerald-400,
 [data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Embed mode — when a dashboard page is rendered inside an iframe (e.g.
+   the image generator embedded in the record-detail card), set
+   `data-embed="1"` on <html> so the dashboard chrome (sidebar + topbar)
+   collapses to zero. The page content fills the iframe naturally.
+   Set/unset by the consuming page when ?embed=1 is in the URL. */
+html[data-embed="1"] [data-zto-chrome="sidebar"],
+html[data-embed="1"] [data-zto-chrome="header"] {
+  display: none !important;
+}
+html[data-embed="1"] [data-zto-chrome="main"] {
+  padding: 0.75rem !important;
+}
+html[data-embed="1"] body {
+  background: transparent !important;
+}

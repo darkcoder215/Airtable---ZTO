@@ -107,6 +107,22 @@ function compactNumber(n: number): string {
 export default function ImageGeneratorPage() {
   const { user, addToast } = useAppStore();
 
+  // Embed mode — when the page is loaded inside an iframe (e.g. the
+  // record-detail card on the dashboard), `?embed=1` collapses the
+  // dashboard chrome via a CSS rule keyed off `<html data-embed="1">`.
+  // We toggle the attribute here so the same page works as both a
+  // full route and an inline panel without a separate component tree.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("embed") !== "1") return;
+    const root = document.documentElement;
+    root.setAttribute("data-embed", "1");
+    return () => {
+      root.removeAttribute("data-embed");
+    };
+  }, []);
+
   /* Tab routing */
   const [tab, setTab] = useState<Tab>("generate");
 
