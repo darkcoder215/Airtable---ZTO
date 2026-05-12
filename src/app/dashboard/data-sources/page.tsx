@@ -31,6 +31,19 @@ import {
   Bot,
   Eye,
   ChevronDown,
+  Type as TypeIcon,
+  Hash,
+  Calendar,
+  Mail,
+  Phone,
+  Link as LinkIcon,
+  Paperclip,
+  List as ListIcon,
+  Square,
+  CheckSquare,
+  ToggleRight as ToggleIcon,
+  Star,
+  FileText,
 } from "lucide-react";
 
 /* ───────── Types ───────── */
@@ -124,6 +137,56 @@ const defaultFormData = {
   filterAgentId: "" as string, // empty → backend resolves the seeded default
   brandId: "" as string,        // empty → unassigned
 };
+
+/* ───────── Field-type visual metadata ─────────
+   Maps Airtable field types to a Lucide icon, a tone class, and a
+   short Arabic label so the mapping UI can show *what kind of value*
+   each column expects at a glance. */
+const FIELD_TYPE_META: Record<
+  string,
+  { Icon: typeof TypeIcon; tone: string; label: string }
+> = {
+  singleLineText:      { Icon: TypeIcon,  tone: "text-blue-300 border-blue-400/30 bg-blue-400/10",    label: "نص قصير" },
+  multilineText:       { Icon: FileText,  tone: "text-blue-300 border-blue-400/30 bg-blue-400/10",    label: "نص طويل" },
+  richText:            { Icon: FileText,  tone: "text-blue-300 border-blue-400/30 bg-blue-400/10",    label: "نص منسّق" },
+  email:               { Icon: Mail,      tone: "text-cyan-300 border-cyan-400/30 bg-cyan-400/10",    label: "بريد" },
+  phoneNumber:         { Icon: Phone,     tone: "text-cyan-300 border-cyan-400/30 bg-cyan-400/10",    label: "هاتف" },
+  url:                 { Icon: LinkIcon,  tone: "text-purple-300 border-purple-400/30 bg-purple-400/10", label: "رابط" },
+  number:              { Icon: Hash,      tone: "text-emerald-300 border-emerald-400/30 bg-emerald-400/10", label: "رقم" },
+  percent:             { Icon: Hash,      tone: "text-emerald-300 border-emerald-400/30 bg-emerald-400/10", label: "نسبة" },
+  currency:            { Icon: Hash,      tone: "text-emerald-300 border-emerald-400/30 bg-emerald-400/10", label: "عملة" },
+  rating:              { Icon: Star,      tone: "text-amber-300 border-amber-400/30 bg-amber-400/10",  label: "تقييم" },
+  duration:            { Icon: Clock,     tone: "text-emerald-300 border-emerald-400/30 bg-emerald-400/10", label: "مدّة" },
+  date:                { Icon: Calendar,  tone: "text-pink-300 border-pink-400/30 bg-pink-400/10",    label: "تاريخ" },
+  dateTime:            { Icon: Calendar,  tone: "text-pink-300 border-pink-400/30 bg-pink-400/10",    label: "تاريخ + وقت" },
+  createdTime:         { Icon: Calendar,  tone: "text-pink-300 border-pink-400/30 bg-pink-400/10",    label: "تاريخ الإنشاء" },
+  lastModifiedTime:    { Icon: Calendar,  tone: "text-pink-300 border-pink-400/30 bg-pink-400/10",    label: "آخر تعديل" },
+  checkbox:            { Icon: CheckSquare, tone: "text-emerald-300 border-emerald-400/30 bg-emerald-400/10", label: "صح/خطأ" },
+  singleSelect:        { Icon: Square,    tone: "text-orange-300 border-orange-400/30 bg-orange-400/10", label: "اختيار واحد" },
+  multipleSelects:     { Icon: ListIcon,  tone: "text-orange-300 border-orange-400/30 bg-orange-400/10", label: "اختيار متعدّد" },
+  multipleAttachments: { Icon: Paperclip, tone: "text-rose-300 border-rose-400/30 bg-rose-400/10",    label: "مرفقات / صور" },
+  attachment:          { Icon: Paperclip, tone: "text-rose-300 border-rose-400/30 bg-rose-400/10",    label: "مرفق" },
+  multipleRecordLinks: { Icon: LinkIcon,  tone: "text-indigo-300 border-indigo-400/30 bg-indigo-400/10", label: "ارتباط بسجل" },
+  lookup:              { Icon: Eye,       tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "بحث (محسوب)" },
+  rollup:              { Icon: Hash,      tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "تجميع (محسوب)" },
+  formula:             { Icon: Hash,      tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "صيغة (محسوب)" },
+  autoNumber:          { Icon: Hash,      tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "ترقيم تلقائي" },
+  count:               { Icon: Hash,      tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "عدّ" },
+  barcode:             { Icon: TypeIcon,  tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "باركود" },
+  button:              { Icon: ToggleIcon, tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40", label: "زرّ" },
+};
+
+const COMPUTED_TYPES = new Set([
+  "lookup", "rollup", "formula", "autoNumber", "count", "createdTime", "lastModifiedTime",
+]);
+
+function getFieldTypeMeta(type: string) {
+  return FIELD_TYPE_META[type] ?? {
+    Icon: TypeIcon,
+    tone: "text-neutral-300 border-neutral-700 bg-neutral-800/40",
+    label: type,
+  };
+}
 
 /* ───────── Component ───────── */
 
@@ -480,10 +543,14 @@ export default function DataSourcesPage() {
     }
   };
 
-  // When a type's tableName changes, lazily fetch its columns so the
-  // missing-column flag and the autocomplete are always up to date.
-  const fetchColumnsFor = async (tableName: string) => {
-    if (!tableName.trim() || destColumnsByTable[tableName]) return;
+  // When a type's tableName changes, fetch its columns so the
+  // missing-column flag, the autocomplete, and the type badges stay
+  // accurate. `force=true` bypasses the cache so the "تحديث" button
+  // and the table switcher always re-pull the live schema (handy
+  // after the admin adds/renames an Airtable column).
+  const fetchColumnsFor = async (tableName: string, force = false) => {
+    if (!tableName.trim()) return;
+    if (!force && destColumnsByTable[tableName]) return;
     try {
       const r = await fetch(
         `/api/data-sources?action=destination-columns&tableName=${encodeURIComponent(tableName)}`
@@ -605,7 +672,9 @@ export default function DataSourcesPage() {
 
   const setActiveTableName = (tableName: string) => {
     setActiveTypeMapping((p) => ({ ...p, tableName }));
-    if (tableName) void fetchColumnsFor(tableName);
+    // Force-refresh on switch so a stale cache from an earlier
+    // schema change doesn't show incorrect columns/types.
+    if (tableName) void fetchColumnsFor(tableName, true);
   };
 
   const handleFetch = async (sourceId: string) => {
@@ -2469,6 +2538,18 @@ export default function DataSourcesPage() {
                       const isReadonly = user?.role !== "admin";
                       const trimmed = row.column.trim();
                       const missing = !!trimmed && !knownColumnNames.has(trimmed);
+                      // Resolve the matching Airtable column (if any)
+                      // so we can show its type as a badge next to the
+                      // name field — saves the admin from squinting at
+                      // the side panel to figure out what the column
+                      // expects.
+                      const matchedCol = trimmed
+                        ? tableColumns.find((c) => c.name === trimmed)
+                        : null;
+                      const matchedMeta = matchedCol ? getFieldTypeMeta(matchedCol.type) : null;
+                      const matchedIsComputed = matchedCol
+                        ? COMPUTED_TYPES.has(matchedCol.type)
+                        : false;
                       return (
                         <tr key={idx} className={`border-b border-neutral-800/50 last:border-0 ${missing ? "bg-red-500/5" : ""}`}>
                           <td className="px-4 py-2.5 align-top">
@@ -2488,10 +2569,26 @@ export default function DataSourcesPage() {
                                 </option>
                               ))}
                             </datalist>
+                            {matchedMeta && (
+                              <span
+                                className={`mt-1.5 inline-flex items-center gap-1 text-[0.6rem] font-bold rounded-full px-2 py-0.5 border ${matchedMeta.tone}`}
+                              >
+                                <matchedMeta.Icon className="w-2.5 h-2.5" />
+                                {matchedMeta.label}
+                                <span className="text-neutral-600 font-mono mr-1">·</span>
+                                <span className="text-neutral-500 font-mono">{matchedCol!.type}</span>
+                              </span>
+                            )}
+                            {matchedIsComputed && (
+                              <p className="text-[0.6rem] text-amber-400 mt-1 flex items-center gap-1">
+                                <Info className="w-3 h-3" />
+                                هذا العمود محسوب في Airtable — لن يقبل الكتابة من API
+                              </p>
+                            )}
                             {missing && (
                               <p className="text-[0.6rem] text-red-400 mt-1 flex items-center gap-1">
                                 <XCircle className="w-3 h-3" />
-                                لا يوجد عمود بهذا الاسم في "{m.tableName}"
+                                لا يوجد عمود بهذا الاسم في «{m.tableName}»
                               </p>
                             )}
                           </td>
@@ -2687,20 +2784,75 @@ export default function DataSourcesPage() {
                   </div>
                 </div>
                 <div className="zto-card p-3">
-                  <h4 className="text-xs font-bold text-white mb-2 flex items-center gap-2">
-                    <Database className="w-3.5 h-3.5 text-amber-400" />
-                    أعمدة "{m.tableName}"
-                  </h4>
-                  <div className="space-y-1 max-h-[260px] overflow-y-auto">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className="text-xs font-bold text-white flex items-center gap-2 min-w-0">
+                      <Database className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">أعمدة «{m.tableName}»</span>
+                    </h4>
+                    <span className="text-[0.6rem] text-neutral-500 font-mono tabular-nums shrink-0">
+                      {tableColumns.length}
+                    </span>
+                  </div>
+                  <p className="text-[0.6rem] text-neutral-500 mb-2 leading-snug">
+                    اضغط أيّ عمود لنسخه إلى الحقل المُحدَّد، أو استخدمه مرجعاً للنوع المتوقّع.
+                  </p>
+                  <div className="space-y-1 max-h-[320px] overflow-y-auto">
                     {tableColumns.length === 0 ? (
                       <p className="text-[0.65rem] text-neutral-500">— لا توجد أعمدة —</p>
                     ) : (
-                      tableColumns.map((c) => (
-                        <div key={c.id} className="flex items-center justify-between gap-2 text-[0.65rem] border-b border-neutral-800/50 last:border-0 py-1.5">
-                          <span className="text-neutral-300 truncate">{c.name}</span>
-                          <span className="text-[0.55rem] text-neutral-500 font-mono shrink-0">{c.type}</span>
-                        </div>
-                      ))
+                      tableColumns.map((c) => {
+                        const meta = getFieldTypeMeta(c.type);
+                        const Icon = meta.Icon;
+                        const usedBy = m.columns.findIndex((r) => r.column.trim() === c.name);
+                        const inUse = usedBy >= 0;
+                        const isComputed = COMPUTED_TYPES.has(c.type);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              try {
+                                navigator.clipboard.writeText(c.name);
+                                addToast(`نُسخ «${c.name}»`, "info");
+                              } catch {
+                                // clipboard may be blocked — ignore
+                              }
+                            }}
+                            className={`w-full text-right group flex items-start gap-2 px-2 py-1.5 rounded-md border transition-colors ${
+                              inUse
+                                ? "border-emerald-400/30 bg-emerald-400/[0.04]"
+                                : "border-transparent hover:border-neutral-700 hover:bg-neutral-800/40"
+                            }`}
+                            title={isComputed ? "حقل محسوب — لا يقبل الكتابة عبر API" : `${c.type} — اضغط للنسخ`}
+                          >
+                            <span
+                              className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${meta.tone}`}
+                            >
+                              <Icon className="w-3 h-3" />
+                            </span>
+                            <span className="flex-1 min-w-0 text-right">
+                              <span className="block text-[0.72rem] font-bold text-white truncate">
+                                {c.name}
+                              </span>
+                              <span className="flex items-center gap-1 mt-0.5">
+                                <span className={`text-[0.6rem] font-bold ${meta.tone.split(" ")[0]}`}>
+                                  {meta.label}
+                                </span>
+                                <span className="text-[0.55rem] text-neutral-600 font-mono">·</span>
+                                <span className="text-[0.55rem] text-neutral-600 font-mono truncate">{c.type}</span>
+                                {isComputed && (
+                                  <span className="text-[0.55rem] text-amber-300 font-bold mr-auto shrink-0">للقراءة فقط</span>
+                                )}
+                                {inUse && !isComputed && (
+                                  <span className="text-[0.55rem] text-emerald-300 font-bold mr-auto shrink-0">
+                                    مُستخدَم
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
