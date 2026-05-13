@@ -832,51 +832,13 @@ html[data-embed="1"] body {
       viewports. The original Tailwind classes already give the right
       look across breakpoints. */
 
-/* ── Bigger, calmer base type. Editorial gets a small bump in
-      size + line-height so body copy is comfortable to read
-      for long stretches. Weight nudges up to 500 (medium) so
-      thin glyphs don't look anemic on dark surfaces. */
-[data-theme="editorial-dark"] body,
-[data-theme="editorial-light"] body {
-  font-size: 16px;
-  line-height: 1.65;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-[data-theme="editorial-dark"] .text-xs,
-[data-theme="editorial-light"] .text-xs        { font-size: 0.82rem !important; line-height: 1.55 !important; }
-[data-theme="editorial-dark"] .text-sm,
-[data-theme="editorial-light"] .text-sm        { font-size: 0.95rem !important; line-height: 1.6 !important; }
-[data-theme="editorial-dark"] .text-base,
-[data-theme="editorial-light"] .text-base      { font-size: 1.05rem !important; line-height: 1.65 !important; }
-[data-theme="editorial-dark"] .text-\[13px\],
-[data-theme="editorial-light"] .text-\[13px\]  { font-size: 14.5px !important; line-height: 1.55 !important; }
-[data-theme="editorial-dark"] .text-\[0\.7rem\],
-[data-theme="editorial-light"] .text-\[0\.7rem\]   { font-size: 0.82rem !important; }
-[data-theme="editorial-dark"] .text-\[0\.65rem\],
-[data-theme="editorial-light"] .text-\[0\.65rem\]  { font-size: 0.78rem !important; }
-[data-theme="editorial-dark"] .text-\[0\.6rem\],
-[data-theme="editorial-light"] .text-\[0\.6rem\]   { font-size: 0.72rem !important; }
-[data-theme="editorial-dark"] .text-\[0\.55rem\],
-[data-theme="editorial-light"] .text-\[0\.55rem\]  { font-size: 0.68rem !important; }
-
-/* Lift "muted" weights so labels don't disappear. */
-[data-theme="editorial-dark"] .font-bold,
-[data-theme="editorial-light"] .font-bold    { font-weight: 700 !important; }
-[data-theme="editorial-dark"] .font-black,
-[data-theme="editorial-light"] .font-black   { font-weight: 800 !important; }
-[data-theme="editorial-dark"] .font-semibold,
-[data-theme="editorial-light"] .font-semibold { font-weight: 600 !important; }
-
-/* ── Subtle reading wash. Card body paragraphs and form labels
-      sit on a barely-perceptible cream/ink wash so the eye
-      finds the text without strain. Keep the wash inset so it
-      reads as type emphasis, not a separate block. */
-[data-theme="editorial-dark"] .zto-card p:not([class*="text-"]),
-[data-theme="editorial-light"] .zto-card p:not([class*="text-"]) {
-  /* leave bare-p untouched; the per-class rules below own
-     the actual recoloring */
-}
+/* ── (Removed) Aggressive type bumps: I had inflated every text-xs /
+      text-sm / text-base / text-[0.6rem] etc class with !important,
+      and pushed body font-size + line-height + font-weight. That
+      fought every page's existing typography (login hero text became
+      huge, the dashboard chrome got pushed around). The editorial
+      look comes from the font swap below, not from re-sizing every
+      utility — those are reverted. */
 
 /* ============================================================
    LIGHT MODE INVERSION
@@ -965,18 +927,6 @@ html[data-embed="1"] body {
    bg/95 variants used by sticky modal headers. */
 [data-theme="editorial-light"] .bg-\[\#0a0a0a\]\/95 {
   background-color: rgba(255, 255, 255, 0.92) !important;
-}
-
-/* ── Subtle highlight wash for "lifted" text in cards under
-      both editorial themes. A 2-3px inline padded background on
-      strong copy gives the eye a soft anchor without becoming a
-      button. Applied to common emphasis nodes in cards. */
-[data-theme="editorial-dark"] .zto-card .text-base,
-[data-theme="editorial-light"] .zto-card .text-base,
-[data-theme="editorial-dark"] .zto-card .text-sm.font-bold,
-[data-theme="editorial-light"] .zto-card .text-sm.font-bold {
-  /* tighter tracking for serif text at body size */
-  letter-spacing: -0.005em;
 }
 
 /* ── Brighter outlines + a quiet wash on inputs under both
