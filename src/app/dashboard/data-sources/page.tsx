@@ -2708,6 +2708,125 @@ export default function DataSourcesPage() {
             </div>
           </div>
 
+          {/* Rules summary — the "funnel" view. A compact, read-only
+              recap of every rule in the current scope so the writer
+              can see at a glance how an article ends up in Airtable.
+              Each chip reads: [source / literal] ← [Airtable column].
+              Hidden until a table is picked + columns are loaded. */}
+          {m.tableName && m.columns.length > 0 && (() => {
+            const meta = destTokenMetaByType[destActiveType] ?? [];
+            const labelFor = (token: string) =>
+              meta.find((tk) => tk.token === token)?.label ?? token;
+            return (
+              <div className="zto-card p-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-white flex items-center gap-2">
+                      <ChevronDown className="w-4 h-4 text-amber-400 rotate-90" />
+                      مسار البيانات · {TYPE_LABELS[destActiveType]}
+                      {destActiveBrandId && overridingBrand && (
+                        <span className="text-[0.65rem] font-bold border border-amber-400/40 text-amber-300 bg-amber-400/10 rounded-full px-2 py-0.5">
+                          تخصيص لعلامة «{overridingBrand.name}»
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[0.65rem] text-neutral-500 mt-0.5 leading-snug">
+                      هذه هي قواعد التحويل الحالية: من اليمين (المصدر) إلى اليسار (عمود Airtable).
+                      عند كل عملية حفظ، تُطبَّق هذه القواعد على المقال الواحد فيتولّد منه سجل واحد.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 text-[0.65rem] text-neutral-400 font-bold shrink-0">
+                    <span className="bg-neutral-800/50 border border-neutral-800 rounded-full px-2 py-0.5">
+                      {m.columns.length} قاعدة
+                    </span>
+                    {(() => {
+                      const lit = m.columns.filter((r) => r.entry.type === "literal").length;
+                      const fld = m.columns.length - lit;
+                      return (
+                        <>
+                          <span className="bg-blue-400/10 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5">
+                            {fld} حقل
+                          </span>
+                          {lit > 0 && (
+                            <span className="bg-amber-400/10 text-amber-300 border border-amber-400/30 rounded-full px-2 py-0.5">
+                              {lit} قيمة ثابتة
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {m.columns.length === 0 ? (
+                    <p className="text-[0.7rem] text-neutral-500 italic">— لا قواعد بعد —</p>
+                  ) : (
+                    m.columns.map((row, idx) => {
+                      const trimmed = row.column.trim();
+                      const missing = !!trimmed && !knownColumnNames.has(trimmed);
+                      const matchedCol = trimmed ? tableColumns.find((c) => c.name === trimmed) : null;
+                      const matchedTone = matchedCol ? getFieldTypeMeta(matchedCol.type) : null;
+                      let sourceNode: React.ReactNode;
+                      if (row.entry.type === "literal") {
+                        sourceNode = (
+                          <span className="inline-flex items-center gap-1.5 max-w-[280px]">
+                            <span className="text-[0.6rem] text-amber-400 font-bold uppercase tracking-wider shrink-0">ثابت</span>
+                            <code className="text-[0.7rem] text-amber-200 font-mono bg-amber-400/5 border border-amber-400/20 rounded px-1.5 py-0.5 truncate">
+                              {row.entry.value || "(فارغ)"}
+                            </code>
+                          </span>
+                        );
+                      } else {
+                        const lbl = labelFor(row.entry.field);
+                        sourceNode = (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="text-[0.6rem] text-blue-400 font-bold uppercase tracking-wider shrink-0">حقل</span>
+                            <span className="text-[0.75rem] text-blue-200 font-bold">{lbl}</span>
+                            <code className="text-[0.55rem] text-neutral-600 font-mono">{row.entry.field}</code>
+                            {row.entry.fallback && (
+                              <span className="text-[0.55rem] text-neutral-500">
+                                / إن لم يوجد: {labelFor(row.entry.fallback)}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      }
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+                            missing
+                              ? "border-red-500/30 bg-red-500/5"
+                              : "border-neutral-800 bg-neutral-900/30"
+                          }`}
+                        >
+                          <span className="text-[0.6rem] text-neutral-600 font-mono tabular-nums shrink-0">
+                            {String(idx + 1).padStart(2, "0")}
+                          </span>
+                          <div className="min-w-0 flex-1 flex items-center justify-between gap-3 flex-wrap">
+                            <div className="min-w-0">{sourceNode}</div>
+                            <span className="text-neutral-600 mx-1 shrink-0">←</span>
+                            <div className="inline-flex items-center gap-2 shrink-0">
+                              <span className="text-[0.75rem] font-bold text-white">{trimmed || "(بدون اسم)"}</span>
+                              {matchedTone ? (
+                                <span className={`inline-flex items-center gap-1 text-[0.55rem] font-bold rounded-full px-1.5 py-0.5 border ${matchedTone.tone}`}>
+                                  <matchedTone.Icon className="w-2.5 h-2.5" />
+                                  {matchedTone.label}
+                                </span>
+                              ) : missing ? (
+                                <span className="text-[0.55rem] text-red-400 font-bold">⚠ غير موجود</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Mapping table */}
           {destLoading ? (
             <div className="zto-card p-12 flex items-center justify-center">
