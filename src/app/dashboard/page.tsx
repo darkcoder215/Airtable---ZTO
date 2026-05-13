@@ -84,6 +84,32 @@ interface AirtableRecord {
 
 /* ────────── Helpers ────────── */
 
+// Relative-time label in Arabic for kanban date cells. Returns the
+// label string plus the parsed direction (past vs future) and a rough
+// day-distance so callers can drive urgency colors.
+function relativeTimeAr(iso: string): { label: string; isPast: boolean; daysAgo: number } {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return { label: iso, isPast: false, daysAgo: 0 };
+  const now = Date.now();
+  const diffMs = t - now; // negative if past
+  const abs = Math.abs(diffMs);
+  const mins = Math.round(abs / 60000);
+  const hours = Math.round(abs / 3600000);
+  const days = Math.round(abs / 86400000);
+  const months = Math.round(days / 30);
+  let unit: string;
+  if (mins < 60) unit = mins <= 1 ? "دقيقة" : `${mins} دقيقة`;
+  else if (hours < 24) unit = hours <= 1 ? "ساعة" : `${hours} ساعة`;
+  else if (days < 30) unit = days <= 1 ? "يوم" : `${days} أيام`;
+  else if (months < 12) unit = months <= 1 ? "شهر" : `${months} أشهر`;
+  else {
+    const yrs = Math.round(days / 365);
+    unit = yrs <= 1 ? "سنة" : `${yrs} سنوات`;
+  }
+  const label = diffMs < 0 ? `منذ ${unit}` : `بعد ${unit}`;
+  return { label, isPast: diffMs < 0, daysAgo: diffMs < 0 ? days : 0 };
+}
+
 function renderCellPreview(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -1084,6 +1110,20 @@ export default function DashboardPage() {
     }
 
     const strVal = String(value);
+    // JSON-string detection. Some fields land in Airtable as the
+    // serialised output of upstream agents (e.g. `{"state":"error",
+    // "errorType":"emptyDependency","value":null,"isStale":false}`).
+    // Showing the raw JSON is hostile — the user wants to know "what
+    // went wrong" or "what's the value", not parse code. We try a
+    // strict parse, and if it succeeds, hand it to a friendly renderer.
+    if (opts?.full && /^\s*[{\[]/.test(strVal)) {
+      try {
+        const parsed = JSON.parse(strVal);
+        return <ParsedJsonValue value={parsed} />;
+      } catch {
+        // not valid JSON — fall through to the regular text path
+      }
+    }
     // Expanded-card path (opts.full): hand the full string to the
     // ExpandableText component which auto-collapses very long values
     // behind a «اقرأ المزيد» button while staying selectable. Grid view
@@ -2335,30 +2375,54 @@ export default function DashboardPage() {
                               {title}
                             </p>
                             {cardFields.length > 0 && (
-                              <div className="mt-2 space-y-1">
+                              <div className="mt-2 space-y-1.5">
                                 {cardFields.map((f) => {
                                   const v = rec.fields[f.name];
-                                  if (v == null || v === "") return null;
-                                  const preview = renderCellPreview(v);
-                                  if (!preview) return null;
                                   const isBold = kanbanCardBold[f.id] === true;
+                                  const isEmpty = v == null || v === "" || (Array.isArray(v) && v.length === 0);
+                                  // Date fields get a "since X" relative
+                                  // rendering so the writer sees urgency
+                                  // at a glance. Past dates render red
+                                  // (overdue), recent ones amber-ish,
+                                  // others stay neutral.
+                                  const isDate =
+                                    f.type === "date" ||
+                                    f.type === "dateTime" ||
+                                    f.type === "createdTime" ||
+                                    f.type === "lastModifiedTime";
+                                  let display: string;
+                                  let urgencyTone = "";
+                                  if (isEmpty) {
+                                    display = "—";
+                                  } else if (isDate && typeof v === "string") {
+                                    const ago = relativeTimeAr(v);
+                                    display = ago.label;
+                                    if (ago.isPast && ago.daysAgo >= 7) urgencyTone = "text-red-300";
+                                    else if (ago.isPast && ago.daysAgo >= 2) urgencyTone = "text-amber-300";
+                                  } else {
+                                    display = renderCellPreview(v) || "—";
+                                  }
                                   return (
                                     <div key={f.id} className="flex items-start gap-1.5">
                                       <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
                                         {f.name}
                                       </span>
                                       <span
-                                        className={`break-words ${
-                                          isBold ? "text-white font-black" : "text-neutral-300"
+                                        className={`break-words whitespace-pre-wrap leading-snug ${
+                                          isEmpty
+                                            ? "text-neutral-600 italic"
+                                            : urgencyTone
+                                              ? `${urgencyTone} font-bold`
+                                              : isBold
+                                                ? "text-white font-black"
+                                                : "text-neutral-300"
                                         } ${
-                                          kanbanDensity === "compact"
-                                            ? "text-[10px] line-clamp-1"
-                                            : kanbanDensity === "comfy"
-                                              ? "text-[12px] line-clamp-3"
-                                              : "text-[11px] line-clamp-2"
+                                          kanbanDensity === "compact" ? "text-[10px]" :
+                                          kanbanDensity === "comfy"  ? "text-[12px]" :
+                                                                       "text-[11px]"
                                         }`}
                                       >
-                                        {preview}
+                                        {display}
                                       </span>
                                     </div>
                                   );
@@ -2718,13 +2782,18 @@ export default function DashboardPage() {
                   visually crowd the populated set. */}
               {cardPrefs.fields && (
               <section>
-                <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <span className="w-1 h-3 rounded-full bg-amber-400" />
-                  الحقول
-                  <span className="text-[0.55rem] text-neutral-600 font-mono mr-1">
-                    {populated.length}/{nonImageFields.length}
-                  </span>
-                </h3>
+                <div className="mb-3">
+                  <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest flex items-center gap-2">
+                    <span className="w-1 h-3 rounded-full bg-amber-400" />
+                    الحقول
+                    <span className="text-[0.55rem] text-neutral-600 font-mono mr-1">
+                      {populated.length}/{nonImageFields.length}
+                    </span>
+                  </h3>
+                  <p className="text-[0.6rem] text-neutral-500 mt-1 leading-snug">
+                    كل أعمدة هذا السجل كما هي في Airtable. الحقول الفارغة مطوية في الأسفل. يمكنك توسيع النصوص الطويلة بزرّ «اقرأ المزيد».
+                  </p>
+                </div>
                 {populated.length === 0 ? (
                   <p className="text-[0.7rem] text-neutral-500 italic font-bold">— لا حقول مُعبَّأة —</p>
                 ) : (
@@ -2786,15 +2855,20 @@ export default function DashboardPage() {
               {/* Comments — Airtable-native record comments */}
               {cardPrefs.comments && (
               <section>
-                <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <span className="w-1 h-3 rounded-full bg-blue-400" />
-                  التعليقات
-                  {comments.length > 0 && (
-                    <span className="text-[0.65rem] tabular-nums bg-blue-400/15 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5 font-black">
-                      {comments.length}
-                    </span>
-                  )}
-                </h3>
+                <div className="mb-3">
+                  <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest flex items-center gap-2">
+                    <span className="w-1 h-3 rounded-full bg-blue-400" />
+                    التعليقات
+                    {comments.length > 0 && (
+                      <span className="text-[0.65rem] tabular-nums bg-blue-400/15 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5 font-black">
+                        {comments.length}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-[0.6rem] text-neutral-500 mt-1 leading-snug">
+                    تعليقات Airtable الأصلية على هذا السجل — مرئية لكل فريق العمل ومحفوظة مباشرة في Airtable.
+                  </p>
+                </div>
 
                 {/* Compose box */}
                 <div className="mb-4 bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 transition-colors focus-within:border-amber-400/40">
@@ -2994,6 +3068,114 @@ export default function DashboardPage() {
    underneath let the admin flip between every image attached to
    the record. Self-contained — needs no parent state.
 */
+/* ─────────────── ParsedJsonValue ───────────────
+   Render a JSON value (object / array / scalar) as a readable Arabic
+   summary instead of raw `{"state":"error",...}`. Recognises common
+   shapes that ship from upstream agents:
+     • { state:"error", errorType, ... } → "خطأ: <type>"
+     • { value, ... } where value is the only meaningful key → show that
+     • everything else → labelled key/value rows
+   The component still offers a "إظهار JSON الأصلي" toggle for debugging.
+*/
+function ParsedJsonValue({ value }: { value: unknown }) {
+  const [showRaw, setShowRaw] = useState(false);
+
+  // Friendly summary for the most common shape (an upstream agent
+  // returning `{ state: "error" | "ok", value, errorType, ... }`).
+  const summary = (() => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const o = value as Record<string, unknown>;
+      if (o.state === "error" || o.errorType) {
+        const t = (o.errorType ?? "خطأ غير معروف") as string;
+        return (
+          <span className="inline-flex items-center gap-2">
+            <span className="text-red-300 font-bold">⚠ خطأ:</span>
+            <code className="text-[0.7rem] text-red-200 font-mono">{String(t)}</code>
+          </span>
+        );
+      }
+      if (o.state === "ok" && o.value != null) {
+        return <ParsedJsonValue value={o.value} />;
+      }
+    }
+    return null;
+  })();
+
+  const raw = JSON.stringify(value, null, 2);
+
+  return (
+    <div className="space-y-2">
+      {summary}
+      {!summary && (
+        <RenderJsonInline value={value} />
+      )}
+      <button
+        type="button"
+        onClick={() => setShowRaw((v) => !v)}
+        className="text-[0.6rem] text-neutral-500 hover:text-amber-300 font-bold"
+      >
+        {showRaw ? "إخفاء JSON الأصلي" : "إظهار JSON الأصلي"}
+      </button>
+      {showRaw && (
+        <pre className="text-[0.7rem] text-neutral-400 bg-black/40 border border-neutral-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all" dir="ltr">
+          {raw}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// Compact key/value renderer used inside ParsedJsonValue when no
+// specific shape is recognised. Strings render inline, objects nest
+// once with a small indent, arrays are joined with bullets. Caps depth
+// at 2 so a deeply nested blob doesn't blow up the card.
+function RenderJsonInline({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (value === null) return <span className="text-neutral-500">—</span>;
+  if (typeof value === "string") return <span className="text-neutral-200 whitespace-pre-wrap">{value}</span>;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return <span className="text-emerald-300 font-mono text-[0.75rem]">{String(value)}</span>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-neutral-500">قائمة فارغة</span>;
+    return (
+      <ul className="space-y-1 pr-3">
+        {value.slice(0, 12).map((v, i) => (
+          <li key={i} className="text-[0.75rem] text-neutral-300">
+            <span className="text-neutral-600 mr-1">·</span>
+            <RenderJsonInline value={v} depth={depth + 1} />
+          </li>
+        ))}
+        {value.length > 12 && (
+          <li className="text-[0.65rem] text-neutral-500">+ {value.length - 12} عناصر</li>
+        )}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return <span className="text-neutral-500">{`{ }`}</span>;
+    if (depth >= 2) {
+      return <span className="text-neutral-400 font-mono text-[0.7rem]">{`{ ${entries.length} حقل }`}</span>;
+    }
+    return (
+      <dl className="space-y-1">
+        {entries.slice(0, 10).map(([k, v]) => (
+          <div key={k} className="flex items-start gap-2">
+            <dt className="text-[0.65rem] text-amber-300 font-mono shrink-0">{k}:</dt>
+            <dd className="text-[0.75rem] text-neutral-200 break-words flex-1 min-w-0">
+              <RenderJsonInline value={v} depth={depth + 1} />
+            </dd>
+          </div>
+        ))}
+        {entries.length > 10 && (
+          <p className="text-[0.65rem] text-neutral-500">+ {entries.length - 10} مفاتيح</p>
+        )}
+      </dl>
+    );
+  }
+  return <span className="text-neutral-200">{String(value)}</span>;
+}
+
 /* ─────────────── ExpandableText ───────────────
    Renders a string fully in the expanded record card. Strings up to
    ~600 chars display as-is so the reader doesn't need a click; longer
