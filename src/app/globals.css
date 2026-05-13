@@ -825,21 +825,12 @@ html[data-embed="1"] body {
    shrinks the dashboard padding so the canvas feels roomier.
    ============================================================ */
 
-/* ── Roomier canvas + denser chrome so the workspace doesn't
-      feel cramped after the editorial typography landed. */
-[data-theme="editorial-dark"] [data-zto-chrome="main"],
-[data-theme="editorial-light"] [data-zto-chrome="main"] {
-  padding: 1rem 1.25rem !important;
-}
-[data-theme="editorial-dark"] [data-zto-chrome="sidebar"],
-[data-theme="editorial-light"] [data-zto-chrome="sidebar"] {
-  width: 220px !important;
-}
-[data-theme="editorial-dark"] [data-zto-chrome="header"],
-[data-theme="editorial-light"] [data-zto-chrome="header"] {
-  height: 52px !important;
-  padding-inline: 1rem !important;
-}
+/* ── (Removed) Editorial geometry overrides for sidebar width,
+      main padding, and topbar height. They forced fixed pixel sizes
+      on top of the existing responsive Tailwind classes and broke
+      the mobile sidebar overlay + the desktop flex row in some
+      viewports. The original Tailwind classes already give the right
+      look across breakpoints. */
 
 /* ── Bigger, calmer base type. Editorial gets a small bump in
       size + line-height so body copy is comfortable to read
