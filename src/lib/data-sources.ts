@@ -11,6 +11,7 @@ import {
   applyMapping,
   getMappingForType,
   getMappingForTypeAndBrand,
+  getMappingForSource,
   getPerTypeMapping,
   DESTINATION_BASE_ID,
   DEFAULT_TABLE_NAME,
@@ -275,6 +276,10 @@ export interface FetchedArticle {
   // pipeline so the destination mapping can pick a brand-specific
   // override stored under TypeMapping.byBrand[brandId].
   brandId?: string | null;
+  // Source topic (news / insights / real_estate). Threaded through so
+  // the destination mapping can pick a per-topic override
+  // (TypeMapping.byTopic[topic]) when no per-brand override applies.
+  topic?: string | null;
   title: string;
   description: string;
   url: string;
@@ -1764,7 +1769,10 @@ export async function saveArticleToAirtable(
   let mapping: TypeMapping;
   try {
     const perType = await getPerTypeMapping();
-    mapping = getMappingForTypeAndBrand(perType, sourceType, article.brandId ?? null);
+    // brand > topic > type default. The resolver returns the same
+    // mapping shape regardless of which scope fired so the rest of
+    // this function is unchanged.
+    mapping = getMappingForSource(perType, sourceType, article.brandId ?? null, article.topic ?? null);
   } catch (err) {
     logger.warn(
       "Could not load destination mapping — using default shape",
@@ -2189,6 +2197,7 @@ export async function fetchSource(sourceId: string): Promise<RSSFetchResult> {
     a.sourceName = source.name;
     a.brandName = brandName;
     a.brandId = source.brandId ?? null;
+    a.topic = source.topic ?? null;
   });
 
   logger.info(

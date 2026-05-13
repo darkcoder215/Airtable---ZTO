@@ -147,14 +147,21 @@ export interface TypeMapping {
   columns: Record<string, MappingEntry>;
   // Per-brand overrides. When a fetched article carries a brandId
   // matching one of these keys, that mapping wins over the type
-  // default. The override is a complete TypeMapping (its own table
-  // + columns) so each brand can route to a different destination
-  // table if needed. The override map is intentionally flat — no
-  // recursive byBrand chains — so the apply path stays trivial.
-  byBrand?: Record<string, Omit<TypeMapping, "byBrand">>;
+  // default. Cap at 64 brands per type to keep the JSON blob bounded.
+  byBrand?: Record<string, Omit<TypeMapping, "byBrand" | "byTopic">>;
+  // Per-topic overrides (news / insights / real_estate). Applied only
+  // when no per-brand override matched — brand wins over topic, topic
+  // wins over the type default. Cap at 16 topics per type.
+  byTopic?: Record<string, Omit<TypeMapping, "byBrand" | "byTopic">>;
 }
 
 export type PerTypeMapping = Partial<Record<SourceType, TypeMapping>>;
+
+// Topic values currently used by the data-sources page. Kept in sync
+// with src/lib/data-sources.ts DataSource.topic so the mapping
+// scope-selector never offers a topic that can't actually arrive.
+export const MAPPABLE_TOPICS = ["news", "insights", "real_estate"] as const;
+export type MappableTopic = (typeof MAPPABLE_TOPICS)[number];
 
 // Source types we let admins map. apify/custom inherit the rss mapping for
 // safety since they share the same flow.
@@ -308,6 +315,25 @@ function sanitizeTypeMapping(raw: unknown): TypeMapping {
     }
     if (Object.keys(byBrand).length > 0) result.byBrand = byBrand;
   }
+  // Per-topic overrides — keyed by the topic enum from data-sources
+  // (news / insights / real_estate). Capped at 16 to bound the blob.
+  const rawTopics = obj.byTopic;
+  const allowedTopics = new Set<string>(MAPPABLE_TOPICS);
+  if (rawTopics && typeof rawTopics === "object" && !Array.isArray(rawTopics)) {
+    const byTopic: NonNullable<TypeMapping["byTopic"]> = {};
+    let kept = 0;
+    for (const [topic, topicRaw] of Object.entries(rawTopics as Record<string, unknown>)) {
+      if (!allowedTopics.has(topic)) continue;
+      if (kept >= 16) break;
+      const inner = sanitizeTypeMapping(topicRaw);
+      byTopic[topic] = {
+        tableName: inner.tableName,
+        columns: inner.columns,
+      };
+      kept += 1;
+    }
+    if (Object.keys(byTopic).length > 0) result.byTopic = byTopic;
+  }
   return result;
 }
 
@@ -335,16 +361,64 @@ export function getMappingForTypeAndBrand(
   type: SourceType,
   brandId: string | null | undefined
 ): TypeMapping {
+  return getMappingForSource(perType, type, brandId, null);
+}
+
+// 3-way resolver: brand wins > topic wins > type default. Also
+// reports which scope actually fired so the UI can show
+// "default" / "brand" / "topic" labels without duplicating the
+// resolution logic. Pass `null` for any axis you don't care about.
+export function getMappingForSource(
+  perType: PerTypeMapping,
+  type: SourceType,
+  brandId: string | null | undefined,
+  topic: string | null | undefined
+): TypeMapping {
+  const r = resolveMappingScope(perType, type, brandId, topic);
+  return r.mapping;
+}
+
+export interface ResolvedMappingScope {
+  mapping: TypeMapping;
+  scope: "brand" | "topic" | "type" | "builtin";
+  brandId?: string;
+  topic?: string;
+}
+
+export function resolveMappingScope(
+  perType: PerTypeMapping,
+  type: SourceType,
+  brandId: string | null | undefined,
+  topic: string | null | undefined
+): ResolvedMappingScope {
   const effectiveType: SourceType = MAPPABLE_SOURCE_TYPES.includes(type) ? type : "rss";
   const typeMapping = perType[effectiveType];
   if (typeMapping && brandId && typeMapping.byBrand?.[brandId]) {
-    const override = typeMapping.byBrand[brandId];
-    return { tableName: override.tableName, columns: override.columns };
+    const o = typeMapping.byBrand[brandId];
+    return {
+      mapping: { tableName: o.tableName, columns: o.columns },
+      scope: "brand",
+      brandId,
+    };
+  }
+  if (typeMapping && topic && typeMapping.byTopic?.[topic]) {
+    const o = typeMapping.byTopic[topic];
+    return {
+      mapping: { tableName: o.tableName, columns: o.columns },
+      scope: "topic",
+      topic,
+    };
   }
   if (typeMapping) {
-    return { tableName: typeMapping.tableName, columns: typeMapping.columns };
+    return {
+      mapping: { tableName: typeMapping.tableName, columns: typeMapping.columns },
+      scope: "type",
+    };
   }
-  return DEFAULT_PER_TYPE_MAPPING[effectiveType] ?? DEFAULT_RSS;
+  return {
+    mapping: DEFAULT_PER_TYPE_MAPPING[effectiveType] ?? DEFAULT_RSS,
+    scope: "builtin",
+  };
 }
 
 export function getMappingForType(

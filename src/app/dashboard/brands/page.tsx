@@ -41,6 +41,7 @@ interface Source {
   type: "rss" | "twitter" | "linkedin" | "apify" | "custom";
   url: string;
   category: "startups" | "investment" | "tech" | "general";
+  topic?: "news" | "insights" | "real_estate" | null;
   is_active: boolean;
   fetch_interval_minutes: number;
   last_fetched_at: string | null;
@@ -49,6 +50,28 @@ interface Source {
   consecutive_errors: number;
   created_at: string;
 }
+
+// Lightweight shape of the resolved destination mapping for a source.
+// Stored in component state keyed by source id so we don't fetch the
+// per-type mapping once per row.
+interface EffectiveRule {
+  scope: "brand" | "topic" | "type" | "builtin";
+  tableName: string;
+  columnCount: number;
+}
+
+const SCOPE_LABEL: Record<EffectiveRule["scope"], string> = {
+  brand: "علامة",
+  topic: "موضوع",
+  type: "افتراضي",
+  builtin: "افتراضي",
+};
+const SCOPE_TONE: Record<EffectiveRule["scope"], string> = {
+  brand: "border-amber-400/40 text-amber-300 bg-amber-400/10",
+  topic: "border-purple-400/40 text-purple-300 bg-purple-400/10",
+  type: "border-neutral-700 text-neutral-400",
+  builtin: "border-neutral-700 text-neutral-500",
+};
 
 const TYPE_META: Record<Source["type"], { label: string; icon: typeof Rss; color: string }> = {
   rss: { label: "موقع (RSS)", icon: Rss, color: "text-orange-400" },
@@ -82,6 +105,63 @@ export default function BrandsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
+
+  // Per-type mapping snapshot from /api/data-sources?action=destination-mapping.
+  // Used to resolve the effective rule (brand override > topic override >
+  // type default) for each source row so the admin sees where data ends up.
+  interface MappingSnapshot {
+    rss?: { tableName?: string; columns?: Record<string, unknown>; byBrand?: Record<string, { tableName?: string; columns?: Record<string, unknown> }>; byTopic?: Record<string, { tableName?: string; columns?: Record<string, unknown> }> };
+    twitter?: MappingSnapshot["rss"];
+    linkedin?: MappingSnapshot["rss"];
+  }
+  const [mappingSnapshot, setMappingSnapshot] = useState<MappingSnapshot | null>(null);
+
+  useEffect(() => {
+    fetch("/api/data-sources?action=destination-mapping")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.mapping) setMappingSnapshot(d.mapping as MappingSnapshot);
+      })
+      .catch(() => {
+        // Non-fatal — the rule chip silently degrades to "افتراضي".
+      });
+  }, []);
+
+  // Resolve the effective mapping rule for a source. Mirrors the
+  // server-side resolveMappingScope() so the admin sees what will
+  // actually fire at fetch time. Brand override wins over topic.
+  const resolveRule = (s: Source): EffectiveRule => {
+    const typeKey = (s.type === "rss" || s.type === "twitter" || s.type === "linkedin")
+      ? s.type
+      : "rss";
+    const m = mappingSnapshot?.[typeKey];
+    const brandOv = m?.byBrand?.[s.brand_id];
+    if (brandOv && brandOv.tableName) {
+      return {
+        scope: "brand",
+        tableName: String(brandOv.tableName),
+        columnCount: Object.keys(brandOv.columns ?? {}).length,
+      };
+    }
+    if (s.topic) {
+      const topicOv = m?.byTopic?.[s.topic];
+      if (topicOv && topicOv.tableName) {
+        return {
+          scope: "topic",
+          tableName: String(topicOv.tableName),
+          columnCount: Object.keys(topicOv.columns ?? {}).length,
+        };
+      }
+    }
+    if (m?.tableName) {
+      return {
+        scope: "type",
+        tableName: String(m.tableName),
+        columnCount: Object.keys(m.columns ?? {}).length,
+      };
+    }
+    return { scope: "builtin", tableName: "—", columnCount: 0 };
+  };
 
   const [showNewBrand, setShowNewBrand] = useState(false);
   const [newBrand, setNewBrand] = useState({ slug: "", name: "", description: "" });
@@ -479,11 +559,12 @@ export default function BrandsPage() {
                 {sources.map((s) => {
                   const meta = TYPE_META[s.type];
                   const Icon = meta.icon;
+                  const rule = resolveRule(s);
                   return (
                     <div key={s.id} className="zto-card p-4 flex items-center gap-4">
                       <Icon className={`w-5 h-5 ${meta.color} shrink-0`} />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-white font-bold text-[14px] truncate">{s.name}</span>
                           {!s.is_active && (
                             <span className="zto-badge text-[9px] bg-neutral-700/40 text-neutral-400">معطّل</span>
@@ -493,6 +574,19 @@ export default function BrandsPage() {
                               {s.consecutive_errors} أخطاء
                             </span>
                           )}
+                          {/* Effective mapping rule chip. Clicking it
+                              jumps to the data-sources mapping tab so
+                              the admin can tweak the rule that fires
+                              for this source. */}
+                          <a
+                            href={`/dashboard/data-sources?tab=destination&type=${s.type}`}
+                            className={`text-[9px] inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 border font-bold ${SCOPE_TONE[rule.scope]}`}
+                            title={`القاعدة الفعالة: ${SCOPE_LABEL[rule.scope]} — تكتب إلى «${rule.tableName}» (${rule.columnCount} عمود)`}
+                          >
+                            <span>← {rule.tableName}</span>
+                            <span className="text-neutral-600 font-mono">·</span>
+                            <span>{SCOPE_LABEL[rule.scope]}</span>
+                          </a>
                         </div>
                         <div className="text-[11px] text-neutral-600 truncate font-mono mt-0.5">{s.url}</div>
                         {s.last_fetched_at && (
