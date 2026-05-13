@@ -124,18 +124,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
   const roleName = ROLE_LABEL[role] ?? role;
   const RoleIcon = ROLE_ICON[role] ?? User;
+  // railWidth used to drive the sidebar width but was unreliable when
+  // composed with a `lg:${...}` template-literal variant — Tailwind's
+  // scanner couldn't extract the responsive form. Width is now spelled
+  // out inline on the <aside>, so we keep the variable around only for
+  // any future caller that wants the base (non-responsive) width string.
   const railWidth = collapsed ? "w-[64px]" : "w-[240px]";
+  void railWidth;
 
   return (
     <div className="min-h-screen flex">
       {/* Subtle geometric backdrop — sits behind everything via z-index:-1 */}
       <div className="zto-grid-backdrop" aria-hidden />
-      {/* Sidebar */}
+      {/* Sidebar.
+          The dynamic Tailwind classes are spelled out in full — Tailwind v4
+          can't extract a class like `lg:w-[64px]` from a template literal
+          that splits the variant from the value (e.g. `lg:${...}`). Listing
+          every variant explicitly guarantees the CSS is generated. */}
       <aside
         data-zto-chrome="sidebar"
-        className={`fixed lg:static inset-y-0 right-0 z-40 ${railWidth} bg-[#151515] border-l border-neutral-800 flex flex-col transition-all duration-200 ${
-          sidebarOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden lg:border-0"
-        } ${sidebarOpen ? "!w-[240px]" : ""} lg:${collapsed ? "w-[64px]" : "w-[240px]"}`}
+        className={[
+          "fixed lg:static inset-y-0 right-0 z-40",
+          "bg-[#151515] border-l border-neutral-800 flex flex-col transition-all duration-200",
+          // Width on small screens: when open, 240px; when closed, the
+          // off-screen translate handles visibility so width still matters.
+          sidebarOpen ? "w-[240px]" : "w-[240px] translate-x-full",
+          // Desktop (lg+): always visible. Width depends on collapse state.
+          "lg:translate-x-0",
+          collapsed ? "lg:w-[64px]" : "lg:w-[240px]",
+        ].join(" ")}
       >
         {/* Logo */}
         <div className="px-3 py-5 border-b border-neutral-800">
