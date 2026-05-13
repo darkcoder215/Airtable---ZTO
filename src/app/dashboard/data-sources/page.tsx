@@ -435,10 +435,30 @@ export default function DataSourcesPage() {
     if (activeTab === "articles") loadArticles();
     if (activeTab === "filters") loadFilterHistory();
     if (activeTab === "destination") {
-      loadDestinationMapping();
-      refreshDestinationColumns();
+      // Run sequentially so the column fetch sees the table names from
+      // the freshly-loaded mapping (running them in parallel left the
+      // mapping page showing "column not found" errors on every row
+      // until the user manually clicked refresh).
+      (async () => {
+        await loadDestinationMapping();
+        await refreshDestinationColumns({ silent: true });
+      })();
     }
   }, [activeTab]);
+
+  // Whenever any source-type points at a new destination table, lazily
+  // fetch its columns so the missing-column flag, the autocomplete and
+  // the type badges populate without waiting for a manual refresh.
+  useEffect(() => {
+    if (activeTab !== "destination") return;
+    for (const t of MAPPABLE_TYPES) {
+      const tn = destPerType[t]?.tableName;
+      if (tn && !destColumnsByTable[tn]) {
+        void fetchColumnsFor(tn);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, destPerType.rss.tableName, destPerType.twitter.tableName, destPerType.linkedin.tableName]);
 
   /* ───────── API helpers ───────── */
 
@@ -538,7 +558,7 @@ export default function DataSourcesPage() {
   // Refresh: pull all tables in the destination base, plus the columns for
   // each type's currently-selected table. Keeps the UI snappy when switching
   // tabs without an extra round-trip.
-  const refreshDestinationColumns = async () => {
+  const refreshDestinationColumns = async (opts?: { silent?: boolean }) => {
     setDestRefreshing(true);
     try {
       const tablesRes = await fetch("/api/data-sources?action=destination-tables");
@@ -568,9 +588,9 @@ export default function DataSourcesPage() {
         }
       }
       setDestColumnsByTable(colsByTable);
-      addToast(`تم تحديث ${tables.length} جدول`, "success");
+      if (!opts?.silent) addToast(`تم تحديث ${tables.length} جدول`, "success");
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "فشل التحديث", "error");
+      if (!opts?.silent) addToast(err instanceof Error ? err.message : "فشل التحديث", "error");
     } finally {
       setDestRefreshing(false);
     }
@@ -2637,7 +2657,7 @@ export default function DataSourcesPage() {
                 </button>
               )}
               <button
-                onClick={refreshDestinationColumns}
+                onClick={() => refreshDestinationColumns()}
                 disabled={destRefreshing}
                 className="zto-btn zto-btn-outline zto-btn-sm self-end"
               >
@@ -2746,12 +2766,20 @@ export default function DataSourcesPage() {
                               disabled={isReadonly}
                               onChange={(e) => updateMappingRow(idx, { column: e.target.value })}
                             />
+                            {/* Autocomplete: the option label leads with
+                                the column NAME (the actual value the
+                                admin needs to see) followed by the
+                                Arabic type tag. Showing the raw type
+                                alone was unreadable. */}
                             <datalist id={`zto-dest-cols-${idx}`}>
-                              {tableColumns.map((c) => (
-                                <option key={c.id} value={c.name}>
-                                  {c.type}
-                                </option>
-                              ))}
+                              {tableColumns.map((c) => {
+                                const meta = getFieldTypeMeta(c.type);
+                                return (
+                                  <option key={c.id} value={c.name}>
+                                    {`${c.name} — ${meta.label}`}
+                                  </option>
+                                );
+                              })}
                             </datalist>
                             {matchedMeta && (
                               <span

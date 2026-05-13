@@ -946,6 +946,12 @@ function AllowedBrandsPicker({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // Verified names from Airtable Brands table. Empty = not loaded yet
+  // or the Airtable lookup failed. Used to flag any scraper_brands.name
+  // that doesn't have a matching row in the Airtable table — those
+  // would silently filter to zero records at runtime.
+  const [airtableNames, setAirtableNames] = useState<Set<string>>(new Set());
+  const [airtableLookupError, setAirtableLookupError] = useState<string | null>(null);
   const unrestricted = value === null;
   const selected = value ?? [];
 
@@ -955,9 +961,14 @@ function AllowedBrandsPicker({
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch("/api/brands");
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "فشل تحميل العلامات");
+        // Load both sources in parallel so the verification is ready
+        // by the time the picker renders.
+        const [brandsRes, airtableRes] = await Promise.all([
+          fetch("/api/brands"),
+          fetch("/api/brands?action=airtable-names"),
+        ]);
+        const data = await brandsRes.json();
+        if (!brandsRes.ok) throw new Error(data.error || "فشل تحميل العلامات");
         if (cancelled) return;
         const list = Array.isArray(data.brands) ? data.brands : [];
         setBrands(
@@ -967,6 +978,25 @@ function AllowedBrandsPicker({
             slug: b.slug,
           }))
         );
+
+        try {
+          const airtableData = await airtableRes.json();
+          if (cancelled) return;
+          if (airtableData?.ok && Array.isArray(airtableData.names)) {
+            // Case-insensitive matching with trim so trailing-space
+            // typos in Airtable don't trigger false warnings.
+            setAirtableNames(
+              new Set((airtableData.names as string[]).map((n) => n.trim().toLowerCase()))
+            );
+            setAirtableLookupError(null);
+          } else {
+            setAirtableLookupError(
+              airtableData?.error || "تعذّر الاتصال بـ Airtable للتحقّق"
+            );
+          }
+        } catch {
+          if (!cancelled) setAirtableLookupError("تعذّر الاتصال بـ Airtable للتحقّق");
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "فشل تحميل العلامات");
       } finally {
@@ -975,6 +1005,14 @@ function AllowedBrandsPicker({
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Names that exist in scraper_brands but NOT in Airtable Brands.
+  // The writer filter would yield zero records for these, so we flag
+  // them prominently.
+  const mismatches = brands.filter(
+    (b) => !airtableNames.has(b.name.trim().toLowerCase())
+  );
+  const airtableVerified = airtableNames.size > 0;
 
   const toggle = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -990,12 +1028,30 @@ function AllowedBrandsPicker({
   return (
     <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-3">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-white">العلامات المسموحة</p>
-          <p className="text-[0.65rem] text-neutral-400 mt-0.5">
+          <p className="text-[0.65rem] text-neutral-400 mt-0.5 leading-snug">
             الفلترة تطبَّق على عمود <code className="text-amber-300 mx-0.5 font-mono">Brand</code>
-            في كلّ جدول. الكاتب يرى فقط السجلات المنسوبة لهذه العلامات.
+            في كلّ جدول. الكاتب يرى فقط السجلات التي قيمة العمود فيها تطابق
+            اسم إحدى العلامات المختارة هنا حرفياً.
           </p>
+          {airtableVerified && (
+            <p className="text-[0.6rem] text-emerald-300 mt-1 font-bold">
+              ✓ تمّ التحقّق من {airtableNames.size} اسم في جدول «Brands» داخل Airtable.
+            </p>
+          )}
+          {airtableLookupError && (
+            <p className="text-[0.6rem] text-amber-300 mt-1">
+              ⚠ تعذّر التحقّق التلقائي من Airtable ({airtableLookupError}). تأكّد يدوياً أن أسماء العلامات تطابق ما هو في جدول «Brands».
+            </p>
+          )}
+          {airtableVerified && mismatches.length > 0 && (
+            <p className="text-[0.6rem] text-red-300 mt-1 leading-snug">
+              ⚠ {mismatches.length} علامة من القائمة لا توجد في جدول «Brands» داخل Airtable
+              ({mismatches.slice(0, 3).map((m) => `«${m.name}»`).join("، ")}
+              {mismatches.length > 3 ? "…" : ""}). الكاتب لن يرى أيّ سجل لهذه العلامات حتى تُضاف إلى Airtable بنفس الاسم تماماً.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -1067,12 +1123,22 @@ function AllowedBrandsPicker({
         <div className={`max-h-56 overflow-y-auto bg-[#0d0d0d] border border-neutral-800 rounded space-y-0.5 p-1 ${unrestricted ? "opacity-50 pointer-events-none" : ""}`}>
           {visible.map((b) => {
             const checked = selected.includes(b.id);
+            const verified =
+              airtableVerified && airtableNames.has(b.name.trim().toLowerCase());
+            const missingInAirtable = airtableVerified && !verified;
             return (
               <label
                 key={b.id}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
                   checked ? "bg-emerald-400/10 text-emerald-100" : "text-neutral-300 hover:bg-neutral-800/40"
-                }`}
+                } ${missingInAirtable ? "ring-1 ring-red-500/30" : ""}`}
+                title={
+                  missingInAirtable
+                    ? "هذا الاسم غير موجود في جدول «Brands» داخل Airtable — السجلات لن تُفلتر."
+                    : verified
+                      ? "اسم مطابق لجدول «Brands» في Airtable"
+                      : ""
+                }
               >
                 <input
                   type="checkbox"
@@ -1082,6 +1148,12 @@ function AllowedBrandsPicker({
                   disabled={unrestricted}
                 />
                 <span className="text-xs font-bold truncate flex-1">{b.name}</span>
+                {verified && (
+                  <span className="text-[0.55rem] text-emerald-400 shrink-0" aria-label="مطابق">✓</span>
+                )}
+                {missingInAirtable && (
+                  <span className="text-[0.55rem] text-red-400 shrink-0" aria-label="غير مطابق">⚠</span>
+                )}
                 <code className="text-[0.55rem] text-neutral-500 font-mono">{b.slug}</code>
               </label>
             );
