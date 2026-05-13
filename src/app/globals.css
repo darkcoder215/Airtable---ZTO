@@ -1,3 +1,79 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Sora:wght@200;300;400;500;600;700;800&display=swap');
+
+/* Tinta Arabic — local file ships in /public/fonts. Two weights only
+   (Light + Bold). We expose them as 300 and 700 in the @font-face rules,
+   then let CSS interpolate from the same file with `font-weight: 100 300`
+   / `400 700` ranges so the engine picks Light for thin text and Bold
+   for emphasis. Display: swap keeps Sora visible while Tinta downloads.
+   Same unicode-range trick as Naveid below — these brand display faces
+   often have weak / missing Latin + digit glyphs, so we scope them to
+   Arabic codepoints and let the rest of the font stack (Sora / IBM Plex
+   Sans Arabic / system-ui) handle Latin and numerals. */
+@font-face {
+  font-family: 'Tinta Arabic';
+  font-style: normal;
+  font-weight: 100 300;
+  font-display: swap;
+  src: url('/fonts/TintaArabic-Light.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: 'Tinta Arabic';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/TintaArabic-Bold.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+
+/* Naveid Arabic DEMO — three discrete weights (Thin / Regular /
+   ExtraBold). We split the weight ranges so 100-300 picks Thin, 400-600
+   picks Regular, 700-900 picks ExtraBold. Used by the gold ZTO themes
+   (dark + light) for a more contemporary Arabic display face than the
+   default Noto Kufi.
+
+   `unicode-range` is critical here: Naveid's DEMO build doesn't ship
+   complete Latin or digit glyphs, so without scoping the file the
+   browser would either substitute a fallback per-character (giving
+   inconsistent number widths) or render numerals as broken/wrong
+   shapes. Restricting the file to Arabic codepoints lets Latin / digits
+   fall through cleanly to the next font in the stack (Noto Kufi
+   Arabic, which has correct Latin numerals). */
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 100 300;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-Thin.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, /* Arabic                          */
+    U+0750-077F, /* Arabic Supplement               */
+    U+08A0-08FF, /* Arabic Extended-A               */
+    U+FB50-FDFF, /* Arabic Presentation Forms-A     */
+    U+FE70-FEFF; /* Arabic Presentation Forms-B     */
+}
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-Regular.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: 'Naveid Arabic';
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+  src: url('/fonts/NaveidArabicDEMO-ExtraBold.otf') format('opentype');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+
 /* ============================================================
    Tailwind theme tokens — these stay in @theme so utilities
    like bg-brand and text-gold work. Default values match the
@@ -25,13 +101,91 @@
   --color-err-bg: var(--c-err-bg);
   --color-info: var(--c-info);
   --color-info-bg: var(--c-info-bg);
-  /* Default font stack — the editorial themes override body to the
-     serif text family; this stack just keeps a sensible Arabic-aware
-     system fallback for any surface that doesn't explicitly set one. */
-  --font-sans: "Editorial Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  /* Default font stack — used by both ZTO gold themes. Naveid Arabic
+     leads for the contemporary display feel; Noto Kufi is the safe
+     fallback while Naveid loads (and for any glyph it doesn't cover). */
+  --font-sans: 'Naveid Arabic', 'Noto Kufi Arabic', system-ui, sans-serif;
 }
 
+/* ============================================================
+   Default (dark) theme
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  --c-brand: #1a1a1a;
+  --c-brand-light: #232323;
+  --c-brand-lighter: #2e2e2e;
+  --c-brand-border: #3a3a3a;
+  --c-brand-hover: #444444;
+  --c-gold: #c9a84c;
+  --c-gold-dark: #a88a3a;
+  --c-gold-light: #e2cc7e;
+  --c-gold-bg: rgba(201, 168, 76, 0.12);
+  --c-txt: #e4e4e4;
+  --c-txt-dim: #9a9a9a;
+  --c-txt-faint: #666666;
+  --c-ok: #34d399;
+  --c-ok-bg: rgba(52, 211, 153, 0.12);
+  --c-warn: #fbbf24;
+  --c-warn-bg: rgba(251, 191, 36, 0.12);
+  --c-err: #f87171;
+  --c-err-bg: rgba(248, 113, 113, 0.12);
+  --c-info: #60a5fa;
+  --c-info-bg: rgba(96, 165, 250, 0.12);
 
+  /* Semantic surface tokens used by the override layer below. */
+  --surface-page: #111111;
+  --surface-card: #1a1a1a;
+  --surface-elevated: #232323;
+  --surface-sunken: #0d0d0d;
+  --surface-header: #161616;
+  --border-strong: #3a3a3a;
+  --border-soft: #262626;
+  --text-strong: #ffffff;
+  --text-base: #e4e4e4;
+  --text-dim: #9a9a9a;
+  --text-faint: #666666;
+  --modal-overlay: rgba(0, 0, 0, 0.65);
+}
+
+/* ============================================================
+   Light theme — bold black text on pure white
+   ============================================================ */
+[data-theme="light"] {
+  --c-brand: #ffffff;
+  --c-brand-light: #f4f4f5;
+  --c-brand-lighter: #e7e7e9;
+  --c-brand-border: #d4d4d8;
+  --c-brand-hover: #a1a1aa;
+  --c-gold: #a07a1f;
+  --c-gold-dark: #7a5d18;
+  --c-gold-light: #c9a84c;
+  --c-gold-bg: rgba(160, 122, 31, 0.12);
+  --c-txt: #0a0a0a;
+  --c-txt-dim: #404040;
+  --c-txt-faint: #737373;
+  --c-ok: #047857;
+  --c-ok-bg: rgba(4, 120, 87, 0.10);
+  --c-warn: #b45309;
+  --c-warn-bg: rgba(180, 83, 9, 0.10);
+  --c-err: #b91c1c;
+  --c-err-bg: rgba(185, 28, 28, 0.10);
+  --c-info: #1d4ed8;
+  --c-info-bg: rgba(29, 78, 216, 0.10);
+
+  --surface-page: #ffffff;
+  --surface-card: #ffffff;
+  --surface-elevated: #f4f4f5;
+  --surface-sunken: #fafafa;
+  --surface-header: #f4f4f5;
+  --border-strong: #d4d4d8;
+  --border-soft: #e7e7e9;
+  --text-strong: #000000;
+  --text-base: #0a0a0a;
+  --text-dim: #404040;
+  --text-faint: #737373;
+  --modal-overlay: rgba(15, 23, 42, 0.45);
+}
 
 @layer base {
   html { direction: rtl; }
@@ -79,6 +233,7 @@
   background: var(--c-gold); color: #000; border-color: var(--c-gold);
 }
 .zto-btn-gold:hover:not(:disabled) { background: var(--c-gold-dark); border-color: var(--c-gold-dark); }
+[data-theme="light"] .zto-btn-gold { color: #fff; }
 
 .zto-btn-ghost {
   background: transparent; color: var(--c-txt-dim); border-color: transparent;
@@ -99,6 +254,7 @@
 .zto-btn-ok {
   background: var(--c-ok); color: #000; border-color: var(--c-ok);
 }
+[data-theme="light"] .zto-btn-ok { color: #fff; }
 
 .zto-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
 
@@ -119,24 +275,6 @@ textarea.zto-input { resize: vertical; line-height: 1.7; }
 
 .zto-select-wrap { position: relative; }
 .zto-select-wrap select { padding-left: 36px; appearance: none; cursor: pointer; }
-
-/* Native <option> elements don't inherit the parent <select>'s color/bg
-   reliably across browsers (especially Chromium on Linux/macOS, where
-   options keep the system white background). Without this rule the
-   editorial-dark dropdown opens to invisible white-on-white items. */
-.zto-input option,
-.zto-select-wrap select option,
-select option {
-  background-color: var(--surface-card);
-  color: var(--text-strong);
-}
-.zto-input optgroup,
-.zto-select-wrap select optgroup,
-select optgroup {
-  background-color: var(--surface-elevated);
-  color: var(--text-base);
-  font-weight: 700;
-}
 .zto-select-wrap::after {
   content: ""; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   width: 0; height: 0;
@@ -216,6 +354,14 @@ select optgroup {
     radial-gradient(circle at 80% 100%, rgba(99,102,241,0.05) 0%, transparent 40%),
     linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
+}
+[data-theme="light"] .zto-grid-backdrop {
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(201,168,76,0.10) 0%, transparent 35%),
+    radial-gradient(circle at 80% 100%, rgba(99,102,241,0.08) 0%, transparent 40%),
+    linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px);
   background-size: auto, auto, 48px 48px, 48px 48px;
 }
 
@@ -323,6 +469,7 @@ button.zto-card:hover {
   box-shadow: 0 24px 48px rgba(0,0,0,0.5);
   width: 100%; max-height: 85vh; overflow-y: auto;
 }
+[data-theme="light"] .zto-modal { box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18); }
 
 /* ========== Toast ========== */
 .zto-toast {
@@ -376,12 +523,875 @@ button.zto-card:hover {
    light mode without touching every component. Dark mode
    keeps the original Tailwind values untouched.
    ============================================================ */
+[data-theme="light"] .bg-\[\#0d0d0d\],
+[data-theme="light"] .bg-\[\#111\],
+[data-theme="light"] .bg-\[\#111111\],
+[data-theme="light"] .bg-\[\#0a0a0a\] {
+  background-color: var(--surface-sunken) !important;
+}
+[data-theme="light"] .bg-\[\#1a1a1a\],
+[data-theme="light"] .bg-\[\#151515\],
+[data-theme="light"] .bg-\[\#161616\],
+[data-theme="light"] .bg-\[\#181818\],
+[data-theme="light"] .bg-neutral-900,
+[data-theme="light"] .bg-zinc-900,
+[data-theme="light"] .bg-stone-900 {
+  background-color: var(--surface-card) !important;
+}
+[data-theme="light"] .bg-\[\#232323\],
+[data-theme="light"] .bg-\[\#252525\],
+[data-theme="light"] .bg-\[\#2a2a2a\],
+[data-theme="light"] .bg-\[\#2e2e2e\],
+[data-theme="light"] .bg-neutral-800,
+[data-theme="light"] .bg-zinc-800,
+[data-theme="light"] .bg-stone-800 {
+  background-color: var(--surface-elevated) !important;
+}
+[data-theme="light"] .bg-black {
+  background-color: var(--surface-page) !important;
+}
+[data-theme="light"] .bg-black\/50,
+[data-theme="light"] .bg-black\/40,
+[data-theme="light"] .bg-black\/60 {
+  background-color: rgba(15, 23, 42, 0.30) !important;
+}
 
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-neutral-50,
+[data-theme="light"] .text-neutral-100,
+[data-theme="light"] .text-zinc-50,
+[data-theme="light"] .text-zinc-100 {
+  color: var(--text-strong) !important;
+  font-weight: 700;
+}
+[data-theme="light"] .text-neutral-200,
+[data-theme="light"] .text-neutral-300,
+[data-theme="light"] .text-neutral-400,
+[data-theme="light"] .text-zinc-300,
+[data-theme="light"] .text-zinc-400 {
+  color: var(--text-dim) !important;
+}
+[data-theme="light"] .text-neutral-500,
+[data-theme="light"] .text-neutral-600,
+[data-theme="light"] .text-zinc-500,
+[data-theme="light"] .text-zinc-600 {
+  color: var(--text-faint) !important;
+}
 
+[data-theme="light"] .border-neutral-700,
+[data-theme="light"] .border-neutral-800,
+[data-theme="light"] .border-neutral-900,
+[data-theme="light"] .border-zinc-700,
+[data-theme="light"] .border-zinc-800,
+[data-theme="light"] .border-\[\#3a3a3a\],
+[data-theme="light"] .border-\[\#2a2a2a\],
+[data-theme="light"] .border-\[\#2e2e2e\] {
+  border-color: var(--border-strong) !important;
+}
 
 /* Brand accents (gold/amber) stay as-is for recognizability,
    but soften for white backgrounds. */
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-amber-500,
+[data-theme="light"] .text-yellow-400 {
+  color: var(--c-gold) !important;
+}
 
+/* ============================================================
+   SIGNAL ENGINEERING theme — v2 (upgraded spec)
+   Dark-mode engineering aesthetic with a single saturated blue
+   accent, mono labels, sharp 2-4px corners, and a faint 48px grid
+   backdrop. Activated by setting data-theme="signal" on <html>.
+
+   Strategy: map the project's familiar token names (--c-brand,
+   --c-gold, ...) onto Signal's paper/ink/signal palette so every
+   existing component recolors automatically without changing the
+   component source. Class-scoped overrides (radius, borders,
+   fonts) tighten the visual identity. Arabic is paired with
+   IBM Plex Sans Arabic — same engineering character as Sora,
+   designed alongside IBM Plex Sans for technical contexts; we
+   list it inside the font stack so Latin glyphs pick up Sora
+   while Arabic glyphs pick up IBM Plex Sans Arabic.
+   ============================================================ */
+[data-theme="signal"], [data-theme="signal-light"] {
+  /* Signal palette — see SIGNAL ENGINEERING / DESIGN SYSTEM v2 */
+  --signal: #2E6BFF;
+  --signal-bright: #4F8BFF;
+  --signal-deep: #1A4DCC;
+  --signal-glow: rgba(46, 107, 255, 0.35);
+  --signal-wash: rgba(46, 107, 255, 0.08);
+  --cyan-edge: #4FD4E3;
+  --success: #3DD68C;
+  --amber-warn: #E8A33D;
+
+  /* Map the project's brand/gold token names onto Signal so
+     every utility class (zto-btn-gold, zto-badge-gold, ...) and
+     every Tailwind override below recolors automatically. */
+  --c-brand: #0A0C12;          /* card background (ink-1) */
+  --c-brand-light: #10131B;    /* popover (ink-2) */
+  --c-brand-lighter: #171B26;  /* muted surface (ink-3) */
+  --c-brand-border: #2A2F3E;   /* card border (ink-border) */
+  --c-brand-hover: #1E2230;    /* subtle hover */
+  --c-gold: var(--signal);
+  --c-gold-dark: var(--signal-deep);
+  --c-gold-light: var(--signal-bright);
+  --c-gold-bg: var(--signal-wash);
+  --c-txt: #F2F3F5;            /* paper */
+  --c-txt-dim: #B7BCC9;        /* paper-mute */
+  --c-txt-faint: #70768A;      /* paper-dim */
+  --c-ok: var(--success);
+  --c-ok-bg: rgba(61, 214, 140, 0.10);
+  --c-warn: var(--amber-warn);
+  --c-warn-bg: rgba(232, 163, 61, 0.10);
+  --c-err: #E8A33D;            /* signal uses amber for warn/err — never red */
+  --c-err-bg: rgba(232, 163, 61, 0.10);
+  --c-info: var(--signal-bright);
+  --c-info-bg: var(--signal-wash);
+
+  --surface-page: #06070A;     /* ink — true near-black, never grey */
+  --surface-card: #0A0C12;     /* ink-1 */
+  --surface-elevated: #10131B; /* ink-2 */
+  --surface-sunken: #06070A;
+  --surface-header: #0A0C12;
+  --border-strong: #2A2F3E;
+  --border-soft: #1E2230;
+  --text-strong: #F2F3F5;      /* spec: never pure white */
+  --text-base: #F2F3F5;
+  --text-dim: #B7BCC9;
+  --text-faint: #70768A;
+  --modal-overlay: rgba(0, 0, 0, 0.78);
+
+  /* Display = Sora 200/600 split. Arabic falls through to
+     IBM Plex Sans Arabic, which pairs with Sora's geometric
+     character and ships in matching weights. Mono = JetBrains
+     Mono for tags, labels, numeric readouts. */
+  /* Display chain: Sora handles Latin/numerals; the browser falls
+     through to Tinta Arabic (the brand-owned face shipped from
+     /public/fonts) for Arabic codepoints, with IBM Plex Sans Arabic
+     as a safe fallback when Tinta hasn't loaded yet. */
+  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-display);
+}
+
+/* ========== Signal — LIGHT inversion ==========
+   Same engineering identity, paper-on-card. The brand chroma deepens
+   to #1D5CE0 for AA contrast on light surfaces, body weight bumps to
+   400 (per spec §3.4), semantic colours shift darker. Toggle via
+   data-theme="signal-light" on <html>. */
+[data-theme="signal-light"] {
+  --signal: #1D5CE0;
+  --signal-bright: #1248C0;
+  --signal-deep: #0D3699;
+  --signal-glow: rgba(29, 92, 224, 0.25);
+  --signal-wash: rgba(29, 92, 224, 0.06);
+  --cyan-edge: #0C8A98;
+  --success: #148C4E;
+  --amber-warn: #A86200;
+
+  --c-brand: #FFFFFF;
+  --c-brand-light: #EFF0F4;
+  --c-brand-lighter: #E5E7ED;
+  --c-brand-border: #B8BCC8;
+  --c-brand-hover: #D8DBE3;
+  --c-gold: var(--signal);
+  --c-gold-dark: var(--signal-deep);
+  --c-gold-light: var(--signal-bright);
+  --c-gold-bg: var(--signal-wash);
+  --c-txt: #0A0D14;
+  --c-txt-dim: #2D3348;
+  --c-txt-faint: #464E68;
+  --c-ok: var(--success);
+  --c-ok-bg: rgba(20, 140, 78, 0.10);
+  --c-warn: var(--amber-warn);
+  --c-warn-bg: rgba(168, 98, 0, 0.10);
+  --c-err: var(--amber-warn);
+  --c-err-bg: rgba(168, 98, 0, 0.10);
+  --c-info: var(--signal);
+  --c-info-bg: var(--signal-wash);
+
+  --surface-page: #F7F8FA;
+  --surface-card: #FFFFFF;
+  --surface-elevated: #EFF0F4;
+  --surface-sunken: #E5E7ED;
+  --surface-header: #FFFFFF;
+  --border-strong: #B8BCC8;
+  --border-soft: #D8DBE3;
+  --text-strong: #0A0D14;
+  --text-base: #0A0D14;
+  --text-dim: #2D3348;
+  --text-faint: #464E68;
+  --modal-overlay: rgba(10, 13, 20, 0.4);
+
+  --font-display: 'Sora', 'Tinta Arabic', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-display);
+}
+
+/* Body weight + 48px engineering grid. The spec is austere — no
+   node dots, no diagonal traces. Two soft radial signal glows
+   layered on body::after add depth without competing with the
+   grid lines. */
+[data-theme="signal"] body,
+[data-theme="signal-light"] body {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss01" 1;
+}
+[data-theme="signal"] body { font-weight: 300; }
+/* Light variant uses 400 body per spec §3.4 — thin weight on a
+   light surface looks washed out otherwise. */
+[data-theme="signal-light"] body { font-weight: 400; }
+
+/* Blur safeguard for small UI text. Sora 200/300 reads cleanly at
+   display sizes but pixel-snapping at <=12px on a dark surface
+   makes the weight look fuzzy. We bump the floor weight to 500
+   for tiny text and keep mono numerics aliased.
+   These selectors pick up the Tailwind size utilities the codebase
+   uses heavily (text-[0.55rem] through text-[0.7rem] and text-xs). */
+[data-theme="signal"] .text-\[0\.55rem\],
+[data-theme="signal"] .text-\[0\.6rem\],
+[data-theme="signal"] .text-\[0\.65rem\],
+[data-theme="signal"] .text-\[0\.7rem\],
+[data-theme="signal-light"] .text-\[0\.55rem\],
+[data-theme="signal-light"] .text-\[0\.6rem\],
+[data-theme="signal-light"] .text-\[0\.65rem\],
+[data-theme="signal-light"] .text-\[0\.7rem\] {
+  font-weight: 500;
+}
+[data-theme="signal"] .text-xs,
+[data-theme="signal-light"] .text-xs {
+  font-weight: 500;
+}
+[data-theme="signal"] .font-mono,
+[data-theme="signal-light"] .font-mono {
+  font-family: var(--font-mono);
+  /* Mono numerics stay aliased — antialiasing softens their stroke
+     contrast which is exactly what makes timestamps look fuzzy. */
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Backdrop — austere 48px grid + two soft radial signal glows.
+   Same pattern in both signal variants, with grid line opacity
+   tuned per surface (white on dark / black on light). Each
+   selector is written out long-hand to avoid collapsing the
+   pseudo-element with the bare element — the previous combined
+   form accidentally applied position:fixed/inset:0 to <body>
+   itself, which removed the page from normal flow and made the
+   theme look completely broken. */
+[data-theme="signal"] body::before,
+[data-theme="signal-light"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-size: 48px 48px;
+}
+[data-theme="signal"] body::before {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+}
+[data-theme="signal-light"] body::before {
+  background-image:
+    linear-gradient(rgba(10, 13, 20, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10, 13, 20, 0.04) 1px, transparent 1px);
+}
+[data-theme="signal"] body::after,
+[data-theme="signal-light"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+[data-theme="signal"] body::after {
+  background:
+    radial-gradient(80vmin 60vmin at 80% 10%, rgba(46, 107, 255, 0.08), transparent 60%),
+    radial-gradient(60vmin 50vmin at 10% 90%, rgba(79, 212, 227, 0.04), transparent 60%);
+}
+[data-theme="signal-light"] body::after {
+  background:
+    radial-gradient(80vmin 60vmin at 80% 10%, rgba(29, 92, 224, 0.06), transparent 60%),
+    radial-gradient(60vmin 50vmin at 10% 90%, rgba(12, 138, 152, 0.04), transparent 60%);
+}
+/* Lift normal page content above the fixed grid + shapes layers
+   without disturbing the .signal-bg-shapes container itself
+   (it needs to keep its own position: fixed). */
+[data-theme="signal"] body > *:not(.signal-bg-shapes),
+[data-theme="signal-light"] body > *:not(.signal-bg-shapes) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== Subtle drifting geometrical shapes ==========================
+   A tiny SVG layer behind the page renders four 1px-stroked outlines
+   (square, circle, triangle, hexagon) drifting at 60–100s loops with
+   ~0.06 opacity. The shapes are positioned absolutely in viewport
+   units so they never crowd content. CSS variables let signal-light
+   recolour them without duplicating the markup.
+   pointer-events: none keeps them invisible to interactions; will-
+   change isolates them on the GPU so the body composite stays cheap.
+*/
+[data-theme="signal"],
+[data-theme="signal-light"] { --signal-shape: var(--signal); }
+.signal-bg-shapes {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  /* Only render under signal themes; the holder element is mounted
+     globally but stays invisible elsewhere. */
+  display: none;
+}
+[data-theme="signal"] .signal-bg-shapes,
+[data-theme="signal-light"] .signal-bg-shapes { display: block; }
+.signal-bg-shapes .shape {
+  position: absolute;
+  opacity: 0.07;
+  color: var(--signal);
+  will-change: transform, opacity;
+}
+[data-theme="signal-light"] .signal-bg-shapes .shape { opacity: 0.06; }
+.signal-bg-shapes .s1 { top: 8%;  right: 12%; width: 220px; height: 220px; animation: zto-bg-drift-a 80s ease-in-out infinite; }
+.signal-bg-shapes .s2 { top: 62%; right: 38%; width: 160px; height: 160px; animation: zto-bg-drift-b 95s ease-in-out infinite; }
+.signal-bg-shapes .s3 { top: 30%; left:  6%;  width: 280px; height: 280px; animation: zto-bg-drift-c 110s ease-in-out infinite; }
+.signal-bg-shapes .s4 { top: 78%; left:  20%; width: 180px; height: 180px; animation: zto-bg-drift-d 70s ease-in-out infinite; }
+@keyframes zto-bg-drift-a {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(-20px, 30px) rotate(45deg); }
+}
+@keyframes zto-bg-drift-b {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(28px, -22px) rotate(-30deg); }
+}
+@keyframes zto-bg-drift-c {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  50%      { transform: translate(40px, 18px) rotate(60deg) scale(1.05); }
+}
+@keyframes zto-bg-drift-d {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(-26px, -34px) rotate(-50deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signal-bg-shapes .shape { animation: none; }
+}
+
+/* Sharp engineering corners — override the rounded shapes the
+   default dark theme uses for the signature 2-4px radius. */
+[data-theme="signal"] .zto-card, [data-theme="signal-light"] .zto-card { border-radius: 4px; border-width: 1px; }
+[data-theme="signal"] .zto-btn, [data-theme="signal-light"] .zto-btn { border-radius: 4px; }
+[data-theme="signal"] .zto-btn-sm, [data-theme="signal-light"] .zto-btn-sm { border-radius: 4px; }
+[data-theme="signal"] .zto-input, [data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
+[data-theme="signal"] .zto-input:focus, [data-theme="signal-light"] .zto-input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-glow);
+}
+[data-theme="signal"] .zto-section, [data-theme="signal-light"] .zto-section { padding: 22px; }
+[data-theme="signal"] .zto-badge, [data-theme="signal-light"] .zto-badge {
+  border-radius: 2px;
+  letter-spacing: 0.12em;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+[data-theme="signal"] .zto-roster-row, [data-theme="signal-light"] .zto-roster-row { border-radius: 4px; }
+[data-theme="signal"] .zto-glow-edge::before, [data-theme="signal-light"] .zto-glow-edge::before {
+  background: linear-gradient(180deg, var(--signal) 0%, transparent 60%);
+}
+
+/* The primary action button under Signal is engineering-style:
+   mono, uppercase, 0.18em tracking, 2px corners, signal-blue fill
+   with void text. This recolors every existing zto-btn-gold the
+   app already uses, so all CTAs flip in unison. */
+[data-theme="signal"] .zto-btn-gold, [data-theme="signal-light"] .zto-btn-gold {
+  background: var(--signal);
+  color: #000000;
+  border-color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+[data-theme="signal"] .zto-btn-gold:hover:not(:disabled),
+[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
+  background: var(--signal-bright);
+  border-color: var(--signal-bright);
+  box-shadow: 0 0 0 3px var(--signal-glow);
+}
+[data-theme="signal"] .zto-btn-outline, [data-theme="signal-light"] .zto-btn-outline {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Tailwind utility remap — the default app uses amber/emerald
+   freely; under Signal those flatten into signal-blue / success
+   so the visual language stays coherent. */
+[data-theme="signal"] .text-amber-400, [data-theme="signal-light"] .text-amber-400,
+[data-theme="signal"] .text-amber-300, [data-theme="signal-light"] .text-amber-300,
+[data-theme="signal"] .text-amber-500, [data-theme="signal-light"] .text-amber-500,
+[data-theme="signal"] .text-yellow-400, [data-theme="signal-light"] .text-yellow-400 {
+  color: var(--signal-bright) !important;
+}
+[data-theme="signal"] .bg-amber-400\/10, [data-theme="signal-light"] .bg-amber-400\/10,
+[data-theme="signal"] .bg-amber-400\/15, [data-theme="signal-light"] .bg-amber-400\/15,
+[data-theme="signal"] .bg-amber-400\/20, [data-theme="signal-light"] .bg-amber-400\/20,
+[data-theme="signal"] .bg-amber-500\/10, [data-theme="signal-light"] .bg-amber-500\/10 {
+  background-color: var(--signal-wash) !important;
+}
+[data-theme="signal"] .border-amber-400\/30, [data-theme="signal-light"] .border-amber-400\/30,
+[data-theme="signal"] .border-amber-400\/40, [data-theme="signal-light"] .border-amber-400\/40,
+[data-theme="signal"] .border-amber-500\/30, [data-theme="signal-light"] .border-amber-500\/30 {
+  border-color: rgba(46, 107, 255, 0.4) !important;
+}
+[data-theme="signal"] .text-emerald-400, [data-theme="signal-light"] .text-emerald-400,
+[data-theme="signal"] .text-emerald-300, [data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
+[data-theme="signal"] .bg-emerald-400\/10, [data-theme="signal-light"] .bg-emerald-400\/10,
+[data-theme="signal"] .bg-emerald-500\/10, [data-theme="signal-light"] .bg-emerald-500\/10 { background-color: rgba(61, 214, 140, 0.10) !important; }
+[data-theme="signal"] .border-emerald-400\/30, [data-theme="signal-light"] .border-emerald-400\/30,
+[data-theme="signal"] .border-emerald-500\/30, [data-theme="signal-light"] .border-emerald-500\/30 { border-color: rgba(61, 214, 140, 0.30) !important; }
+/* Spec says: never red for warnings — flip Tailwind reds to amber-warn. */
+[data-theme="signal"] .text-red-400, [data-theme="signal-light"] .text-red-400,
+[data-theme="signal"] .text-red-300, [data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
+[data-theme="signal"] .bg-red-500\/10, [data-theme="signal-light"] .bg-red-500\/10,
+[data-theme="signal"] .bg-red-500\/5, [data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(232, 163, 61, 0.10) !important; }
+[data-theme="signal"] .border-red-500\/30, [data-theme="signal-light"] .border-red-500\/30,
+[data-theme="signal"] .border-red-500\/40, [data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(232, 163, 61, 0.30) !important; }
+
+[data-theme="signal"] ::selection, [data-theme="signal-light"] ::selection { background: var(--signal); color: #FFFFFF; }
+
+/* ============================================================
+   Signal utility classes — eyebrow / tag / logo-mark / chrome /
+   corner-frame / display headlines / KPI / big stat / orbital
+   radar / severity dots. They're declared globally so any page
+   can use them, but most decorative bits gate on
+   data-theme=signal so the gold/light themes don't suddenly
+   grow stray L-brackets.
+   ============================================================ */
+
+/* >>> EYEBROW [01]
+   Thin uppercase mono label preceded by a 24px signal-blue dash. */
+.signal-eyebrow,
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--c-txt-dim);
+}
+.signal-eyebrow::before,
+.eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--c-gold);
+}
+
+/* Bracketed tag — supports the canonical >>> LABEL [01] pattern.
+   Pass three child spans: .arrow ">>>", the label as a text node,
+   and .bracket spans for the index. The .is-accent variant fills
+   with signal-wash and a thin signal border. */
+.signal-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-txt);
+  padding: 6px 12px;
+  border: 1px solid var(--c-brand-border);
+  background: var(--c-brand-light);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.signal-tag .arrow { color: var(--c-gold); font-weight: 700; }
+.signal-tag .bracket { color: var(--c-txt-faint); }
+.signal-tag.is-accent {
+  color: var(--c-gold-light);
+  border-color: rgba(46, 107, 255, 0.4);
+  background: var(--c-gold-bg);
+}
+.signal-tag.is-accent .bracket { color: var(--c-gold); }
+
+/* Logo mark — 28×28 signal-bordered square with a slow-rotating
+   dashed inner frame and a glowing centre dot. Pair with the
+   "[ LOGO ]" text placeholder in mono. */
+.logo-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--c-gold);
+  border-radius: 2px;
+  background: var(--c-gold-bg);
+  flex: 0 0 28px;
+}
+.logo-mark::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 1px dashed rgba(46, 107, 255, 0.5);
+  border-radius: 1px;
+  animation: zto-logo-rotate 24s linear infinite;
+}
+.logo-mark::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--c-gold);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--c-gold);
+}
+@keyframes zto-logo-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .logo-mark::before { animation: none; }
+}
+
+/* Chrome row — top + bottom strip on slides / hero pages.
+   UPPERCASE, 0.22em tracking, mono. Children .l / .r split the row. */
+.signal-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--c-txt-faint);
+  border-bottom: 1px solid var(--c-brand-border);
+}
+.signal-chrome .l,
+.signal-chrome .r {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Corner frame — 16px L-brackets at top-left + bottom-right.
+   Spec stays on data-theme=signal so the dark+gold theme's
+   regular cards aren't accidentally branded. */
+.corner-frame { position: relative; }
+[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before,
+[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--signal);
+  pointer-events: none;
+}
+[data-theme="signal"] .corner-frame::before, [data-theme="signal-light"] .corner-frame::before {
+  top: 20px;
+  left: 20px;
+  border-right: none;
+  border-bottom: none;
+}
+[data-theme="signal"] .corner-frame::after, [data-theme="signal-light"] .corner-frame::after {
+  bottom: 20px;
+  right: 20px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Display headlines — Sora 200 with .pivot for the 600-weight
+   word that carries the meaning. Always one or two pivots, never
+   three. End with a period.
+
+   <h1 class="signal-display">
+     Engineered <span class="pivot">connectivity</span> for high-footfall <span class="pivot">venues.</span>
+   </h1>                                                                           */
+.signal-display {
+  font-family: var(--font-display);
+  font-weight: 200;
+  font-size: clamp(34px, 3.8vw, 54px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: var(--text-strong);
+}
+.signal-display.signal-display-xl {
+  font-size: clamp(44px, 6.5vw, 88px);
+  line-height: 0.95;
+}
+.signal-display .pivot { font-weight: 600; }
+
+/* KPI tile — the canonical metric card for dashboards. */
+.signal-kpi {
+  background: var(--c-brand);
+  border: 1px solid var(--c-brand-border);
+  border-radius: 4px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+.signal-kpi .label { font-size: 13px; font-weight: 500; color: var(--c-txt-dim); }
+.signal-kpi .meta {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+  letter-spacing: 0.22em; text-transform: uppercase; color: var(--c-txt-faint);
+}
+.signal-kpi .value {
+  font-family: var(--font-display); font-weight: 300; font-size: 40px;
+  letter-spacing: -0.02em; color: var(--text-strong);
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.signal-kpi .value .unit {
+  font-size: 13px; font-weight: 500; letter-spacing: 0.06em;
+  color: var(--c-gold);
+}
+.signal-kpi .delta {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.06em;
+}
+.signal-kpi .delta.up   { color: var(--success); }
+.signal-kpi .delta.down { color: var(--amber-warn); }
+
+/* Big stat reveal — single massive number. One per page max. */
+.signal-bigstat {
+  font-family: var(--font-display);
+  font-weight: 200;
+  font-size: clamp(72px, 12vw, 160px);
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  color: var(--text-strong);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.signal-bigstat .unit {
+  font-size: 0.18em; font-weight: 500; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--c-gold);
+}
+
+/* Orbital radar — concentric dashed rings + rotating sweep + pulsing
+   core. Use for hero moments only. Pair with a mono caption like
+   "SCANNING · CH. 36 / 5 GHZ". 280–480px diameter. */
+.signal-radar {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  display: grid;
+  place-items: center;
+}
+.signal-radar .ring {
+  position: absolute;
+  border: 1px solid var(--c-brand-border);
+  border-radius: 50%;
+}
+.signal-radar .ring.r1 { width: 100%; height: 100%; }
+.signal-radar .ring.r2 { width: 75%; height: 75%; border-style: dashed; opacity: 0.7; }
+.signal-radar .ring.r3 { width: 50%; height: 50%; opacity: 0.6; }
+.signal-radar .ring.r4 { width: 25%; height: 25%; border-style: dashed; opacity: 0.5; }
+.signal-radar .sweep {
+  position: absolute;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--signal-glow) 30deg, transparent 60deg);
+  animation: zto-radar-sweep 5s linear infinite;
+}
+.signal-radar .core {
+  position: relative;
+  width: 10px; height: 10px;
+  background: var(--signal);
+  border-radius: 50%;
+  box-shadow: 0 0 16px var(--signal-glow);
+  animation: zto-radar-pulse 2.4s ease-out infinite;
+}
+.signal-radar .blip {
+  position: absolute;
+  width: 6px; height: 6px;
+  background: var(--cyan-edge);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(79, 212, 227, 0.7);
+}
+@keyframes zto-radar-sweep  { to { transform: rotate(360deg); } }
+@keyframes zto-radar-pulse  {
+  0%   { box-shadow: 0 0 0 0 var(--signal-glow); }
+  70%  { box-shadow: 0 0 0 24px rgba(46, 107, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 107, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signal-radar .sweep,
+  .signal-radar .core { animation: none; }
+}
+
+/* Severity dots/badges. */
+.severity-critical { color: #E8A33D; background: rgba(232,163,61,.10); border: 1px solid rgba(232,163,61,.30); }
+.severity-major    { color: #4FD4E3; background: rgba(79,212,227,.10); border: 1px solid rgba(79,212,227,.30); }
+.severity-minor    { color: #B7BCC9; background: rgba(183,188,201,.08); border: 1px solid rgba(183,188,201,.20); }
+.severity-positive { color: #3DD68C; background: rgba(61,214,140,.10); border: 1px solid rgba(61,214,140,.30); }
+
+/* SVG dash-flow — used on architecture diagrams + signal traces. */
+@keyframes ztoSignalDash { to { stroke-dashoffset: -24; } }
+[data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash {
+  stroke-dasharray: 4 8;
+  animation: ztoSignalDash 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="signal"] .signal-dash, [data-theme="signal-light"] .signal-dash { animation: none; }
+}
+
+/* ============================================================
+   Comprehensive component coverage under both Signal variants.
+   Every surface that ships its own background / border / radius
+   gets re-tuned here so the engineering identity is consistent
+   across cards, tables, dividers, scrollbars, modals, popovers,
+   roster rows, and the page-guide accent strip.
+   ============================================================ */
+
+/* Tables — sharper rows, mono headers, colour-tuned hover. */
+[data-theme="signal"] .zto-th,
+[data-theme="signal-light"] .zto-th {
+  background: var(--c-brand-light);
+  color: var(--c-txt-faint);
+  border-bottom: 1px solid var(--c-brand-border);
+  font-family: var(--font-mono);
+  letter-spacing: 0.18em;
+}
+[data-theme="signal"] .zto-td,
+[data-theme="signal-light"] .zto-td {
+  border-bottom-color: var(--c-brand-border);
+  font-weight: 400;
+}
+[data-theme="signal"] table tbody tr:hover,
+[data-theme="signal-light"] table tbody tr:hover {
+  background: var(--c-gold-bg);
+}
+
+/* Dividers + soft borders. */
+[data-theme="signal"] .border-neutral-800,
+[data-theme="signal"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
+[data-theme="signal-light"] .border-neutral-800,
+[data-theme="signal-light"] .border-neutral-700 { border-color: var(--c-brand-border) !important; }
+[data-theme="signal"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]),
+[data-theme="signal-light"] .divide-neutral-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--c-brand-border) !important;
+}
+
+/* Neutral surfaces (lots of components use bg-[#1a1a1a] / [#0d0d0d]
+   / [#161616] inline). Map them onto Signal's ink-1 / ink-2 / ink. */
+[data-theme="signal"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
+[data-theme="signal"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
+[data-theme="signal"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
+[data-theme="signal-light"] .bg-\[\#1a1a1a\] { background-color: var(--c-brand-lighter) !important; }
+[data-theme="signal-light"] .bg-\[\#161616\] { background-color: var(--c-brand-light) !important; }
+[data-theme="signal-light"] .bg-\[\#0d0d0d\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal-light"] .bg-\[\#0e0e0e\] { background-color: var(--surface-sunken) !important; }
+[data-theme="signal-light"] .bg-\[\#0a0a0a\] { background-color: var(--surface-page) !important; }
+/* Hard text colours used in places. */
+[data-theme="signal-light"] .text-white { color: var(--text-strong) !important; }
+[data-theme="signal-light"] .text-neutral-300,
+[data-theme="signal-light"] .text-neutral-400 { color: var(--c-txt) !important; }
+[data-theme="signal-light"] .text-neutral-500 { color: var(--c-txt-dim) !important; }
+[data-theme="signal-light"] .text-neutral-600,
+[data-theme="signal-light"] .text-neutral-700 { color: var(--c-txt-faint) !important; }
+
+/* Scrollbar accents pick up the brand. */
+[data-theme="signal"] ::-webkit-scrollbar-thumb,
+[data-theme="signal-light"] ::-webkit-scrollbar-thumb {
+  background: var(--c-brand-border);
+  border-radius: 2px;
+}
+[data-theme="signal"] ::-webkit-scrollbar-thumb:hover,
+[data-theme="signal-light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--signal);
+}
+
+/* Modal / popover surfaces — Signal prefers ink-2 popovers with a
+   thin signal border so they read as instrument panels. */
+[data-theme="signal"] .zto-modal,
+[data-theme="signal"] .zto-modal-content,
+[data-theme="signal-light"] .zto-modal,
+[data-theme="signal-light"] .zto-modal-content {
+  border-radius: 4px;
+  border: 1px solid var(--c-brand-border);
+  background: var(--surface-elevated);
+}
+
+/* Page guide accent — when the bg color uses an emerald/blue/amber
+   wash, swap in the signal wash so the colour family is consistent. */
+[data-theme="signal"] .zto-card.bg-emerald-400\/5,
+[data-theme="signal"] .zto-card.bg-blue-400\/5,
+[data-theme="signal"] .zto-card.bg-purple-400\/5,
+[data-theme="signal"] .zto-card.bg-amber-400\/5,
+[data-theme="signal-light"] .zto-card.bg-emerald-400\/5,
+[data-theme="signal-light"] .zto-card.bg-blue-400\/5,
+[data-theme="signal-light"] .zto-card.bg-purple-400\/5,
+[data-theme="signal-light"] .zto-card.bg-amber-400\/5 {
+  background-color: var(--signal-wash) !important;
+  border-color: rgba(46, 107, 255, 0.30) !important;
+}
+
+/* Buttons — Signal-light keeps the same engineering treatment as
+   Signal-dark but with a deeper signal-blue for AA contrast on
+   paper, and white text instead of void. */
+[data-theme="signal-light"] .zto-btn-gold {
+  background: var(--signal);
+  color: #FFFFFF;
+  border-color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+[data-theme="signal-light"] .zto-btn-gold:hover:not(:disabled) {
+  background: var(--signal-deep);
+  border-color: var(--signal-deep);
+}
+[data-theme="signal-light"] .zto-btn-outline {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Inputs — focus ring under signal-light. */
+[data-theme="signal-light"] .zto-input { border-radius: 4px; border-width: 1px; }
+[data-theme="signal-light"] .zto-input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px rgba(29, 92, 224, 0.18);
+}
+
+/* Severity remap to honour the spec's "amber not red for warnings"
+   rule under signal-light too. */
+[data-theme="signal-light"] .text-red-400,
+[data-theme="signal-light"] .text-red-300 { color: var(--amber-warn) !important; }
+[data-theme="signal-light"] .bg-red-500\/10,
+[data-theme="signal-light"] .bg-red-500\/5 { background-color: rgba(168, 98, 0, 0.10) !important; }
+[data-theme="signal-light"] .border-red-500\/30,
+[data-theme="signal-light"] .border-red-500\/40 { border-color: rgba(168, 98, 0, 0.30) !important; }
+[data-theme="signal-light"] .text-amber-400,
+[data-theme="signal-light"] .text-amber-300,
+[data-theme="signal-light"] .text-amber-500 { color: var(--signal) !important; }
+[data-theme="signal-light"] .bg-amber-400\/10,
+[data-theme="signal-light"] .bg-amber-400\/15 { background-color: var(--signal-wash) !important; }
+[data-theme="signal-light"] .border-amber-400\/30,
+[data-theme="signal-light"] .border-amber-400\/40 { border-color: rgba(29, 92, 224, 0.30) !important; }
+[data-theme="signal-light"] .text-emerald-400,
+[data-theme="signal-light"] .text-emerald-300 { color: var(--success) !important; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Embed mode — when a dashboard page is rendered inside an iframe (e.g.
@@ -398,637 +1408,4 @@ html[data-embed="1"] [data-zto-chrome="main"] {
 }
 html[data-embed="1"] body {
   background: transparent !important;
-}
-
-/* ============================================================
-   EDITORIAL theme — v3
-   A serif-led, high-contrast editorial aesthetic inspired by
-   premium long-form publications. Headings use a sharp serif
-   display, body copy uses a quieter serif text, and chrome
-   uses a clean humanist sans. Both light and dark variants
-   ship; toggle via data-theme="editorial-dark" or
-   "editorial-light" on <html>. Branding stays Zero to One.
-   ============================================================ */
-
-@font-face {
-  font-family: "Editorial Serif Display";
-  src: url("/fonts/EditorialSerif-Light.otf") format("opentype");
-  font-weight: 300; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Display";
-  src: url("/fonts/EditorialSerif-Regular.otf") format("opentype");
-  font-weight: 400; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Display";
-  src: url("/fonts/EditorialSerif-Medium.otf") format("opentype");
-  font-weight: 500; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Display";
-  src: url("/fonts/EditorialSerif-Bold.otf") format("opentype");
-  font-weight: 700; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Display";
-  src: url("/fonts/EditorialSerif-Black.otf") format("opentype");
-  font-weight: 900; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Text";
-  src: url("/fonts/EditorialText-Light.otf") format("opentype");
-  font-weight: 300; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Text";
-  src: url("/fonts/EditorialText-Regular.otf") format("opentype");
-  font-weight: 400; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Text";
-  src: url("/fonts/EditorialText-Medium.otf") format("opentype");
-  font-weight: 500; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Text";
-  src: url("/fonts/EditorialText-Bold.otf") format("opentype");
-  font-weight: 700; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Serif Text";
-  src: url("/fonts/EditorialText-Black.otf") format("opentype");
-  font-weight: 900; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Sans";
-  src: url("/fonts/EditorialSans-Light.otf") format("opentype");
-  font-weight: 300; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Sans";
-  src: url("/fonts/EditorialSans-Regular.otf") format("opentype");
-  font-weight: 400; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Sans";
-  src: url("/fonts/EditorialSans-Medium.otf") format("opentype");
-  font-weight: 500; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Sans";
-  src: url("/fonts/EditorialSans-Bold.otf") format("opentype");
-  font-weight: 700; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: "Editorial Sans";
-  src: url("/fonts/EditorialSans-Black.otf") format("opentype");
-  font-weight: 900; font-style: normal; font-display: swap;
-}
-
-/* Shared palette — both editorial variants pull from the same
-   accent set so cross-theme handoff stays coherent. */
-[data-theme="editorial-dark"], [data-theme="editorial-light"] {
-  --ed-green:        #00C17A;
-  --ed-green-light:  #B5E8BE;
-  --ed-blue:         #0072F9;
-  --ed-red:          #F24935;
-  --ed-amber:        #FFBC0A;
-  --ed-yellow-pale:  #F9E59E;
-  --ed-peach:        #FF9172;
-  --ed-mint:         #B2E2BA;
-  --ed-burgundy:     #82003A;
-  --ed-pink:         #FF00B7;
-
-  /* Typography scale */
-  --ed-font-display: "Editorial Serif Display", Georgia, "Times New Roman", serif;
-  --ed-font-body:    "Editorial Serif Text", Georgia, "Times New Roman", serif;
-  --ed-font-ui:      "Editorial Sans", "Segoe UI", Helvetica, Arial, sans-serif;
-
-  /* Radii — soft rounded, never sharp */
-  --ed-radius-sm: 8px;
-  --ed-radius-md: 12px;
-  --ed-radius-lg: 16px;
-  --ed-radius-xl: 24px;
-  --ed-radius-full: 9999px;
-}
-
-/* ── Editorial · Dark ─────────────────────────────────────
-   Doubles as the :root fallback so the editorial palette is active
-   even before the bootstrap script writes data-theme on <html>.
-   This avoids a flash of unstyled-looking content on first paint. */
-:root,
-[data-theme="editorial-dark"] {
-  --c-brand: #1A1A1D;          /* card */
-  --c-brand-light: #21232A;    /* elevated */
-  --c-brand-lighter: #2A2C36;  /* muted */
-  --c-brand-border: rgba(255, 255, 255, 0.08);
-  --c-brand-hover: #2E303A;
-  --c-gold: var(--ed-green);
-  --c-gold-dark: #009C62;
-  --c-gold-light: var(--ed-green-light);
-  --c-gold-bg: rgba(0, 193, 122, 0.10);
-  --c-txt: #F4F2ED;
-  --c-txt-dim: #A8AAB6;
-  --c-txt-faint: #6E707C;
-  --c-ok: var(--ed-green);
-  --c-ok-bg: rgba(0, 193, 122, 0.10);
-  --c-warn: var(--ed-amber);
-  --c-warn-bg: rgba(255, 188, 10, 0.10);
-  --c-err: var(--ed-red);
-  --c-err-bg: rgba(242, 73, 53, 0.10);
-  --c-info: var(--ed-blue);
-  --c-info-bg: rgba(0, 114, 249, 0.10);
-
-  --surface-page: #000000;
-  --surface-card: #1A1A1D;
-  --surface-elevated: #21232A;
-  --surface-sunken: #0F0F12;
-  --surface-header: #0A0A0C;
-  --border-strong: rgba(255, 255, 255, 0.10);
-  --border-soft: rgba(255, 255, 255, 0.05);
-  --text-strong: #FFFFFF;
-  --text-base: #F4F2ED;
-  --text-dim: #A8AAB6;
-  --text-faint: #6E707C;
-  --modal-overlay: rgba(0, 0, 0, 0.78);
-}
-
-/* ── Editorial · Light ──────────────────────────────────── */
-[data-theme="editorial-light"] {
-  --c-brand: #FFFFFF;
-  --c-brand-light: #F7F4EE;       /* warm paper */
-  --c-brand-lighter: #EFEDE2;     /* warm gray */
-  --c-brand-border: rgba(17, 20, 33, 0.10);
-  --c-brand-hover: #E7E2D5;
-  --c-gold: #009C62;              /* deeper green for AA contrast on light */
-  --c-gold-dark: #007A4D;
-  --c-gold-light: var(--ed-green);
-  --c-gold-bg: rgba(0, 156, 98, 0.08);
-  --c-txt: #111421;
-  --c-txt-dim: #494C6B;
-  --c-txt-faint: #6E7185;
-  --c-ok: #009C62;
-  --c-ok-bg: rgba(0, 156, 98, 0.08);
-  --c-warn: #B07A00;
-  --c-warn-bg: rgba(176, 122, 0, 0.10);
-  --c-err: #C73824;
-  --c-err-bg: rgba(199, 56, 36, 0.10);
-  --c-info: var(--ed-blue);
-  --c-info-bg: rgba(0, 114, 249, 0.08);
-
-  --surface-page: #F4F2ED;        /* cream — never pure white */
-  --surface-card: #FFFFFF;
-  --surface-elevated: #FFFFFF;
-  --surface-sunken: #EFEDE2;
-  --surface-header: #FFFFFF;
-  --border-strong: rgba(17, 20, 33, 0.15);
-  --border-soft: rgba(17, 20, 33, 0.08);
-  --text-strong: #000000;
-  --text-base: #111421;
-  --text-dim: #494C6B;
-  --text-faint: #6E7185;
-  --modal-overlay: rgba(17, 20, 33, 0.55);
-}
-
-/* ── Body typography for both editorial variants ──────────
-   Body picks up the serif text family; UI chrome
-   (cards, badges, buttons, inputs) uses the sans. We keep
-   the existing project font stack for Latin/numerics but
-   prepend the editorial fonts so they win when present. */
-[data-theme="editorial-dark"] body,
-[data-theme="editorial-light"] body {
-  font-family: var(--ed-font-body);
-  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss01" 1;
-  letter-spacing: 0;
-}
-
-/* Display headings get the sharp serif display. h2/h3
-   intentionally stay on the body family for editorial calm
-   per the design guide (idea > style). */
-[data-theme="editorial-dark"] h1,
-[data-theme="editorial-light"] h1 {
-  font-family: var(--ed-font-display);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-}
-
-/* Sans applies to chrome / UI surfaces — buttons, inputs,
-   nav links, badges, table headers, form labels. */
-[data-theme="editorial-dark"] .zto-btn,
-[data-theme="editorial-light"] .zto-btn,
-[data-theme="editorial-dark"] .zto-badge,
-[data-theme="editorial-light"] .zto-badge,
-[data-theme="editorial-dark"] .zto-input,
-[data-theme="editorial-light"] .zto-input,
-[data-theme="editorial-dark"] .zto-select,
-[data-theme="editorial-light"] .zto-select,
-[data-theme="editorial-dark"] .zto-label,
-[data-theme="editorial-light"] .zto-label,
-[data-theme="editorial-dark"] .zto-nav-item,
-[data-theme="editorial-light"] .zto-nav-item,
-[data-theme="editorial-dark"] table th,
-[data-theme="editorial-light"] table th,
-[data-theme="editorial-dark"] .zto-toast,
-[data-theme="editorial-light"] .zto-toast {
-  font-family: var(--ed-font-ui);
-  letter-spacing: 0;
-}
-
-/* Soften every radius across the app — editorial rejects
-   sharp 90° corners. We override the per-component radii so
-   existing utility classes recolor + reshape automatically. */
-[data-theme="editorial-dark"] .zto-card,
-[data-theme="editorial-light"] .zto-card {
-  border-radius: var(--ed-radius-lg);
-  border-color: var(--border-soft);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-[data-theme="editorial-light"] .zto-card {
-  box-shadow: 0 4px 12px rgba(17, 20, 33, 0.06);
-}
-[data-theme="editorial-dark"] .zto-btn,
-[data-theme="editorial-light"] .zto-btn {
-  border-radius: var(--ed-radius-full);
-  font-weight: 700;
-  padding-inline: 1.25rem;
-  letter-spacing: 0;
-}
-[data-theme="editorial-dark"] .zto-btn-sm,
-[data-theme="editorial-light"] .zto-btn-sm {
-  padding-inline: 0.95rem;
-}
-[data-theme="editorial-dark"] .zto-badge,
-[data-theme="editorial-light"] .zto-badge {
-  border-radius: var(--ed-radius-full);
-  border-width: 1px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-[data-theme="editorial-dark"] .zto-input,
-[data-theme="editorial-light"] .zto-input,
-[data-theme="editorial-dark"] .zto-select,
-[data-theme="editorial-light"] .zto-select {
-  border-radius: var(--ed-radius-md);
-}
-
-/* Primary action — green pill on both variants. The brand
-   uses a single saturated green moment per screen. */
-[data-theme="editorial-dark"] .zto-btn-gold,
-[data-theme="editorial-dark"] .zto-btn-primary,
-[data-theme="editorial-light"] .zto-btn-gold,
-[data-theme="editorial-light"] .zto-btn-primary {
-  background: var(--ed-green) !important;
-  color: #FFFFFF !important;
-  border-color: transparent !important;
-}
-[data-theme="editorial-dark"] .zto-btn-gold:hover,
-[data-theme="editorial-dark"] .zto-btn-primary:hover,
-[data-theme="editorial-light"] .zto-btn-gold:hover,
-[data-theme="editorial-light"] .zto-btn-primary:hover {
-  background: #009C62 !important;
-}
-
-/* Secondary / outline pill */
-[data-theme="editorial-dark"] .zto-btn-outline,
-[data-theme="editorial-light"] .zto-btn-outline {
-  background: transparent !important;
-  border: 1px solid var(--border-strong) !important;
-  color: var(--text-base) !important;
-}
-
-/* Sidebar + topbar surfaces inherit the new neutrals. */
-[data-theme="editorial-dark"] [data-zto-chrome="sidebar"] {
-  background: #0A0A0C;
-  border-color: var(--border-soft);
-}
-[data-theme="editorial-light"] [data-zto-chrome="sidebar"] {
-  background: #FFFFFF;
-  border-color: var(--border-soft);
-}
-[data-theme="editorial-dark"] [data-zto-chrome="header"] {
-  background: rgba(10, 10, 12, 0.92);
-  border-color: var(--border-soft);
-  backdrop-filter: blur(8px);
-}
-[data-theme="editorial-light"] [data-zto-chrome="header"] {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: var(--border-soft);
-  backdrop-filter: blur(8px);
-}
-
-/* Nav items — pill-shaped on hover/active to echo the brand.
-   The active state gets a subtle green wash, not a solid fill,
-   so a single nav row never reads like multiple primary CTAs. */
-[data-theme="editorial-dark"] .zto-nav-item,
-[data-theme="editorial-light"] .zto-nav-item {
-  border-radius: var(--ed-radius-full);
-  padding: 0.55rem 0.95rem;
-  font-weight: 500;
-}
-[data-theme="editorial-dark"] .zto-nav-active,
-[data-theme="editorial-light"] .zto-nav-active {
-  background: var(--c-gold-bg) !important;
-  color: var(--c-gold) !important;
-}
-
-/* Brand block in the sidebar — keep the Zero to One identity
-   but recolor the chip to the brand green so the editorial
-   palette reads through immediately on first paint. */
-[data-theme="editorial-dark"] [data-zto-chrome="sidebar"] .bg-white,
-[data-theme="editorial-light"] [data-zto-chrome="sidebar"] .bg-white {
-  background: var(--ed-green) !important;
-}
-[data-theme="editorial-dark"] [data-zto-chrome="sidebar"] .text-black {
-  color: #FFFFFF !important;
-}
-
-/* Tables — alternating row tint, no visible cell borders, header bar in ink */
-[data-theme="editorial-dark"] table thead,
-[data-theme="editorial-light"] table thead {
-  background: var(--surface-sunken);
-}
-[data-theme="editorial-dark"] table thead th,
-[data-theme="editorial-light"] table thead th {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: none;
-  color: var(--text-strong);
-}
-[data-theme="editorial-dark"] table tbody tr:nth-child(even),
-[data-theme="editorial-light"] table tbody tr:nth-child(even) {
-  background: var(--surface-elevated);
-}
-
-/* Modal overlay — softer, more cinematic */
-[data-theme="editorial-dark"] .zto-overlay,
-[data-theme="editorial-light"] .zto-overlay {
-  background: var(--modal-overlay);
-}
-[data-theme="editorial-dark"] .zto-modal,
-[data-theme="editorial-light"] .zto-modal {
-  border-radius: var(--ed-radius-xl);
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
-}
-
-/* Toast pill — full-radius, sans, single accent dot */
-[data-theme="editorial-dark"] .zto-toast,
-[data-theme="editorial-light"] .zto-toast {
-  border-radius: var(--ed-radius-full);
-  border: 1px solid var(--border-soft);
-  padding-inline: 1rem;
-  background: var(--surface-card);
-}
-
-/* Emphasise serif headings in PageGuide cards so the editorial
-   character shows up on every dashboard surface. */
-[data-theme="editorial-dark"] .zto-card h1,
-[data-theme="editorial-dark"] .zto-card h2,
-[data-theme="editorial-dark"] .zto-card h3,
-[data-theme="editorial-light"] .zto-card h1,
-[data-theme="editorial-light"] .zto-card h2,
-[data-theme="editorial-light"] .zto-card h3 {
-  font-family: var(--ed-font-display);
-  letter-spacing: -0.005em;
-}
-
-/* Severity recolor on light: keep amber for warn instead of red,
-   matching the brand's "warm-not-aggressive" palette. */
-[data-theme="editorial-light"] .text-red-400,
-[data-theme="editorial-light"] .text-red-300 { color: #C73824 !important; }
-[data-theme="editorial-light"] .text-amber-400,
-[data-theme="editorial-light"] .text-amber-300,
-[data-theme="editorial-light"] .text-amber-500 { color: #B07A00 !important; }
-[data-theme="editorial-light"] .text-emerald-400,
-[data-theme="editorial-light"] .text-emerald-300 { color: #009C62 !important; }
-
-/* Recolour the gold accents used across the app to the brand
-   green when an editorial theme is active so existing utility
-   classes (text-amber-300 etc) feel native. */
-[data-theme="editorial-dark"] .text-amber-400,
-[data-theme="editorial-dark"] .text-amber-300,
-[data-theme="editorial-dark"] .text-amber-500 { color: var(--ed-green-light) !important; }
-[data-theme="editorial-dark"] .bg-amber-400\/10,
-[data-theme="editorial-dark"] .bg-amber-400\/15 { background-color: var(--c-gold-bg) !important; }
-[data-theme="editorial-dark"] .border-amber-400\/30,
-[data-theme="editorial-dark"] .border-amber-400\/40 { border-color: rgba(0, 193, 122, 0.30) !important; }
-
-/* ============================================================
-   EDITORIAL theme — readability + light-mode rescue layer
-   Most components were written assuming the dark ZTO palette,
-   so dark-only utility classes (text-white, text-neutral-200,
-   bg-[#0a0a0a]…) render invisible under editorial-light. This
-   block performs the inversion. It also boosts base size +
-   weight + line-height across both editorial variants and
-   shrinks the dashboard padding so the canvas feels roomier.
-   ============================================================ */
-
-/* ── (Removed) Editorial geometry overrides for sidebar width,
-      main padding, and topbar height. They forced fixed pixel sizes
-      on top of the existing responsive Tailwind classes and broke
-      the mobile sidebar overlay + the desktop flex row in some
-      viewports. The original Tailwind classes already give the right
-      look across breakpoints. */
-
-/* ── (Removed) Aggressive type bumps: I had inflated every text-xs /
-      text-sm / text-base / text-[0.6rem] etc class with !important,
-      and pushed body font-size + line-height + font-weight. That
-      fought every page's existing typography (login hero text became
-      huge, the dashboard chrome got pushed around). The editorial
-      look comes from the font swap below, not from re-sizing every
-      utility — those are reverted. */
-
-/* ============================================================
-   LIGHT MODE INVERSION
-   These overrides flip dark-only Tailwind utility classes so
-   components built assuming a black canvas remain readable
-   under editorial-light.
-   ============================================================ */
-
-/* — Pure-white and near-white text → ink base — */
-[data-theme="editorial-light"] .text-white,
-[data-theme="editorial-light"] .text-neutral-50,
-[data-theme="editorial-light"] .text-neutral-100,
-[data-theme="editorial-light"] .text-neutral-200,
-[data-theme="editorial-light"] .text-zinc-100,
-[data-theme="editorial-light"] .text-zinc-200,
-[data-theme="editorial-light"] .text-gray-100,
-[data-theme="editorial-light"] .text-gray-200 {
-  color: var(--text-strong) !important;
-}
-[data-theme="editorial-light"] .text-neutral-300,
-[data-theme="editorial-light"] .text-zinc-300,
-[data-theme="editorial-light"] .text-gray-300 {
-  color: var(--text-base) !important;
-}
-[data-theme="editorial-light"] .text-neutral-400,
-[data-theme="editorial-light"] .text-zinc-400,
-[data-theme="editorial-light"] .text-gray-400 {
-  color: var(--text-dim) !important;
-}
-[data-theme="editorial-light"] .text-neutral-500,
-[data-theme="editorial-light"] .text-zinc-500,
-[data-theme="editorial-light"] .text-gray-500 {
-  color: #5C6075 !important;
-}
-[data-theme="editorial-light"] .text-neutral-600,
-[data-theme="editorial-light"] .text-neutral-700,
-[data-theme="editorial-light"] .text-zinc-600,
-[data-theme="editorial-light"] .text-zinc-700 {
-  color: var(--text-faint) !important;
-}
-
-/* — Black / near-black surface utilities → editorial surfaces — */
-[data-theme="editorial-light"] .bg-black,
-[data-theme="editorial-light"] .bg-\[\#000\],
-[data-theme="editorial-light"] .bg-\[\#000000\] {
-  background-color: var(--surface-card) !important;
-}
-[data-theme="editorial-light"] .bg-\[\#0a0a0a\],
-[data-theme="editorial-light"] .bg-\[\#0a0a0a\]\/95,
-[data-theme="editorial-light"] .bg-\[\#0d0d0d\],
-[data-theme="editorial-light"] .bg-\[\#111\],
-[data-theme="editorial-light"] .bg-\[\#111111\],
-[data-theme="editorial-light"] .bg-\[\#141414\],
-[data-theme="editorial-light"] .bg-\[\#151515\],
-[data-theme="editorial-light"] .bg-\[\#161616\],
-[data-theme="editorial-light"] .bg-\[\#1a1a1a\],
-[data-theme="editorial-light"] .bg-\[\#1a1a1d\] {
-  background-color: var(--surface-card) !important;
-}
-[data-theme="editorial-light"] .bg-\[\#232323\],
-[data-theme="editorial-light"] .bg-\[\#2a2a2a\],
-[data-theme="editorial-light"] .bg-\[\#2e2e2e\] {
-  background-color: var(--surface-elevated) !important;
-}
-[data-theme="editorial-light"] .bg-neutral-800,
-[data-theme="editorial-light"] .bg-neutral-900,
-[data-theme="editorial-light"] .bg-zinc-800,
-[data-theme="editorial-light"] .bg-zinc-900 {
-  background-color: var(--surface-elevated) !important;
-}
-[data-theme="editorial-light"] .bg-neutral-800\/30,
-[data-theme="editorial-light"] .bg-neutral-800\/40 {
-  background-color: rgba(17, 20, 33, 0.05) !important;
-}
-
-/* — Dark borders → editorial borders — */
-[data-theme="editorial-light"] .border-neutral-700,
-[data-theme="editorial-light"] .border-neutral-800,
-[data-theme="editorial-light"] .border-neutral-900,
-[data-theme="editorial-light"] .border-zinc-700,
-[data-theme="editorial-light"] .border-zinc-800 {
-  border-color: var(--border-strong) !important;
-}
-
-/* Header backdrop tint already covered above; nail down the
-   bg/95 variants used by sticky modal headers. */
-[data-theme="editorial-light"] .bg-\[\#0a0a0a\]\/95 {
-  background-color: rgba(255, 255, 255, 0.92) !important;
-}
-
-/* ── Brighter outlines + a quiet wash on inputs under both
-      editorial themes so form fields read distinctly from the
-      surrounding card surface. */
-[data-theme="editorial-dark"] .zto-input,
-[data-theme="editorial-dark"] .zto-select,
-[data-theme="editorial-dark"] .zto-input[readonly],
-[data-theme="editorial-dark"] textarea.zto-input {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-color: var(--border-strong) !important;
-  color: var(--text-strong) !important;
-}
-[data-theme="editorial-light"] .zto-input,
-[data-theme="editorial-light"] .zto-select,
-[data-theme="editorial-light"] textarea.zto-input {
-  background: #FFFFFF !important;
-  border-color: rgba(17, 20, 33, 0.18) !important;
-  color: var(--text-strong) !important;
-}
-[data-theme="editorial-dark"] .zto-input:focus,
-[data-theme="editorial-light"] .zto-input:focus,
-[data-theme="editorial-dark"] .zto-select:focus,
-[data-theme="editorial-light"] .zto-select:focus {
-  border-color: var(--ed-green) !important;
-  box-shadow: 0 0 0 3px rgba(0, 193, 122, 0.18) !important;
-  outline: none !important;
-}
-
-/* ── Card surface in editorial-light: pure white on a cream
-      page background gives the cleanest "paper on table" feel.
-      Inputs sit on white inside the card, so we need to
-      darken the empty-record placeholders for readability. */
-[data-theme="editorial-light"] .zto-card {
-  background: var(--surface-card) !important;
-  border: 1px solid var(--border-soft) !important;
-}
-
-/* ── Editorial-light: code/mono spans visible — — */
-[data-theme="editorial-light"] code,
-[data-theme="editorial-light"] .font-mono {
-  color: var(--text-dim) !important;
-  background: rgba(17, 20, 33, 0.04);
-  padding: 1px 4px;
-  border-radius: 4px;
-}
-
-/* ── Pill/badge readability: bg-*\/10 wash classes get bumped
-      to \/14 wash under editorial-light for visible contrast. */
-[data-theme="editorial-light"] .bg-amber-400\/10,
-[data-theme="editorial-light"] .bg-amber-400\/15 { background-color: rgba(176, 122, 0, 0.14) !important; }
-[data-theme="editorial-light"] .bg-blue-400\/10,
-[data-theme="editorial-light"] .bg-blue-500\/10 { background-color: rgba(0, 114, 249, 0.10) !important; }
-[data-theme="editorial-light"] .bg-emerald-500\/10,
-[data-theme="editorial-light"] .bg-green-500\/10 { background-color: rgba(0, 156, 98, 0.12) !important; }
-[data-theme="editorial-light"] .bg-red-500\/10,
-[data-theme="editorial-light"] .bg-red-500\/5 { background-color: rgba(199, 56, 36, 0.10) !important; }
-[data-theme="editorial-light"] .bg-purple-400\/10,
-[data-theme="editorial-light"] .bg-purple-500\/10 { background-color: rgba(130, 0, 58, 0.10) !important; }
-
-/* ── Page guide accent stays warm on light. */
-[data-theme="editorial-light"] .border-amber-400\/30,
-[data-theme="editorial-light"] .border-amber-400\/40,
-[data-theme="editorial-light"] .border-amber-500\/30,
-[data-theme="editorial-light"] .border-amber-500\/40 {
-  border-color: rgba(0, 156, 98, 0.30) !important;
-}
-
-/* ── Sidebar nav items on editorial-light need darker hover
-      since their default uses opacity-on-white. */
-[data-theme="editorial-light"] .zto-nav-item {
-  color: var(--text-dim) !important;
-}
-[data-theme="editorial-light"] .zto-nav-item:hover {
-  background: rgba(17, 20, 33, 0.06) !important;
-  color: var(--text-strong) !important;
-}
-[data-theme="editorial-light"] .zto-nav-active {
-  background: rgba(0, 156, 98, 0.12) !important;
-  color: var(--c-gold) !important;
-  font-weight: 700 !important;
-}
-
-/* ── User name + role chip in the sidebar bottom block. */
-[data-theme="editorial-light"] .bg-\[\#232323\] {
-  background-color: var(--surface-elevated) !important;
-}
-
-/* ── Kanban / detail-card scrim — bright white scrim on light
-      doesn't focus the eye; deepen to the surface-elevated tone
-      so the modal pops without going pitch-black. */
-[data-theme="editorial-light"] .bg-black\/50,
-[data-theme="editorial-light"] .bg-black\/70,
-[data-theme="editorial-light"] .bg-black\/80 {
-  background-color: rgba(17, 20, 33, 0.55) !important;
-}
-
-/* ── Force focus rings to the brand green on both editorial
-      variants so keyboard navigation is obvious. */
-[data-theme="editorial-dark"] :focus-visible,
-[data-theme="editorial-light"] :focus-visible {
-  outline: 2px solid var(--ed-green);
-  outline-offset: 2px;
-  border-radius: 6px;
 }
