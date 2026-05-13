@@ -1238,7 +1238,14 @@ export default function DashboardPage() {
     );
   };
 
-  const canEdit = user?.role === "admin" || user?.role === "editor";
+  // Edit gate: admin, editor, and content_writer can write. The
+  // server-side access-control layer (lib/access-control.ts) does
+  // the real authorisation per-table for content_writer accounts
+  // via their allowed_table_ids, so unbounded UI here is safe — a
+  // writer attempting to edit a table outside their allowlist still
+  // gets rejected by /api/airtable. Viewer remains read-only.
+  const canEdit =
+    user?.role === "admin" || user?.role === "editor" || user?.role === "content_writer";
   const canDelete = user?.role === "admin";
 
   /* ──── Quick search filter (client-side) ──── */
