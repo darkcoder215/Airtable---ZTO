@@ -399,6 +399,11 @@ export default function DashboardPage() {
   // single user can have a different layout per table.
   const [kanbanCardFieldIds, setKanbanCardFieldIds] = useState<string[]>([]);
   const [kanbanCardBold, setKanbanCardBold] = useState<Record<string, boolean>>({});
+  // Which field appears as the BIG title on each kanban card. Default
+  // is the table's primary field. When the primary field is the
+  // auto-generated record id (useless to writers), the user can pick
+  // a different field here.
+  const [kanbanCardTitleFieldId, setKanbanCardTitleFieldId] = useState<string | null>(null);
   const [showCardConfig, setShowCardConfig] = useState(false);
 
   const cardCfgKey = `zto-kanban-card:${selectedBase?.id ?? "_"}:${selectedTable?.id ?? "_"}`;
@@ -407,30 +412,39 @@ export default function DashboardPage() {
     if (!selectedBase || !selectedTable) {
       setKanbanCardFieldIds([]);
       setKanbanCardBold({});
+      setKanbanCardTitleFieldId(null);
       return;
     }
     try {
       const raw = localStorage.getItem(cardCfgKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as { fieldIds?: string[]; bold?: Record<string, boolean> };
+        const parsed = JSON.parse(raw) as { fieldIds?: string[]; bold?: Record<string, boolean>; titleFieldId?: string | null };
         setKanbanCardFieldIds(Array.isArray(parsed.fieldIds) ? parsed.fieldIds : []);
         setKanbanCardBold(parsed.bold && typeof parsed.bold === "object" ? parsed.bold : {});
+        setKanbanCardTitleFieldId(typeof parsed.titleFieldId === "string" ? parsed.titleFieldId : null);
       } else {
         setKanbanCardFieldIds([]);
         setKanbanCardBold({});
+        setKanbanCardTitleFieldId(null);
       }
     } catch {
       setKanbanCardFieldIds([]);
       setKanbanCardBold({});
+      setKanbanCardTitleFieldId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBase?.id, selectedTable?.id]);
 
-  const saveCardCfg = (fieldIds: string[], bold: Record<string, boolean>) => {
+  const saveCardCfg = (
+    fieldIds: string[],
+    bold: Record<string, boolean>,
+    titleFieldId: string | null = kanbanCardTitleFieldId
+  ) => {
     setKanbanCardFieldIds(fieldIds);
     setKanbanCardBold(bold);
+    setKanbanCardTitleFieldId(titleFieldId);
     try {
-      localStorage.setItem(cardCfgKey, JSON.stringify({ fieldIds, bold }));
+      localStorage.setItem(cardCfgKey, JSON.stringify({ fieldIds, bold, titleFieldId }));
     } catch {}
   };
 
@@ -2110,6 +2124,44 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
+            {/* Title field selector — addresses the «no one wants the
+                record ID» pain. Defaults to the table's primary field
+                but the writer can pick any singleLineText / multilineText
+                field as the big card title instead. */}
+            <div className="mb-3 bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[0.6rem] font-black text-neutral-400 uppercase tracking-widest">
+                  حقل العنوان (الذي يظهر بخط كبير على رأس البطاقة)
+                </span>
+              </div>
+              <div className="zto-select-wrap">
+                <select
+                  className="zto-input text-xs"
+                  value={kanbanCardTitleFieldId ?? ""}
+                  onChange={(e) =>
+                    saveCardCfg(kanbanCardFieldIds, kanbanCardBold, e.target.value || null)
+                  }
+                >
+                  <option value="">
+                    افتراضي (الحقل الأساسي{
+                      selectedTable?.fields.find((f) => f.id === selectedTable?.primaryFieldId)
+                        ? `: ${selectedTable?.fields.find((f) => f.id === selectedTable?.primaryFieldId)?.name}`
+                        : ""
+                    })
+                  </option>
+                  {selectedTable?.fields
+                    .filter((f) => f.id !== selectedTable.primaryFieldId)
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name} ({f.type})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <p className="text-[0.6rem] text-neutral-500 mt-1.5 leading-snug">
+                إن كان الحقل الأساسي في Airtable هو معرّف السجل (rec…)، اختر هنا حقلاً نصياً واضحاً مثل «العنوان» أو «POST CONTENT».
+              </p>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <p className="text-[0.6rem] font-black text-neutral-500 uppercase tracking-widest mb-1.5">
@@ -2207,7 +2259,14 @@ export default function DashboardPage() {
           groups[key].push(rec);
         }
         const orderedKeys = [...choices.map((c) => c.name).filter((k) => k in groups), ...Object.keys(groups).filter((k) => k !== noneKey && !choices.some((c) => c.name === k)), noneKey];
-        const primary = selectedTable.fields.find((f) => f.id === selectedTable.primaryFieldId);
+        // The big title on each kanban card. Default = table's primary
+        // field. The writer can override this via «حقول البطاقة» so
+        // they don't see useless auto-generated record IDs.
+        const primaryFieldId = selectedTable.primaryFieldId;
+        const chosenTitleField = kanbanCardTitleFieldId
+          ? selectedTable.fields.find((f) => f.id === kanbanCardTitleFieldId)
+          : null;
+        const primary = chosenTitleField ?? selectedTable.fields.find((f) => f.id === primaryFieldId);
         // Card fields: prefer the user's saved preference (per-user, keyed by
         // base:table) when present, otherwise the first 3 visible non-primary
         // non-group fields. Per-field 'bold' state is also stored on the same
@@ -2353,7 +2412,19 @@ export default function DashboardPage() {
                       )}
                       {list.map((rec) => {
                         const titleVal = primary ? rec.fields[primary.name] : null;
-                        const title = renderCellPreview(titleVal) || rec.id;
+                        // Title fallback chain:
+                        //   1. The chosen title field's value
+                        //   2. The first populated text-ish field on the card
+                        //   3. A short slice of the record id (kanban needs *something*)
+                        let title = renderCellPreview(titleVal);
+                        if (!title) {
+                          for (const cf of cardFields) {
+                            const cv = rec.fields[cf.name];
+                            const preview = renderCellPreview(cv);
+                            if (preview) { title = preview; break; }
+                          }
+                        }
+                        if (!title) title = `… ${rec.id.slice(-6)}`;
                         const isDragging = kanbanDraggingId === rec.id;
                         const isMoving = kanbanMoving === rec.id;
                         return (
@@ -2370,8 +2441,8 @@ export default function DashboardPage() {
                               if (target.closest("select, button, .zto-select-wrap, [data-no-open]")) return;
                               setDetailRecordId(rec.id);
                             }}
-                            className={`bg-[#1a1a1a] border rounded-lg ${densityCard} hover:border-amber-400/40 hover:-translate-y-0.5 transition-all duration-150 group relative ${
-                              isDragging ? "opacity-40 scale-95" : ""
+                            className={`bg-gradient-to-br from-[#1d1d1f] to-[#161618] border rounded-xl ${densityCard} shadow-md shadow-black/30 ring-1 ring-white/[0.02] hover:border-amber-400/40 hover:ring-amber-400/10 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 transition-all duration-150 group relative ${
+                              isDragging ? "opacity-40 scale-95 rotate-1" : ""
                             } ${isMoving ? "opacity-60" : ""} ${
                               canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                             }`}
@@ -2381,8 +2452,8 @@ export default function DashboardPage() {
                               <GripVertical className="w-3.5 h-3.5 text-neutral-600 absolute top-2 left-2 opacity-0 group-hover:opacity-100 pointer-events-none" />
                             )}
                             <p
-                              className={`font-bold text-white leading-snug line-clamp-2 break-words ${
-                                kanbanDensity === "compact" ? "text-[11px]" : kanbanDensity === "comfy" ? "text-[13px]" : "text-[12px]"
+                              className={`font-bold text-white leading-snug break-words ${
+                                kanbanDensity === "compact" ? "text-[11px] line-clamp-3" : kanbanDensity === "comfy" ? "text-[14px]" : "text-[12.5px]"
                               }`}
                             >
                               {title}
@@ -2826,7 +2897,7 @@ export default function DashboardPage() {
                     </span>
                   </h3>
                   <p className="text-[0.6rem] text-neutral-500 mt-1 leading-snug">
-                    كل أعمدة هذا السجل كما هي في Airtable. الحقول الفارغة مطوية في الأسفل. يمكنك توسيع النصوص الطويلة بزرّ «اقرأ المزيد».
+                    كل أعمدة هذا السجل كما هي في Airtable — النصوص تظهر كاملةً. مرّر الفأرة على أيّ حقل ثم اضغط أيقونة التحرير لتعديله مباشرةً.
                   </p>
                 </div>
                 {populated.length === 0 ? (
@@ -2864,6 +2935,36 @@ export default function DashboardPage() {
                           <dt className="flex items-center gap-1.5 text-[0.55rem] uppercase tracking-widest text-neutral-500 font-black mb-2">
                             <Icon className={`w-3 h-3 ${typeColor}`} />
                             <span className="flex-1">{field.name}</span>
+                            {/* Rewrite-with-AI on any text-ish field. Bumps the
+                                AI-writer panel up to scroll into view + opens
+                                it. We don't pre-fill (the writer panel reads
+                                the article from props on render) but the
+                                writer can immediately «ولّد المنشور» using
+                                this field as input. */}
+                            {!isThisEditing &&
+                              (field.type === "singleLineText" ||
+                                field.type === "multilineText" ||
+                                field.type === "richText") && (
+                                <button
+                                  onClick={() => {
+                                    const el = document.getElementById("zto-card-writer");
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: "smooth", block: "start" });
+                                      // Open the writer panel if it's collapsed.
+                                      const trigger = el.querySelector("button");
+                                      if (trigger && el.getAttribute("data-writer-open") !== "1") {
+                                        (trigger as HTMLButtonElement).click();
+                                        el.setAttribute("data-writer-open", "1");
+                                      }
+                                    }
+                                  }}
+                                  className="opacity-0 group-hover/field:opacity-100 text-[0.6rem] text-purple-300 hover:text-purple-200 font-bold transition-opacity inline-flex items-center gap-1"
+                                  title="أعد كتابة هذا الحقل بوكيل ذكاء اصطناعي"
+                                >
+                                  <Sparkles className="w-3 h-3" />
+                                  أعد بـ AI
+                                </button>
+                              )}
                             {isFieldEditable && !isThisEditing && (
                               <button
                                 onClick={() => {
@@ -3307,31 +3408,13 @@ function RenderJsonInline({ value, depth = 0 }: { value: unknown; depth?: number
    ones collapse behind a clamp + "اقرأ المزيد" button so the card
    doesn't grow into a wall of text. Text stays selectable in both
    states — copying a paragraph still works. */
-const EXPANDABLE_THRESHOLD = 600;
+/* ─────────────── ExpandableText ───────────────
+   Always shows the FULL string. There's no "اقرأ المزيد" clamp
+   anymore — the previous threshold was hiding writers' content and
+   forcing an extra click for every record. Text stays selectable.
+*/
 function ExpandableText({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const isLong = text.length > EXPANDABLE_THRESHOLD;
-  if (!isLong) {
-    return <span className="text-neutral-200 whitespace-pre-wrap">{text}</span>;
-  }
-  return (
-    <div className="space-y-1.5">
-      <div
-        className={`text-neutral-200 whitespace-pre-wrap ${
-          open ? "" : "max-h-[8.4em] overflow-hidden relative"
-        }`}
-      >
-        {open ? text : text.slice(0, EXPANDABLE_THRESHOLD).trimEnd() + "…"}
-      </div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="text-[0.65rem] font-bold text-amber-300 hover:text-amber-200 transition-colors"
-      >
-        {open ? "طيّ" : `اقرأ المزيد · ${text.length.toLocaleString("ar")} حرف`}
-      </button>
-    </div>
-  );
+  return <span className="text-neutral-200 whitespace-pre-wrap">{text}</span>;
 }
 
 function DrawerImageGallery({
