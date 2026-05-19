@@ -465,6 +465,13 @@ export default function DashboardPage() {
     parentCommentId?: string | null;
   }
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
+  // Inline edit state for the expanded record card. We only track one
+  // active edit at a time (the field the writer just clicked); the
+  // input is hosted right inside the field's tile and saves via the
+  // existing updateRecordField -> /api/airtable PATCH path.
+  const [modalEditField, setModalEditField] = useState<string | null>(null);
+  const [modalEditValue, setModalEditValue] = useState<unknown>(null);
+  const [modalEditSaving, setModalEditSaving] = useState(false);
   const [comments, setComments] = useState<RecordComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
@@ -1102,6 +1109,12 @@ export default function DashboardPage() {
     }
 
     if (typeof value === "object" && value !== null) {
+      // In the expanded card we have room to render objects
+      // intelligibly (user records, agent outputs, generic
+      // key/value blobs). Grid view keeps the compact JSON.
+      if (opts?.full) {
+        return <ParsedJsonValue value={value} />;
+      }
       return (
         <span className="text-[11px] text-neutral-500 font-mono break-all">
           {JSON.stringify(value)}
@@ -2402,28 +2415,50 @@ export default function DashboardPage() {
                                   } else {
                                     display = renderCellPreview(v) || "—";
                                   }
+                                  // URL fields (or any string value that
+                                  // happens to be an http(s) link) get
+                                  // rendered as a click-to-open anchor so
+                                  // the writer can jump to the source
+                                  // straight from the kanban without
+                                  // opening the detail card.
+                                  const isUrl =
+                                    f.type === "url" ||
+                                    (typeof v === "string" && /^https?:\/\//i.test(v));
+                                  const sizeCls =
+                                    kanbanDensity === "compact" ? "text-[10px]" :
+                                    kanbanDensity === "comfy"  ? "text-[12px]" :
+                                                                 "text-[11px]";
+                                  const toneCls = isEmpty
+                                    ? "text-neutral-600 italic"
+                                    : urgencyTone
+                                      ? `${urgencyTone} font-bold`
+                                      : isBold
+                                        ? "text-white font-black"
+                                        : "text-neutral-300";
                                   return (
                                     <div key={f.id} className="flex items-start gap-1.5">
                                       <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
                                         {f.name}
                                       </span>
-                                      <span
-                                        className={`break-words whitespace-pre-wrap leading-snug ${
-                                          isEmpty
-                                            ? "text-neutral-600 italic"
-                                            : urgencyTone
-                                              ? `${urgencyTone} font-bold`
-                                              : isBold
-                                                ? "text-white font-black"
-                                                : "text-neutral-300"
-                                        } ${
-                                          kanbanDensity === "compact" ? "text-[10px]" :
-                                          kanbanDensity === "comfy"  ? "text-[12px]" :
-                                                                       "text-[11px]"
-                                        }`}
-                                      >
-                                        {display}
-                                      </span>
+                                      {isUrl && !isEmpty && typeof v === "string" ? (
+                                        <a
+                                          href={v}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          data-no-open
+                                          className={`text-amber-400 hover:text-amber-300 underline decoration-amber-400/30 hover:decoration-amber-300 break-all ${sizeCls}`}
+                                          title={v}
+                                        >
+                                          {v.replace(/^https?:\/\//, "").slice(0, 80)}
+                                        </a>
+                                      ) : (
+                                        <span
+                                          className={`break-words whitespace-pre-wrap leading-snug ${toneCls} ${sizeCls}`}
+                                        >
+                                          {display}
+                                        </span>
+                                      )}
                                     </div>
                                   );
                                 })}
@@ -2802,24 +2837,76 @@ export default function DashboardPage() {
                       const Icon = getFieldIcon(field.type);
                       const typeColor = getFieldTypeColor(field.type);
                       const v = detailRecord.fields[field.name];
-                      // Long-text and multi-line fields get the full row.
                       const wide =
                         field.type === "multilineText" ||
                         (typeof v === "string" && v.length > 120);
+                      const isFieldEditable = canEdit && !READ_ONLY_TYPES.includes(field.type);
+                      const isThisEditing = modalEditField === field.name;
+                      const saveThisEdit = async () => {
+                        if (!detailRecord) return;
+                        setModalEditSaving(true);
+                        try {
+                          await updateRecordField(detailRecord.id, field.name, modalEditValue);
+                          setModalEditField(null);
+                        } finally {
+                          setModalEditSaving(false);
+                        }
+                      };
                       return (
                         <div
                           key={field.id}
-                          className={`bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3.5 transition-colors hover:border-neutral-700 ${
-                            wide ? "md:col-span-2" : ""
-                          }`}
+                          className={`bg-[#0d0d0d] border rounded-lg p-3.5 transition-colors group/field ${
+                            isThisEditing
+                              ? "border-amber-400/60"
+                              : "border-neutral-800 hover:border-neutral-700"
+                          } ${wide ? "md:col-span-2" : ""}`}
                         >
                           <dt className="flex items-center gap-1.5 text-[0.55rem] uppercase tracking-widest text-neutral-500 font-black mb-2">
                             <Icon className={`w-3 h-3 ${typeColor}`} />
-                            {field.name}
+                            <span className="flex-1">{field.name}</span>
+                            {isFieldEditable && !isThisEditing && (
+                              <button
+                                onClick={() => {
+                                  setModalEditField(field.name);
+                                  setModalEditValue(v);
+                                }}
+                                className="opacity-0 group-hover/field:opacity-100 text-[0.6rem] text-amber-400 hover:text-amber-300 font-bold transition-opacity"
+                                title="تحرير"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                            )}
                           </dt>
-                          <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
-                            {renderFieldValue(v, field, { full: true })}
-                          </dd>
+                          {isThisEditing ? (
+                            <div className="space-y-2">
+                              {renderFieldInput(field, modalEditValue, setModalEditValue)}
+                              <div className="flex items-center gap-2 justify-end">
+                                <button
+                                  onClick={() => setModalEditField(null)}
+                                  className="zto-btn zto-btn-ghost zto-btn-sm"
+                                  disabled={modalEditSaving}
+                                >
+                                  إلغاء
+                                </button>
+                                <button
+                                  onClick={saveThisEdit}
+                                  className="zto-btn zto-btn-gold zto-btn-sm"
+                                  disabled={modalEditSaving}
+                                >
+                                  {modalEditSaving ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Save className="w-3.5 h-3.5" />
+                                  )}
+                                  حفظ
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
+                              {renderFieldValue(v, field, { full: true })}
+                            </dd>
+                          )}
                         </div>
                       );
                     })}
@@ -3097,6 +3184,44 @@ function ParsedJsonValue({ value }: { value: unknown }) {
       if (o.state === "ok" && o.value != null) {
         return <ParsedJsonValue value={o.value} />;
       }
+      // Airtable collaborator / user record. Created-by, last-modified-by
+      // and any user-link field returns `{ id, email, name, profilePicUrl? }`.
+      // Render as a friendly chip instead of raw JSON.
+      if (typeof o.name === "string" && typeof o.email === "string") {
+        const initial = String(o.name).trim().slice(0, 1).toUpperCase() || "?";
+        return (
+          <span className="inline-flex items-center gap-2 bg-neutral-900/40 border border-neutral-800 rounded-full pl-3 pr-1.5 py-1">
+            <span className="w-6 h-6 rounded-full bg-amber-400/20 text-amber-200 text-[0.7rem] font-black flex items-center justify-center">
+              {initial}
+            </span>
+            <span className="flex flex-col leading-tight">
+              <span className="text-[0.75rem] text-white font-bold">{String(o.name)}</span>
+              <span className="text-[0.6rem] text-neutral-500 font-mono">{String(o.email)}</span>
+            </span>
+          </span>
+        );
+      }
+      // Array of collaborators (multi-user fields).
+    }
+    if (Array.isArray(value) && value.length > 0 && value.every((v) =>
+      v && typeof v === "object" &&
+      typeof (v as { name?: unknown }).name === "string"
+    )) {
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {(value as Array<{ name: string; email?: string }>).slice(0, 8).map((u, i) => {
+            const initial = u.name.trim().slice(0, 1).toUpperCase() || "?";
+            return (
+              <span key={i} className="inline-flex items-center gap-1.5 bg-neutral-900/40 border border-neutral-800 rounded-full pl-2 pr-1 py-0.5">
+                <span className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-200 text-[0.55rem] font-black flex items-center justify-center">
+                  {initial}
+                </span>
+                <span className="text-[0.7rem] text-neutral-200 font-bold">{u.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      );
     }
     return null;
   })();
