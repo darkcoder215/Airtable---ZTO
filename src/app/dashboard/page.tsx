@@ -2476,6 +2476,15 @@ export default function DashboardPage() {
                                     f.type === "lastModifiedTime";
                                   let display: string;
                                   let urgencyTone = "";
+                                  // multipleRecordLinks fields arrive as an
+                                  // array of record IDs (`["recXXX",...]`).
+                                  // The default preview joins the raw IDs,
+                                  // which is what users were seeing on the
+                                  // brand chip. Resolve via `linkedNames`
+                                  // (populated alongside the records fetch)
+                                  // so the human-readable primary-field
+                                  // value shows up instead.
+                                  const isLink = f.type === "multipleRecordLinks";
                                   if (isEmpty) {
                                     display = "—";
                                   } else if (isDate && typeof v === "string") {
@@ -2483,6 +2492,11 @@ export default function DashboardPage() {
                                     display = ago.label;
                                     if (ago.isPast && ago.daysAgo >= 7) urgencyTone = "text-red-300";
                                     else if (ago.isPast && ago.daysAgo >= 2) urgencyTone = "text-amber-300";
+                                  } else if (isLink && Array.isArray(v)) {
+                                    display = (v as unknown[])
+                                      .map((x) => (typeof x === "string" ? (linkedNames[x] ?? x) : ""))
+                                      .filter(Boolean)
+                                      .join("، ") || "—";
                                   } else {
                                     display = renderCellPreview(v) || "—";
                                   }
