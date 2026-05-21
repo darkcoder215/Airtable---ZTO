@@ -637,3 +637,102 @@ html[data-embed="1"] [data-zto-chrome="main"] {
 html[data-embed="1"] body {
   background: transparent !important;
 }
+
+/* ============================================================
+   Light-theme surface rescue
+   Many dashboard surfaces (kanban canvas, kanban columns, cards,
+   compose boxes, popovers …) hard-code dark hex values inline
+   (`bg-[#0d0d0d]`, `bg-[#1a1a1a]`, etc.). Under the dark theme
+   they look right, but in light mode they make the page look
+   half-broken — a white sidebar next to a black kanban canvas.
+   This block remaps those hard-coded utility-class names to the
+   Airtable-style cream/white tones so the whole page reads as
+   one consistent surface family.
+   ============================================================ */
+[data-theme="light"] .bg-\[\#0a0a0a\],
+[data-theme="light"] .bg-\[\#0d0d0d\],
+[data-theme="light"] .bg-\[\#0f0f0f\],
+[data-theme="light"] .bg-\[\#111\],
+[data-theme="light"] .bg-\[\#111111\],
+[data-theme="light"] .bg-\[\#141414\],
+[data-theme="light"] .bg-\[\#141416\],
+[data-theme="light"] .bg-\[\#151515\],
+[data-theme="light"] .bg-\[\#161616\],
+[data-theme="light"] .bg-\[\#181818\],
+[data-theme="light"] .bg-\[\#1a1a1a\],
+[data-theme="light"] .bg-\[\#1a1a1d\] {
+  background-color: var(--surface-card) !important;
+}
+[data-theme="light"] .bg-\[\#1f1f22\],
+[data-theme="light"] .bg-\[\#232323\],
+[data-theme="light"] .bg-\[\#252525\],
+[data-theme="light"] .bg-\[\#2a2a2a\],
+[data-theme="light"] .bg-\[\#2a2a2d\],
+[data-theme="light"] .bg-\[\#2e2e2e\] {
+  background-color: var(--surface-sunken) !important;
+}
+[data-theme="light"] .bg-black,
+[data-theme="light"] .bg-\[\#000\],
+[data-theme="light"] .bg-\[\#000000\] {
+  background-color: var(--surface-card) !important;
+}
+
+/* Dark borders -> light borders */
+[data-theme="light"] .border-neutral-700,
+[data-theme="light"] .border-neutral-800,
+[data-theme="light"] .border-neutral-900,
+[data-theme="light"] .border-\[\#3a3a3a\],
+[data-theme="light"] .border-neutral-800\/50,
+[data-theme="light"] .border-neutral-800\/60,
+[data-theme="light"] .border-neutral-800\/70,
+[data-theme="light"] .border-neutral-800\/80 {
+  border-color: var(--border-soft) !important;
+}
+
+/* Dark-only text utilities -> ink on light backgrounds */
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-neutral-50,
+[data-theme="light"] .text-neutral-100,
+[data-theme="light"] .text-neutral-200 {
+  color: var(--text-strong) !important;
+}
+[data-theme="light"] .text-neutral-300,
+[data-theme="light"] .text-neutral-400 {
+  color: var(--text-base) !important;
+}
+[data-theme="light"] .text-neutral-500,
+[data-theme="light"] .text-neutral-600 {
+  color: var(--text-dim) !important;
+}
+[data-theme="light"] .text-neutral-700 {
+  color: var(--text-faint) !important;
+}
+
+/* The header backdrop (sticky `bg-[#0a0a0a]/95` etc.) should be
+   the same warm white as the cards underneath rather than ink. */
+[data-theme="light"] .bg-\[\#0a0a0a\]\/95 {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+}
+
+/* The scrim under the record modal is too dark on a light page —
+   tone it down so the modal still pops but doesn't black-out the
+   background entirely. */
+[data-theme="light"] .bg-black\/50,
+[data-theme="light"] .bg-black\/70,
+[data-theme="light"] .bg-black\/80 {
+  background-color: rgba(17, 20, 33, 0.42) !important;
+}
+
+/* Kanban card hover gets a soft amber border in dark mode; in
+   light mode the existing colour reads as a hard yellow line.
+   Soften to the same green accent the rest of the theme uses. */
+[data-theme="light"] .hover\:border-amber-400\/40:hover {
+  border-color: rgba(0, 122, 77, 0.32) !important;
+}
+
+/* Bright amber text on light surfaces is hard to read; deepen
+   the accent on those small chips so they stay legible. */
+[data-theme="light"] .text-amber-300,
+[data-theme="light"] .text-amber-400 {
+  color: #B07A00 !important;
+}
