@@ -2441,108 +2441,132 @@ export default function DashboardPage() {
                               if (target.closest("select, button, .zto-select-wrap, [data-no-open]")) return;
                               setDetailRecordId(rec.id);
                             }}
-                            className={`bg-gradient-to-br from-[#1d1d1f] to-[#161618] border rounded-xl ${densityCard} shadow-md shadow-black/30 ring-1 ring-white/[0.02] hover:border-amber-400/40 hover:ring-amber-400/10 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 transition-all duration-150 group relative ${
+                            className={`bg-[#141416] border rounded-lg ${densityCard} shadow-sm shadow-black/40 hover:border-amber-400/40 hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/60 transition-all duration-150 group relative ${
                               isDragging ? "opacity-40 scale-95 rotate-1" : ""
                             } ${isMoving ? "opacity-60" : ""} ${
                               canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
-                            }`}
+                            } border-neutral-800/80`}
                             title={canEdit ? "انقر للتفاصيل، اسحب لتغيير الحالة" : "انقر للتفاصيل"}
                           >
                             {canEdit && (
                               <GripVertical className="w-3.5 h-3.5 text-neutral-600 absolute top-2 left-2 opacity-0 group-hover:opacity-100 pointer-events-none" />
                             )}
+                            {/* Title row — Airtable-style: bold dark text
+                                with a soft divider below before the fields
+                                stack. No clamp at default density. */}
                             <p
-                              className={`font-bold text-white leading-snug break-words ${
+                              className={`font-bold text-white leading-snug break-words pb-2 mb-2 border-b border-neutral-800/70 ${
                                 kanbanDensity === "compact" ? "text-[11px] line-clamp-3" : kanbanDensity === "comfy" ? "text-[14px]" : "text-[12.5px]"
                               }`}
                             >
                               {title}
                             </p>
                             {cardFields.length > 0 && (
-                              <div className="mt-2 space-y-1.5">
+                              <div className={`${kanbanDensity === "compact" ? "space-y-2" : "space-y-2.5"}`}>
                                 {cardFields.map((f) => {
                                   const v = rec.fields[f.name];
                                   const isBold = kanbanCardBold[f.id] === true;
                                   const isEmpty = v == null || v === "" || (Array.isArray(v) && v.length === 0);
-                                  // Date fields get a "since X" relative
-                                  // rendering so the writer sees urgency
-                                  // at a glance. Past dates render red
-                                  // (overdue), recent ones amber-ish,
-                                  // others stay neutral.
                                   const isDate =
                                     f.type === "date" ||
                                     f.type === "dateTime" ||
                                     f.type === "createdTime" ||
                                     f.type === "lastModifiedTime";
-                                  let display: string;
-                                  let urgencyTone = "";
-                                  // multipleRecordLinks fields arrive as an
-                                  // array of record IDs (`["recXXX",...]`).
-                                  // The default preview joins the raw IDs,
-                                  // which is what users were seeing on the
-                                  // brand chip. Resolve via `linkedNames`
-                                  // (populated alongside the records fetch)
-                                  // so the human-readable primary-field
-                                  // value shows up instead.
                                   const isLink = f.type === "multipleRecordLinks";
+                                  const isSelect = f.type === "singleSelect";
+                                  const isMultiSelect = f.type === "multipleSelects";
+                                  const isUrl =
+                                    f.type === "url" ||
+                                    (typeof v === "string" && /^https?:\/\//i.test(v));
+                                  const fieldChoices = readChoices(f);
+                                  // Resolve display string for simple text/preview cases.
+                                  let textDisplay: string;
+                                  let urgencyTone = "";
                                   if (isEmpty) {
-                                    display = "—";
+                                    textDisplay = "—";
                                   } else if (isDate && typeof v === "string") {
                                     const ago = relativeTimeAr(v);
-                                    display = ago.label;
+                                    textDisplay = ago.label;
                                     if (ago.isPast && ago.daysAgo >= 7) urgencyTone = "text-red-300";
                                     else if (ago.isPast && ago.daysAgo >= 2) urgencyTone = "text-amber-300";
                                   } else if (isLink && Array.isArray(v)) {
-                                    display = (v as unknown[])
+                                    textDisplay = (v as unknown[])
                                       .map((x) => (typeof x === "string" ? (linkedNames[x] ?? x) : ""))
                                       .filter(Boolean)
                                       .join("، ") || "—";
                                   } else {
-                                    display = renderCellPreview(v) || "—";
+                                    textDisplay = renderCellPreview(v) || "—";
                                   }
-                                  // URL fields (or any string value that
-                                  // happens to be an http(s) link) get
-                                  // rendered as a click-to-open anchor so
-                                  // the writer can jump to the source
-                                  // straight from the kanban without
-                                  // opening the detail card.
-                                  const isUrl =
-                                    f.type === "url" ||
-                                    (typeof v === "string" && /^https?:\/\//i.test(v));
                                   const sizeCls =
-                                    kanbanDensity === "compact" ? "text-[10px]" :
-                                    kanbanDensity === "comfy"  ? "text-[12px]" :
-                                                                 "text-[11px]";
+                                    kanbanDensity === "compact" ? "text-[10.5px]" :
+                                    kanbanDensity === "comfy"  ? "text-[12.5px]" :
+                                                                 "text-[11.5px]";
                                   const toneCls = isEmpty
                                     ? "text-neutral-600 italic"
                                     : urgencyTone
                                       ? `${urgencyTone} font-bold`
                                       : isBold
-                                        ? "text-white font-black"
-                                        : "text-neutral-300";
-                                  return (
-                                    <div key={f.id} className="flex items-start gap-1.5">
-                                      <span className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide shrink-0 mt-[2px]">
-                                        {f.name}
+                                        ? "text-white font-bold"
+                                        : "text-neutral-200";
+                                  // Airtable-style choice pill helper.
+                                  const renderSelectPill = (name: string) => {
+                                    const meta = fieldChoices.find((c) => c.name === name);
+                                    const bg = (meta?.color && colorMap[meta.color]) || "rgba(255,255,255,0.05)";
+                                    return (
+                                      <span
+                                        key={name}
+                                        className="inline-flex items-center text-white text-[11px] font-medium rounded-md px-2 py-0.5"
+                                        style={{ background: bg }}
+                                      >
+                                        {name}
                                       </span>
-                                      {isUrl && !isEmpty && typeof v === "string" ? (
+                                    );
+                                  };
+                                  return (
+                                    <div key={f.id} className="space-y-0.5">
+                                      {/* Field label — small, muted, on its
+                                          own line (Airtable convention). */}
+                                      <div className="text-[10px] text-neutral-500 font-medium">
+                                        {f.name}
+                                      </div>
+                                      {/* Value rendering, type-aware. */}
+                                      {isEmpty ? (
+                                        <div className={`${sizeCls} text-neutral-600 italic`}>—</div>
+                                      ) : isSelect && typeof v === "string" ? (
+                                        <div>{renderSelectPill(v)}</div>
+                                      ) : isMultiSelect && Array.isArray(v) ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {(v as string[]).map((nm) => renderSelectPill(nm))}
+                                        </div>
+                                      ) : isLink && Array.isArray(v) ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {(v as unknown[]).map((id, i) => (
+                                            <span
+                                              key={i}
+                                              className="inline-flex items-center bg-blue-400/10 border border-blue-400/30 text-blue-200 text-[11px] rounded-md px-2 py-0.5"
+                                            >
+                                              {typeof id === "string" ? (linkedNames[id] ?? id) : ""}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : isUrl && typeof v === "string" ? (
                                         <a
                                           href={v}
                                           target="_blank"
                                           rel="noreferrer"
                                           onClick={(e) => e.stopPropagation()}
                                           data-no-open
-                                          className={`text-amber-400 hover:text-amber-300 underline decoration-amber-400/30 hover:decoration-amber-300 break-all ${sizeCls}`}
+                                          className={`block text-amber-400 hover:text-amber-300 underline decoration-amber-400/30 hover:decoration-amber-300 break-all ${sizeCls}`}
                                           title={v}
                                         >
                                           {v.replace(/^https?:\/\//, "").slice(0, 80)}
                                         </a>
                                       ) : (
-                                        <span
+                                        <div
                                           className={`break-words whitespace-pre-wrap leading-snug ${toneCls} ${sizeCls}`}
                                         >
-                                          {display}
-                                        </span>
+                                          {textDisplay}
+                                        </div>
                                       )}
                                     </div>
                                   );
@@ -2917,14 +2941,15 @@ export default function DashboardPage() {
                 {populated.length === 0 ? (
                   <p className="text-[0.7rem] text-neutral-500 italic font-bold">— لا حقول مُعبَّأة —</p>
                 ) : (
-                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  // Airtable-native row layout: each field is a horizontal
+                  // row with [icon + field name] on the right (RTL) and the
+                  // value boxed on the left. Matches the look of the
+                  // record-detail panel inside Airtable itself.
+                  <dl className="divide-y divide-neutral-800/60">
                     {populated.map((field) => {
                       const Icon = getFieldIcon(field.type);
                       const typeColor = getFieldTypeColor(field.type);
                       const v = detailRecord.fields[field.name];
-                      const wide =
-                        field.type === "multilineText" ||
-                        (typeof v === "string" && v.length > 120);
                       const isFieldEditable = canEdit && !READ_ONLY_TYPES.includes(field.type);
                       const isThisEditing = modalEditField === field.name;
                       const saveThisEdit = async () => {
@@ -2940,88 +2965,103 @@ export default function DashboardPage() {
                       return (
                         <div
                           key={field.id}
-                          className={`bg-[#0d0d0d] border rounded-lg p-3.5 transition-colors group/field ${
-                            isThisEditing
-                              ? "border-amber-400/60"
-                              : "border-neutral-800 hover:border-neutral-700"
-                          } ${wide ? "md:col-span-2" : ""}`}
+                          className="flex items-start gap-4 py-3 group/field"
                         >
-                          <dt className="flex items-center gap-1.5 text-[0.55rem] uppercase tracking-widest text-neutral-500 font-black mb-2">
-                            <Icon className={`w-3 h-3 ${typeColor}`} />
-                            <span className="flex-1">{field.name}</span>
-                            {/* Rewrite-with-AI on any text-ish field. Bumps the
-                                AI-writer panel up to scroll into view + opens
-                                it. We don't pre-fill (the writer panel reads
-                                the article from props on render) but the
-                                writer can immediately «ولّد المنشور» using
-                                this field as input. */}
-                            {!isThisEditing &&
-                              (field.type === "singleLineText" ||
-                                field.type === "multilineText" ||
-                                field.type === "richText") && (
-                                <button
-                                  onClick={() => {
-                                    const el = document.getElementById("zto-card-writer");
-                                    if (el) {
-                                      el.scrollIntoView({ behavior: "smooth", block: "start" });
-                                      // Open the writer panel if it's collapsed.
-                                      const trigger = el.querySelector("button");
-                                      if (trigger && el.getAttribute("data-writer-open") !== "1") {
-                                        (trigger as HTMLButtonElement).click();
-                                        el.setAttribute("data-writer-open", "1");
-                                      }
-                                    }
-                                  }}
-                                  className="opacity-0 group-hover/field:opacity-100 text-[0.6rem] text-purple-300 hover:text-purple-200 font-bold transition-opacity inline-flex items-center gap-1"
-                                  title="أعد كتابة هذا الحقل بوكيل ذكاء اصطناعي"
-                                >
-                                  <Sparkles className="w-3 h-3" />
-                                  أعد بـ AI
-                                </button>
-                              )}
-                            {isFieldEditable && !isThisEditing && (
-                              <button
-                                onClick={() => {
-                                  setModalEditField(field.name);
-                                  setModalEditValue(v);
-                                }}
-                                className="opacity-0 group-hover/field:opacity-100 text-[0.6rem] text-amber-400 hover:text-amber-300 font-bold transition-opacity"
-                                title="تحرير"
-                              >
-                                <Edit3 className="w-3 h-3" />
-                              </button>
-                            )}
+                          {/* Label column: icon + field name. Fixed width
+                              so every value box lines up vertically. */}
+                          <dt className="flex items-center gap-2 w-[180px] shrink-0 text-[0.78rem] text-neutral-400 font-medium pt-2.5">
+                            <Icon className={`w-3.5 h-3.5 ${typeColor} shrink-0`} />
+                            <span className="truncate">{field.name}</span>
                           </dt>
-                          {isThisEditing ? (
-                            <div className="space-y-2">
-                              {renderFieldInput(field, modalEditValue, setModalEditValue)}
-                              <div className="flex items-center gap-2 justify-end">
-                                <button
-                                  onClick={() => setModalEditField(null)}
-                                  className="zto-btn zto-btn-ghost zto-btn-sm"
-                                  disabled={modalEditSaving}
-                                >
-                                  إلغاء
-                                </button>
-                                <button
-                                  onClick={saveThisEdit}
-                                  className="zto-btn zto-btn-gold zto-btn-sm"
-                                  disabled={modalEditSaving}
-                                >
-                                  {modalEditSaving ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Save className="w-3.5 h-3.5" />
-                                  )}
-                                  حفظ
-                                </button>
-                              </div>
+
+                          {/* Value column: bordered box that hosts either
+                              the rendered value (read mode) or the inline
+                              input (edit mode). Hover surfaces the edit
+                              + "rewrite with AI" actions on the value box's
+                              top-left corner so they don't fight the
+                              content for attention. */}
+                          <dd className="flex-1 min-w-0 relative">
+                            <div
+                              className={`rounded-lg border bg-[#0a0a0a] px-3 py-2.5 min-h-[44px] flex items-center transition-colors ${
+                                isThisEditing
+                                  ? "border-amber-400/60 bg-[#0d0d0d]"
+                                  : "border-neutral-800 hover:border-neutral-700"
+                              }`}
+                            >
+                              {isThisEditing ? (
+                                <div className="w-full space-y-2">
+                                  {renderFieldInput(field, modalEditValue, setModalEditValue)}
+                                  <div className="flex items-center gap-2 justify-end">
+                                    <button
+                                      onClick={() => setModalEditField(null)}
+                                      className="zto-btn zto-btn-ghost zto-btn-sm"
+                                      disabled={modalEditSaving}
+                                    >
+                                      إلغاء
+                                    </button>
+                                    <button
+                                      onClick={saveThisEdit}
+                                      className="zto-btn zto-btn-gold zto-btn-sm"
+                                      disabled={modalEditSaving}
+                                    >
+                                      {modalEditSaving ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <Save className="w-3.5 h-3.5" />
+                                      )}
+                                      حفظ
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="text-[14px] text-white break-words leading-relaxed w-full">
+                                  {renderFieldValue(v, field, { full: true })}
+                                </div>
+                              )}
                             </div>
-                          ) : (
-                            <dd className="text-[13px] text-white font-bold break-words leading-relaxed">
-                              {renderFieldValue(v, field, { full: true })}
-                            </dd>
-                          )}
+                            {/* Action chips on the corner of the value
+                                box — only visible on hover, never compete
+                                with the content for vertical room. */}
+                            {!isThisEditing && (
+                              <div className="absolute top-1 left-1 opacity-0 group-hover/field:opacity-100 transition-opacity flex items-center gap-1 pointer-events-none">
+                                {(field.type === "singleLineText" ||
+                                  field.type === "multilineText" ||
+                                  field.type === "richText") && (
+                                  <button
+                                    onClick={() => {
+                                      const el = document.getElementById("zto-card-writer");
+                                      if (el) {
+                                        el.scrollIntoView({ behavior: "smooth", block: "start" });
+                                        const trigger = el.querySelector("button");
+                                        if (trigger && el.getAttribute("data-writer-open") !== "1") {
+                                          (trigger as HTMLButtonElement).click();
+                                          el.setAttribute("data-writer-open", "1");
+                                        }
+                                      }
+                                    }}
+                                    className="pointer-events-auto text-[0.6rem] text-purple-300 hover:text-purple-200 font-bold inline-flex items-center gap-1 bg-[#0d0d0d]/90 border border-purple-400/30 rounded-full px-2 py-0.5"
+                                    title="أعد كتابة هذا الحقل بوكيل ذكاء اصطناعي"
+                                  >
+                                    <Sparkles className="w-3 h-3" />
+                                    أعد بـ AI
+                                  </button>
+                                )}
+                                {isFieldEditable && (
+                                  <button
+                                    onClick={() => {
+                                      setModalEditField(field.name);
+                                      setModalEditValue(v);
+                                    }}
+                                    className="pointer-events-auto text-[0.6rem] text-amber-400 hover:text-amber-300 font-bold inline-flex items-center gap-1 bg-[#0d0d0d]/90 border border-amber-400/30 rounded-full px-2 py-0.5"
+                                    title="تحرير"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                    تحرير
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </dd>
                         </div>
                       );
                     })}
