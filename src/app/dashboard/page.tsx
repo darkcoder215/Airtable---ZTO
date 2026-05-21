@@ -1031,23 +1031,60 @@ export default function DashboardPage() {
     }
 
     if (field.type === "multipleAttachments") {
-      const attachments = Array.isArray(value) ? value : [];
+      const attachments = (Array.isArray(value) ? value : []) as Array<{
+        url?: string;
+        filename?: string;
+        type?: string;
+        thumbnails?: { small?: { url: string }; large?: { url: string } };
+      }>;
+      if (attachments.length === 0) {
+        return <span className="text-neutral-600">—</span>;
+      }
+      // Mirror Airtable's small inline thumbnails — image attachments
+      // show as 48px squares, anything else falls back to the legacy
+      // paperclip pill.
       return (
-        <div className="flex gap-1 flex-wrap">
-          {attachments.map(
-            (att: { url?: string; filename?: string }, i: number) => (
+        <div className="flex gap-1.5 flex-wrap">
+          {attachments.map((att, i) => {
+            const isImage =
+              (att.type && att.type.startsWith("image/")) ||
+              /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(att.url ?? "");
+            const thumbUrl = att.thumbnails?.small?.url ?? att.url;
+            if (isImage && thumbUrl) {
+              return (
+                <a
+                  key={i}
+                  href={att.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-12 h-12 rounded-md overflow-hidden border border-neutral-800 bg-neutral-900 hover:border-amber-400/50 transition-colors"
+                  title={att.filename ?? ""}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumbUrl}
+                    alt={att.filename ?? ""}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                </a>
+              );
+            }
+            return (
               <a
                 key={i}
                 href={att.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 bg-[#232323] text-amber-400 rounded px-2 py-0.5 text-[11px] font-medium hover:bg-[#2e2e2e] transition-colors"
+                className="inline-flex items-center gap-1 bg-[#232323] text-amber-400 rounded px-2 py-0.5 text-[11px] font-medium hover:bg-[#2e2e2e] transition-colors max-w-[200px]"
+                title={att.filename}
               >
-                <Paperclip className="w-3 h-3" />
-                {att.filename || "ملف"}
+                <Paperclip className="w-3 h-3 shrink-0" />
+                <span className="truncate">{att.filename || "ملف"}</span>
               </a>
-            )
-          )}
+            );
+          })}
         </div>
       );
     }
@@ -2492,6 +2529,7 @@ export default function DashboardPage() {
                                   const isLink = f.type === "multipleRecordLinks";
                                   const isSelect = f.type === "singleSelect";
                                   const isMultiSelect = f.type === "multipleSelects";
+                                  const isAttachment = f.type === "multipleAttachments";
                                   const isUrl =
                                     f.type === "url" ||
                                     (typeof v === "string" && /^https?:\/\//i.test(v));
@@ -2565,6 +2603,62 @@ export default function DashboardPage() {
                                               {typeof id === "string" ? (linkedNames[id] ?? id) : ""}
                                             </span>
                                           ))}
+                                        </div>
+                                      ) : isAttachment && Array.isArray(v) ? (
+                                        /* Airtable-style inline thumbnails.
+                                           Image attachments render as small
+                                           squares, non-image files fall back
+                                           to the paperclip pill. */
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {(v as Array<{ url?: string; filename?: string; type?: string; thumbnails?: { small?: { url: string } } }>).slice(0, 8).map((att, i) => {
+                                            const isImage =
+                                              (att.type && att.type.startsWith("image/")) ||
+                                              /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(att.url ?? "");
+                                            const thumbUrl = att.thumbnails?.small?.url ?? att.url;
+                                            if (isImage && thumbUrl) {
+                                              return (
+                                                <a
+                                                  key={i}
+                                                  href={att.url}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  data-no-open
+                                                  className="block w-9 h-9 rounded-md overflow-hidden border border-neutral-800 bg-neutral-900 hover:border-amber-400/50 transition-colors"
+                                                  title={att.filename ?? ""}
+                                                >
+                                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                  <img
+                                                    src={thumbUrl}
+                                                    alt={att.filename ?? ""}
+                                                    loading="lazy"
+                                                    referrerPolicy="no-referrer"
+                                                    className="w-full h-full object-cover"
+                                                  />
+                                                </a>
+                                              );
+                                            }
+                                            return (
+                                              <a
+                                                key={i}
+                                                href={att.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                onClick={(e) => e.stopPropagation()}
+                                                data-no-open
+                                                className="inline-flex items-center gap-1 bg-[#1f1f22] text-amber-300 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-[#2a2a2d] transition-colors max-w-[140px]"
+                                                title={att.filename}
+                                              >
+                                                <Paperclip className="w-2.5 h-2.5 shrink-0" />
+                                                <span className="truncate">{att.filename || "ملف"}</span>
+                                              </a>
+                                            );
+                                          })}
+                                          {(v as unknown[]).length > 8 && (
+                                            <span className="text-[10px] text-neutral-500 self-center">
+                                              + {(v as unknown[]).length - 8}
+                                            </span>
+                                          )}
                                         </div>
                                       ) : isUrl && typeof v === "string" ? (
                                         <a
