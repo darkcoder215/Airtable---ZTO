@@ -2413,15 +2413,32 @@ export default function DashboardPage() {
                       {list.map((rec) => {
                         const titleVal = primary ? rec.fields[primary.name] : null;
                         // Title fallback chain:
-                        //   1. The chosen title field's value
-                        //   2. The first populated text-ish field on the card
-                        //   3. A short slice of the record id (kanban needs *something*)
-                        let title = renderCellPreview(titleVal);
+                        //   1. The chosen title field's value (unless it
+                        //      resolved to an Airtable record id — that
+                        //      happens when the primary field is a
+                        //      RECORD_ID() formula or an unresolved link;
+                        //      it's never a useful card title).
+                        //   2. The first populated text-ish card field
+                        //      whose preview isn't itself a record id.
+                        //   3. A short suffix of the row's record id so
+                        //      the card never reads as totally blank.
+                        const looksLikeRecordId = (s: string) =>
+                          /^rec[A-Za-z0-9]{14}$/.test(s.trim()) ||
+                          // 14-char base62 fragments and similar
+                          // unreadable identifiers (e.g. lookup output
+                          // from a hidden join key) read like noise to
+                          // a writer too.
+                          /^[A-Za-z0-9_-]{14,18}$/.test(s.trim());
+                        const titlePreview = renderCellPreview(titleVal);
+                        let title = titlePreview && !looksLikeRecordId(titlePreview) ? titlePreview : "";
                         if (!title) {
                           for (const cf of cardFields) {
                             const cv = rec.fields[cf.name];
                             const preview = renderCellPreview(cv);
-                            if (preview) { title = preview; break; }
+                            if (preview && !looksLikeRecordId(preview)) {
+                              title = preview;
+                              break;
+                            }
                           }
                         }
                         if (!title) title = `… ${rec.id.slice(-6)}`;
@@ -2845,7 +2862,11 @@ export default function DashboardPage() {
               </button>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Body — two-column layout: main content on the left, the
+                comments panel docked on the right (like Airtable's). On
+                small screens both stack vertically. */}
+            <div className="flex-1 flex flex-col lg:flex-row min-h-0">
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 min-w-0">
               {/* AI quick-access strip — surfaces the writing + image
                   generator tools at the top of the card so writers see
                   them before scrolling through fields and comments.
@@ -3094,122 +3115,7 @@ export default function DashboardPage() {
               </section>
               )}
 
-              {/* Comments — Airtable-native record comments */}
-              {cardPrefs.comments && (
-              <section>
-                <div className="mb-3">
-                  <h3 className="text-[0.7rem] font-black text-neutral-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-1 h-3 rounded-full bg-blue-400" />
-                    التعليقات
-                    {comments.length > 0 && (
-                      <span className="text-[0.65rem] tabular-nums bg-blue-400/15 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5 font-black">
-                        {comments.length}
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-[0.6rem] text-neutral-500 mt-1 leading-snug">
-                    تعليقات Airtable الأصلية على هذا السجل — مرئية لكل فريق العمل ومحفوظة مباشرة في Airtable.
-                  </p>
-                </div>
-
-                {/* Compose box */}
-                <div className="mb-4 bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 transition-colors focus-within:border-amber-400/40">
-                  <textarea
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    onKeyDown={(e) => {
-                      // Cmd/Ctrl + Enter submits — keeps multi-line
-                      // editing intuitive while still allowing quick send.
-                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                        e.preventDefault();
-                        void submitComment();
-                      }
-                    }}
-                    placeholder="أضف تعليقاً... (⌘/Ctrl + Enter للإرسال)"
-                    className="w-full bg-transparent text-[13px] text-white font-bold placeholder:text-neutral-600 placeholder:font-normal outline-none resize-y min-h-[64px]"
-                    maxLength={10000}
-                  />
-                  <div className="flex items-center justify-between gap-2 mt-2">
-                    <span className="text-[0.55rem] text-neutral-600 font-mono tabular-nums">
-                      {newComment.length}/10000
-                    </span>
-                    <button
-                      onClick={submitComment}
-                      disabled={postingComment || !newComment.trim()}
-                      className="zto-btn zto-btn-gold zto-btn-sm"
-                    >
-                      {postingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      نشر
-                    </button>
-                  </div>
-                </div>
-
-                {/* Timeline */}
-                {commentsLoading ? (
-                  <div className="flex items-center justify-center py-6">
-                    <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
-                  </div>
-                ) : commentsError ? (
-                  <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-[0.7rem] text-red-300 font-bold">
-                    ⚠ {commentsError}
-                  </div>
-                ) : comments.length === 0 ? (
-                  <p className="text-center py-6 text-[0.7rem] text-neutral-500 font-bold">
-                    لا تعليقات بعد — كن أوّل من يعلّق.
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {comments.map((c, idx) => {
-                      const authorName = c.author?.name || c.author?.email || "—";
-                      const initial = authorName.trim().slice(0, 1).toUpperCase();
-                      const date = new Date(c.createdTime);
-                      const dateStr = isNaN(date.getTime())
-                        ? c.createdTime
-                        : date.toLocaleString("ar-SA", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          });
-                      return (
-                        <li
-                          key={c.id}
-                          className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 hover:border-neutral-700 transition-colors zto-stagger-in"
-                          style={{ animationDelay: `${idx * 30}ms` }}
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400/40 to-purple-500/40 border border-neutral-700 flex items-center justify-center text-[0.65rem] font-black text-white shrink-0">
-                              {initial || "؟"}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <p className="text-[0.7rem] font-black text-white truncate">
-                                  {authorName}
-                                </p>
-                                <span className="text-[0.55rem] text-neutral-500 font-mono">{dateStr}</span>
-                                {canEdit && (
-                                  <button
-                                    onClick={() => deleteCommentOnRecord(c.id)}
-                                    className="mr-auto text-neutral-600 hover:text-red-400 transition-colors"
-                                    title="حذف"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                              <p className="text-[13px] text-neutral-200 font-bold whitespace-pre-line break-words leading-relaxed">
-                                {c.text}
-                              </p>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-
-              )}
+              {/* (Comments now live in the right-side panel below, like Airtable.) */}
 
               {/* AI writer panel — drafts post copy from the article
                   text using a writing-type scraper agent. Lazy-loads
@@ -3293,6 +3199,130 @@ export default function DashboardPage() {
                   </section>
                 );
               })()}
+              </div>
+              {/* ── Comments side panel (Airtable-style docked drawer) ──
+                  Pinned to the right side of the modal on lg+ screens,
+                  stacks below the main content on mobile so the writer
+                  doesn't lose access. Hidden entirely when the user
+                  unticked Comments in the card-view prefs. */}
+              {cardPrefs.comments && (
+                <aside className="lg:w-[340px] lg:shrink-0 lg:border-r lg:border-neutral-800/70 bg-[#0a0a0a]/40 flex flex-col max-h-[40vh] lg:max-h-none overflow-hidden">
+                  <div className="px-4 py-3 border-b border-neutral-800/70 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[0.78rem] font-bold text-white">التعليقات</h3>
+                      {comments.length > 0 && (
+                        <span className="text-[0.65rem] tabular-nums bg-blue-400/15 text-blue-300 border border-blue-400/30 rounded-full px-2 py-0.5 font-black">
+                          {comments.length}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Timeline (scrollable middle region) */}
+                  <div className="flex-1 overflow-y-auto px-4 py-3">
+                    {commentsLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+                      </div>
+                    ) : commentsError ? (
+                      <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-[0.7rem] text-red-300 font-bold">
+                        ⚠ {commentsError}
+                      </div>
+                    ) : comments.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 text-center">
+                        <div className="w-12 h-12 rounded-full bg-neutral-800/40 border border-neutral-700/60 flex items-center justify-center mb-2">
+                          <ChevronDown className="w-5 h-5 text-neutral-500" />
+                        </div>
+                        <p className="text-[0.78rem] text-neutral-300 font-bold mb-1">ابدأ محادثة</p>
+                        <p className="text-[0.65rem] text-neutral-500 max-w-[220px] leading-snug">
+                          اطرح سؤالاً، تابع تحديثات الحالة، وتعاون مع فريقك — مباشرةً عبر Airtable.
+                        </p>
+                      </div>
+                    ) : (
+                      <ul className="space-y-2">
+                        {comments.map((c, idx) => {
+                          const authorName = c.author?.name || c.author?.email || "—";
+                          const initial = authorName.trim().slice(0, 1).toUpperCase();
+                          const date = new Date(c.createdTime);
+                          const dateStr = isNaN(date.getTime())
+                            ? c.createdTime
+                            : date.toLocaleString("ar-SA", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              });
+                          return (
+                            <li
+                              key={c.id}
+                              className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-3 hover:border-neutral-700 transition-colors zto-stagger-in"
+                              style={{ animationDelay: `${idx * 30}ms` }}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400/40 to-purple-500/40 border border-neutral-700 flex items-center justify-center text-[0.65rem] font-black text-white shrink-0">
+                                  {initial || "؟"}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <p className="text-[0.7rem] font-black text-white truncate">
+                                      {authorName}
+                                    </p>
+                                    <span className="text-[0.55rem] text-neutral-500 font-mono">{dateStr}</span>
+                                    {canEdit && (
+                                      <button
+                                        onClick={() => deleteCommentOnRecord(c.id)}
+                                        className="mr-auto text-neutral-600 hover:text-red-400 transition-colors"
+                                        title="حذف"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-[13px] text-neutral-200 font-bold whitespace-pre-line break-words leading-relaxed">
+                                    {c.text}
+                                  </p>
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Compose box pinned to the bottom of the panel */}
+                  <div className="border-t border-neutral-800/70 p-3 bg-[#0a0a0a]/60">
+                    <div className="bg-[#0d0d0d] border border-neutral-800 rounded-lg p-2 transition-colors focus-within:border-amber-400/40">
+                      <textarea
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            void submitComment();
+                          }
+                        }}
+                        placeholder="اترك تعليقاً…"
+                        className="w-full bg-transparent text-[13px] text-white font-bold placeholder:text-neutral-600 placeholder:font-normal outline-none resize-y min-h-[44px]"
+                        maxLength={10000}
+                      />
+                      <div className="flex items-center justify-between gap-2 mt-1.5">
+                        <span className="text-[0.55rem] text-neutral-600 font-mono tabular-nums">
+                          {newComment.length}/10000
+                        </span>
+                        <button
+                          onClick={submitComment}
+                          disabled={postingComment || !newComment.trim()}
+                          className="zto-btn zto-btn-gold zto-btn-sm"
+                        >
+                          {postingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          نشر
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+              )}
             </div>
             </aside>
           </div>

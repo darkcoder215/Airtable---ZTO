@@ -152,42 +152,62 @@
 }
 
 /* ============================================================
-   Light theme — warm cream paper, ink-deep text, green accent.
+   Light theme — Airtable-like neutral white surfaces, near-black
+   text rendered semi-bold by default so it reads cleanly on a
+   bright canvas. Page is a soft cool grey (matches Airtable's
+   workspace background), cards are pure white, borders are a
+   barely-visible cool grey. Green stays as the single accent.
    ============================================================ */
 [data-theme="light"] {
   --c-brand: #FFFFFF;
-  --c-brand-light: #F7F4EE;
-  --c-brand-lighter: #EFEDE2;
-  --c-brand-border: rgba(17, 20, 33, 0.10);
-  --c-brand-hover: #E7E2D5;
-  --c-gold: #009C62;
-  --c-gold-dark: #007A4D;
-  --c-gold-light: #00C17A;
+  --c-brand-light: #F7F8FA;
+  --c-brand-lighter: #EFF1F4;
+  --c-brand-border: rgba(0, 0, 0, 0.08);
+  --c-brand-hover: #E5E7EB;
+  --c-gold: #007A4D;
+  --c-gold-dark: #005C3A;
+  --c-gold-light: #009C62;
   --c-gold-bg: rgba(0, 156, 98, 0.08);
-  --c-txt: #111421;
-  --c-txt-dim: #494C6B;
-  --c-txt-faint: #6E7185;
-  --c-ok: #009C62;
+  --c-txt: #1F1F23;
+  --c-txt-dim: #4B4F58;
+  --c-txt-faint: #6B7280;
+  --c-ok: #007A4D;
   --c-ok-bg: rgba(0, 156, 98, 0.08);
-  --c-warn: #B07A00;
-  --c-warn-bg: rgba(176, 122, 0, 0.10);
-  --c-err: #C73824;
-  --c-err-bg: rgba(199, 56, 36, 0.10);
-  --c-info: #0072F9;
-  --c-info-bg: rgba(0, 114, 249, 0.08);
+  --c-warn: #B45309;
+  --c-warn-bg: rgba(180, 83, 9, 0.10);
+  --c-err: #B91C1C;
+  --c-err-bg: rgba(185, 28, 28, 0.10);
+  --c-info: #1D4ED8;
+  --c-info-bg: rgba(29, 78, 216, 0.08);
 
-  --surface-page: #F4F2ED;
+  /* Surfaces.
+     - page  : soft cool grey, matches Airtable's workspace bg
+     - card  : pure white
+     - sunken: slightly cooler grey for stripes / muted panels */
+  --surface-page: #F5F5F7;
   --surface-card: #FFFFFF;
   --surface-elevated: #FFFFFF;
-  --surface-sunken: #EFEDE2;
+  --surface-sunken: #F0F1F4;
   --surface-header: #FFFFFF;
-  --border-strong: rgba(17, 20, 33, 0.15);
-  --border-soft: rgba(17, 20, 33, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --border-soft: rgba(0, 0, 0, 0.07);
   --text-strong: #000000;
-  --text-base: #111421;
-  --text-dim: #494C6B;
-  --text-faint: #6E7185;
-  --modal-overlay: rgba(17, 20, 33, 0.55);
+  --text-base: #1F1F23;
+  --text-dim: #4B4F58;
+  --text-faint: #6B7280;
+  --modal-overlay: rgba(0, 0, 0, 0.45);
+}
+
+/* Body text in light mode renders semi-bold by default so the
+   eye lands on it cleanly against the bright canvas. Headings
+   keep their existing font-bold/font-black bumps; what changes
+   is the regular body weight goes from 400 → 500. */
+[data-theme="light"] body {
+  font-weight: 500;
+}
+[data-theme="light"] .text-neutral-300,
+[data-theme="light"] .text-neutral-400 {
+  font-weight: 500;
 }
 
 @layer base {
